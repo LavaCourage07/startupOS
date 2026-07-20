@@ -1,0 +1,27 @@
+{
+  "name": "@mariozechner/agent",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "require": "./index.js",
+      "default": "./index.js"
+    },
+    "./dist/index.js": {
+      "types": "./index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./dist/types.js": {
+      "types": "./dist/types.d.ts",
+      "require": "./dist/types.js",
+      "default": "./dist/types.js"
+    }
+  },
+  "dependencies": {
+    "@mariozechner/pi-agent-core": "0.55.3"
+  }
+}

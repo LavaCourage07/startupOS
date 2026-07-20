@@ -1,0 +1,6 @@
+/**
+ * packages/web — 云版本 Web 应用骨架
+ *
+ * 当前阶段：src/ 代码仍在根目录，此包为未来迁移预留位置。
+ * 迁移路径：根目录 src/ → packages/web/src/
+ */

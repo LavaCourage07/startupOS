@@ -1,0 +1,18 @@
+{
+  "name": "search-and-install-skill",
+  "displayName": "搜索并安装市场技能",
+  "description": "自动根据用户输入的技能关键词，从技能市场搜索匹配项，分析来源平台，下载并安装。",
+  "version": "1.1.0",
+  "type": "SIMPLE",
+  "icon": "🧩",
+  "color": "from-blue-500",
+  "tags": ["技能管理", "安装", "搜索"],
+  "inputs": {
+    "type": "text",
+    "description": "用户输入的技能关键词"
+  },
+  "outputs": {
+    "type": "dialog",
+    "description": "在对话中展示搜索结果、来源平台、安装进度及完成提示"
+  }
+}

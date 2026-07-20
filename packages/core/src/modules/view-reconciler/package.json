@@ -1,0 +1,34 @@
+{
+  "name": "@neural-nexus/view-reconciler",
+  "version": "0.1.5",
+  "description": "",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json -w",
+    "test": "npm run build && jest --coverage --forceExit",
+    "prepublish": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NeuralNexusPro/neural-nexus.git"
+  },
+  "author": "archersado",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^18.14.0",
+    "typescript": "^4.9.5"
+  },
+  "dependencies": {
+    "@micro-zoe/micro-app": "^0.8.10",
+    "@neural-nexus/neural-channel": "file:../neural-channel",
+    "llpage": "^1.1.5",
+    "qiankun": "^2.10.1"
+  },
+  "gitHead": "2213b99e8266c3da4ab017fd2ffed7606b18d652"
+}

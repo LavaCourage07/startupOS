@@ -1,0 +1,52 @@
+appId: com.originos.ce
+productName: OriginOS CE
+electronDist: node_modules/.pnpm/electron@42.3.3/node_modules/electron/dist
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - dist-electron/**/*
+  - package.json
+  - '!**/*.map'
+
+extraResources:
+  - from: packages/web/.next/standalone
+    to: web
+  - from: packages/web/.next/standalone/node_modules
+    to: web/node_modules
+  - from: packages/web/.next/static
+    to: web/packages/web/.next/static
+  - from: packages/web/public
+    to: web/packages/web/public
+  - from: resources/icons
+    to: resources/icons
+
+mac:
+  icon: resources/icons/icon.icns
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch:
+        - arm64
+
+win:
+  icon: resources/icons/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+linux:
+  icon: resources/icons/icon.png
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  category: Development
+
+publish:
+  provider: github
+  owner: originos
+  repo: originos-ce
+  releaseType: release

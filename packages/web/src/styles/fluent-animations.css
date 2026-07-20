@@ -1,0 +1,566 @@
+/**
+ * OS.6: Fluent Animation System
+ * Microsoft Fluent Design inspired animations with natural motion
+ */
+
+/* ===========================================
+   CSS Variables - Animation Tokens
+   =========================================== */
+
+:root {
+  /* Fluent Easing Functions */
+  --fluent-ease-standard: cubic-bezier(0.4, 0.0, 0.2, 1);
+  --fluent-ease-decelerate: cubic-bezier(0.0, 0.0, 0.2, 1);
+  --fluent-ease-accelerate: cubic-bezier(0.4, 0.0, 1, 1);
+  --fluent-ease-sharp: cubic-bezier(0.4, 0.0, 0.6, 1);
+  --fluent-ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --fluent-ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+
+  /* Animation Durations */
+  --fluent-duration-instant: 100ms;
+  --fluent-duration-fast: 200ms;
+  --fluent-duration-normal: 300ms;
+  --fluent-duration-slow: 500ms;
+  --fluent-duration-enter: 250ms;
+  --fluent-duration-exit: 200ms;
+  --fluent-duration-complex: 400ms;
+
+  /* Animation Delays */
+  --fluent-delay-none: 0ms;
+  --fluent-delay-short: 50ms;
+  --fluent-delay-medium: 100ms;
+  --fluent-delay-long: 200ms;
+
+  /* Transform Origins */
+  --fluent-origin-center: center center;
+  --fluent-origin-top: center top;
+  --fluent-origin-bottom: center bottom;
+  --fluent-origin-left: left center;
+  --fluent-origin-right: right center;
+}
+
+/* ===========================================
+   Enter Animations
+   =========================================== */
+
+@keyframes fluent-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes fluent-enter-scale {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fluent-enter-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fluent-enter-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fluent-enter-slide-left {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fluent-enter-slide-right {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fluent-enter-expand {
+  from {
+    opacity: 0;
+    transform: scaleY(0);
+    transform-origin: top;
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+    transform-origin: top;
+  }
+}
+
+@keyframes fluent-enter-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ===========================================
+   Exit Animations
+   =========================================== */
+
+@keyframes fluent-exit {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+}
+
+@keyframes fluent-exit-scale {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+@keyframes fluent-exit-slide-up {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+}
+
+@keyframes fluent-exit-slide-down {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+}
+
+@keyframes fluent-exit-collapse {
+  from {
+    opacity: 1;
+    transform: scaleY(1);
+    transform-origin: top;
+  }
+  to {
+    opacity: 0;
+    transform: scaleY(0);
+    transform-origin: top;
+  }
+}
+
+@keyframes fluent-exit-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* ===========================================
+   Attention Animations
+   =========================================== */
+
+@keyframes fluent-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes fluent-shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  10%, 30%, 50%, 70%, 90% {
+    transform: translateX(-4px);
+  }
+  20%, 40%, 60%, 80% {
+    transform: translateX(4px);
+  }
+}
+
+@keyframes fluent-bounce {
+  0%, 100% {
+    transform: translateY(0);
+    animation-timing-function: cubic-bezier(0.0, 0.0, 0.2, 1);
+  }
+  50% {
+    transform: translateY(-25%);
+    animation-timing-function: cubic-bezier(0.4, 0.0, 1, 1);
+  }
+}
+
+@keyframes fluent-wiggle {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-3deg);
+  }
+  75% {
+    transform: rotate(3deg);
+  }
+}
+
+@keyframes fluent-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(0, 120, 212, 0);
+  }
+  50% {
+    box-shadow: 0 0 20px 4px rgba(0, 120, 212, 0.4);
+  }
+}
+
+/* ===========================================
+   Interaction Animations
+   =========================================== */
+
+@keyframes fluent-press {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.97);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes fluent-release {
+  from {
+    transform: scale(0.97);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes fluent-hover-lift {
+  from {
+    transform: translateY(0);
+    box-shadow: var(--fluent-shadow-rest, 0 2px 4px rgba(0, 0, 0, 0.1));
+  }
+  to {
+    transform: translateY(-2px);
+    box-shadow: var(--fluent-shadow-hover, 0 8px 16px rgba(0, 0, 0, 0.15));
+  }
+}
+
+/* ===========================================
+   Loading Animations
+   =========================================== */
+
+@keyframes fluent-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fluent-spin-reverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes fluent-dots-pulse {
+  0%, 80%, 100% {
+    transform: scale(0.8);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes fluent-progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* ===========================================
+   Utility Classes - Enter
+   =========================================== */
+
+.fluent-enter {
+  animation: fluent-enter var(--fluent-duration-enter) var(--fluent-ease-decelerate) forwards;
+}
+
+.fluent-enter-scale {
+  animation: fluent-enter-scale var(--fluent-duration-enter) var(--fluent-ease-bounce) forwards;
+}
+
+.fluent-enter-slide-up {
+  animation: fluent-enter-slide-up var(--fluent-duration-normal) var(--fluent-ease-decelerate) forwards;
+}
+
+.fluent-enter-slide-down {
+  animation: fluent-enter-slide-down var(--fluent-duration-normal) var(--fluent-ease-decelerate) forwards;
+}
+
+.fluent-enter-slide-left {
+  animation: fluent-enter-slide-left var(--fluent-duration-normal) var(--fluent-ease-decelerate) forwards;
+}
+
+.fluent-enter-slide-right {
+  animation: fluent-enter-slide-right var(--fluent-duration-normal) var(--fluent-ease-decelerate) forwards;
+}
+
+.fluent-enter-expand {
+  animation: fluent-enter-expand var(--fluent-duration-fast) var(--fluent-ease-decelerate) forwards;
+}
+
+.fluent-enter-fade {
+  animation: fluent-enter-fade var(--fluent-duration-fast) var(--fluent-ease-standard) forwards;
+}
+
+/* ===========================================
+   Utility Classes - Exit
+   =========================================== */
+
+.fluent-exit {
+  animation: fluent-exit var(--fluent-duration-exit) var(--fluent-ease-accelerate) forwards;
+}
+
+.fluent-exit-scale {
+  animation: fluent-exit-scale var(--fluent-duration-exit) var(--fluent-ease-accelerate) forwards;
+}
+
+.fluent-exit-slide-up {
+  animation: fluent-exit-slide-up var(--fluent-duration-exit) var(--fluent-ease-accelerate) forwards;
+}
+
+.fluent-exit-slide-down {
+  animation: fluent-exit-slide-down var(--fluent-duration-exit) var(--fluent-ease-accelerate) forwards;
+}
+
+.fluent-exit-collapse {
+  animation: fluent-exit-collapse var(--fluent-duration-fast) var(--fluent-ease-accelerate) forwards;
+}
+
+.fluent-exit-fade {
+  animation: fluent-exit-fade var(--fluent-duration-fast) var(--fluent-ease-standard) forwards;
+}
+
+/* ===========================================
+   Utility Classes - Attention
+   =========================================== */
+
+.fluent-pulse {
+  animation: fluent-pulse var(--fluent-duration-slow) var(--fluent-ease-standard) infinite;
+}
+
+.fluent-shake {
+  animation: fluent-shake 0.5s var(--fluent-ease-standard);
+}
+
+.fluent-bounce {
+  animation: fluent-bounce 1s var(--fluent-ease-bounce) infinite;
+}
+
+.fluent-wiggle {
+  animation: fluent-wiggle 0.3s var(--fluent-ease-standard);
+}
+
+.fluent-glow {
+  animation: fluent-glow 2s var(--fluent-ease-standard) infinite;
+}
+
+/* ===========================================
+   Utility Classes - Loading
+   =========================================== */
+
+.fluent-spin {
+  animation: fluent-spin 1s linear infinite;
+}
+
+.fluent-spin-reverse {
+  animation: fluent-spin-reverse 1s linear infinite;
+}
+
+.fluent-dots-pulse {
+  animation: fluent-dots-pulse 1.4s var(--fluent-ease-standard) infinite;
+}
+
+.fluent-dots-pulse-delay-1 {
+  animation: fluent-dots-pulse 1.4s var(--fluent-ease-standard) infinite;
+  animation-delay: 0ms;
+}
+
+.fluent-dots-pulse-delay-2 {
+  animation: fluent-dots-pulse 1.4s var(--fluent-ease-standard) infinite;
+  animation-delay: 160ms;
+}
+
+.fluent-dots-pulse-delay-3 {
+  animation: fluent-dots-pulse 1.4s var(--fluent-ease-standard) infinite;
+  animation-delay: 320ms;
+}
+
+/* ===========================================
+   Utility Classes - Interactions
+   =========================================== */
+
+.fluent-press {
+  animation: fluent-press 150ms var(--fluent-ease-standard);
+}
+
+.fluent-hover-lift {
+  transition: transform var(--fluent-duration-fast) var(--fluent-ease-decelerate),
+              box-shadow var(--fluent-duration-fast) var(--fluent-ease-decelerate);
+}
+
+.fluent-hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--fluent-shadow-hover, 0 8px 16px rgba(0, 0, 0, 0.15));
+}
+
+.fluent-hover-scale {
+  transition: transform var(--fluent-duration-fast) var(--fluent-ease-bounce);
+}
+
+.fluent-hover-scale:hover {
+  transform: scale(1.02);
+}
+
+.fluent-active-scale:active {
+  transform: scale(0.98);
+}
+
+/* ===========================================
+   Transition Utilities
+   =========================================== */
+
+.fluent-transition-all {
+  transition: all var(--fluent-duration-normal) var(--fluent-ease-standard);
+}
+
+.fluent-transition-transform {
+  transition: transform var(--fluent-duration-normal) var(--fluent-ease-standard);
+}
+
+.fluent-transition-opacity {
+  transition: opacity var(--fluent-duration-normal) var(--fluent-ease-standard);
+}
+
+.fluent-transition-colors {
+  transition: background-color var(--fluent-duration-normal) var(--fluent-ease-standard),
+              border-color var(--fluent-duration-normal) var(--fluent-ease-standard),
+              color var(--fluent-duration-normal) var(--fluent-ease-standard);
+}
+
+.fluent-transition-shadow {
+  transition: box-shadow var(--fluent-duration-normal) var(--fluent-ease-standard);
+}
+
+.fluent-transition-fast {
+  transition-duration: var(--fluent-duration-fast);
+}
+
+.fluent-transition-slow {
+  transition-duration: var(--fluent-duration-slow);
+}
+
+/* ===========================================
+   Reduced Motion Support
+   =========================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .fluent-enter,
+  .fluent-enter-scale,
+  .fluent-enter-slide-up,
+  .fluent-enter-slide-down,
+  .fluent-enter-slide-left,
+  .fluent-enter-slide-right,
+  .fluent-enter-expand,
+  .fluent-enter-fade,
+  .fluent-exit,
+  .fluent-exit-scale,
+  .fluent-exit-slide-up,
+  .fluent-exit-slide-down,
+  .fluent-exit-collapse,
+  .fluent-exit-fade {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .fluent-pulse,
+  .fluent-bounce,
+  .fluent-glow,
+  .fluent-spin,
+  .fluent-spin-reverse,
+  .fluent-dots-pulse,
+  .fluent-dots-pulse-delay-1,
+  .fluent-dots-pulse-delay-2,
+  .fluent-dots-pulse-delay-3 {
+    animation: none;
+  }
+}

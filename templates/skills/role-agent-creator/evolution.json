@@ -1,0 +1,152 @@
+{
+  "runs": [
+    {
+      "timestamp": "2026-06-12T02:30:14.308Z",
+      "sessionId": "3fa2b5d1-0961-4bef-9450-a15d15b1767c",
+      "success": true,
+      "turnCount": 3,
+      "duration": 2247
+    },
+    {
+      "timestamp": "2026-06-12T14:04:54.014Z",
+      "sessionId": "52367885-e8b8-4e55-a187-9b57fb47718d",
+      "success": true,
+      "turnCount": 3,
+      "duration": 3741
+    },
+    {
+      "timestamp": "2026-06-12T14:12:38.639Z",
+      "sessionId": "52367885-e8b8-4e55-a187-9b57fb47718d",
+      "success": true,
+      "turnCount": 5,
+      "duration": 4661
+    },
+    {
+      "timestamp": "2026-06-12T14:13:20.770Z",
+      "sessionId": "1c9d93a5-c7bc-47d0-b1f0-c9765c7631b0",
+      "success": true,
+      "turnCount": 3,
+      "duration": 3227
+    },
+    {
+      "timestamp": "2026-06-12T14:14:13.551Z",
+      "sessionId": "1c9d93a5-c7bc-47d0-b1f0-c9765c7631b0",
+      "success": true,
+      "turnCount": 5,
+      "duration": 2708
+    },
+    {
+      "timestamp": "2026-06-12T14:20:34.923Z",
+      "sessionId": "f336be42-3abb-4990-805b-4efeaf8c4d38",
+      "success": true,
+      "turnCount": 3,
+      "duration": 8
+    },
+    {
+      "timestamp": "2026-06-12T14:20:58.037Z",
+      "sessionId": "f336be42-3abb-4990-805b-4efeaf8c4d38",
+      "success": true,
+      "turnCount": 5,
+      "duration": 24
+    },
+    {
+      "timestamp": "2026-06-15T03:14:47.487Z",
+      "sessionId": "34d5f808-35c6-4638-bacf-7a81082968c3",
+      "success": true,
+      "turnCount": 3,
+      "duration": 78
+    },
+    {
+      "timestamp": "2026-06-15T03:14:52.148Z",
+      "sessionId": "34d5f808-35c6-4638-bacf-7a81082968c3",
+      "success": true,
+      "turnCount": 5,
+      "duration": 7
+    },
+    {
+      "timestamp": "2026-06-15T03:14:56.151Z",
+      "sessionId": "34d5f808-35c6-4638-bacf-7a81082968c3",
+      "success": true,
+      "turnCount": 7,
+      "duration": 9
+    },
+    {
+      "timestamp": "2026-06-15T03:15:02.302Z",
+      "sessionId": "34d5f808-35c6-4638-bacf-7a81082968c3",
+      "success": true,
+      "turnCount": 9,
+      "duration": 11
+    },
+    {
+      "timestamp": "2026-06-15T04:52:33.338Z",
+      "sessionId": "de32a338-b0f7-4f53-895d-55899eedd6a0",
+      "success": true,
+      "turnCount": 3,
+      "duration": 209
+    },
+    {
+      "timestamp": "2026-06-15T04:52:39.899Z",
+      "sessionId": "de32a338-b0f7-4f53-895d-55899eedd6a0",
+      "success": true,
+      "turnCount": 5,
+      "duration": 6
+    },
+    {
+      "timestamp": "2026-06-15T04:52:45.456Z",
+      "sessionId": "de32a338-b0f7-4f53-895d-55899eedd6a0",
+      "success": true,
+      "turnCount": 7,
+      "duration": 13
+    },
+    {
+      "timestamp": "2026-06-15T04:53:37.740Z",
+      "sessionId": "de32a338-b0f7-4f53-895d-55899eedd6a0",
+      "success": true,
+      "turnCount": 9,
+      "duration": 30
+    },
+    {
+      "timestamp": "2026-06-15T06:27:22.704Z",
+      "sessionId": "05de1ee2-a067-48ac-80b0-a19a688898a4",
+      "success": true,
+      "turnCount": 3,
+      "duration": 2596
+    },
+    {
+      "timestamp": "2026-06-16T03:47:53.431Z",
+      "sessionId": "7c7c98de-64a5-4d07-9dd0-67627b25bdc0",
+      "success": true,
+      "turnCount": 3,
+      "duration": 14
+    },
+    {
+      "timestamp": "2026-06-16T03:48:34.772Z",
+      "sessionId": "7c7c98de-64a5-4d07-9dd0-67627b25bdc0",
+      "success": true,
+      "turnCount": 5,
+      "duration": 21
+    },
+    {
+      "timestamp": "2026-06-16T03:48:52.074Z",
+      "sessionId": "7c7c98de-64a5-4d07-9dd0-67627b25bdc0",
+      "success": true,
+      "turnCount": 7,
+      "duration": 14
+    },
+    {
+      "timestamp": "2026-06-16T03:50:04.228Z",
+      "sessionId": "7c7c98de-64a5-4d07-9dd0-67627b25bdc0",
+      "success": true,
+      "turnCount": 9,
+      "duration": 22
+    },
+    {
+      "timestamp": "2026-06-16T03:50:12.894Z",
+      "sessionId": "7c7c98de-64a5-4d07-9dd0-67627b25bdc0",
+      "success": true,
+      "turnCount": 11,
+      "duration": 13
+    }
+  ],
+  "version": 1
+}

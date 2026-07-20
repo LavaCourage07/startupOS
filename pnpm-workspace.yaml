@@ -1,0 +1,26 @@
+packages:
+  - packages/*
+
+# Electron 主进程产物在 dist-electron/ 下，运行时向上解析 node_modules；
+# pnpm 默认 isolated 模式不 hoist，导致 zod 等依赖解析失败。
+# hoisted 模式平铺依赖，解决 Electron + monorepo 运行期解析问题。
+nodeLinker: hoisted
+
+# 只安装当前平台架构的 optional 二进制（@next/swc-* 等），
+# 避免拉取 linux/win32 跨平台包导致 npmmirror 下载失败卡住。
+supportedArchitectures:
+  os:
+    - darwin
+  cpu:
+    - arm64
+    - x64
+
+allowBuilds:
+  '@google/genai': true
+  '@parcel/watcher': true
+  canvas: true
+  electron-winstaller: true
+  esbuild: true
+  koffi: true
+  onnxruntime-node: true
+  protobufjs: true

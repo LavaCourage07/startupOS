@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": false,
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "noUncheckedIndexedAccess": false,
+    "noErrorTruncation": true,    
+    "diagnostics": false,
+    "maxNodeModuleJsDepth": 0,
+    "disableSizeLimit": true,    
+    "strict": true,
+    "module": "ESNext",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "strictPropertyInitialization": false,
+    "moduleResolution": "node",
+    "isolatedModules": true,
+    "target": "es2019",
+    "sourceMap": true,
+    "outDir": "./lib",
+    "baseUrl": "./",
+    "noImplicitAny": false,
+    "incremental": true,
+    "paths": {
+      "@src/*": ["src/*"],
+      "@modules/*": ["src/modules/*"],
+      "@config/*": ["src/infrastructure/configs/*"],
+      "@exceptions": ["src/libs/exceptions"],
+      "@libs/*": ["src/libs/*"]
+    }
+  },
+
+  "exclude": [
+    "node_modules",
+    "./lib/**/*"
+  ],
+}

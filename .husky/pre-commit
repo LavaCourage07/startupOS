@@ -1,0 +1,44 @@
+#!/bin/sh
+
+# AGENTS.md 规约检查 - Git Pre-commit Hook
+
+echo "🔍 运行 AGENTS.md 规约检查..."
+
+# 1. TypeScript 类型检查
+echo "\n📝 检查 TypeScript 类型..."
+npm run type-check
+if [ $? -ne 0 ]; then
+  echo "❌ TypeScript 类型检查失败"
+  echo "请修复类型错误后再提交"
+  exit 1
+fi
+
+# 2. ESLint 检查
+echo "\n🔧 运行 ESLint..."
+npm run lint
+if [ $? -ne 0 ]; then
+  echo "❌ ESLint 检查失败"
+  echo "请修复 Lint 错误后再提交"
+  exit 1
+fi
+
+# 3. Prettier 格式检查
+echo "\n💅 检查代码格式..."
+npm run format:check
+if [ $? -ne 0 ]; then
+  echo "❌ 代码格式不符合规范"
+  echo "运行 'npm run format' 自动格式化代码"
+  exit 1
+fi
+
+# 4. AGENTS.md 依赖规约检查
+echo "\n🏗️  检查模块依赖规约..."
+npm run agents:check
+if [ $? -ne 0 ]; then
+  echo "❌ 违反 AGENTS.md 依赖规约"
+  echo "请查看上方错误信息并修复"
+  exit 1
+fi
+
+echo "\n✅ 所有检查通过！"
+exit 0

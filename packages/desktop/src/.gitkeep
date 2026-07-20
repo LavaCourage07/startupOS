@@ -1,0 +1,6 @@
+/**
+ * packages/desktop — CE 桌面版骨架
+ *
+ * 当前阶段：electron/ 代码仍在根目录，此包为未来迁移预留位置。
+ * 迁移路径：根目录 electron/ → packages/desktop/src/main/
+ */

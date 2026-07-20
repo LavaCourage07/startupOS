@@ -1,0 +1,129 @@
+appId: com.originos.ce
+productName: OriginOS CE
+artifactName: ${productName}-${version}-${arch}.${ext}
+detectUpdateChannel: true
+generateUpdatesFilesForAllChannels: true
+directories:
+  output: ../../release
+  buildResources: ../../resources
+electronVersion: 42.3.3
+electronDownload:
+  version: 42.3.3
+  mirror: https://npmmirror.com/mirrors/electron/
+
+files:
+  - dist-electron/**/*
+  - from: dist-electron/core/src/lib
+    to: dist-electron/core/src/lib
+    filter:
+      - "**/*.js"
+  - from: dist-electron/core/src/modules
+    to: dist-electron/core/src/modules
+    filter:
+      - "**/*.js"
+      - "**/*.mjs"
+  - from: dist-electron/core/src/types
+    to: dist-electron/core/src/types
+    filter:
+      - "**/*.js"
+  - from: dist-electron/core/src/lib/integrations/pi-agent/tools
+    to: dist-electron/core/src/lib/integrations/pi-agent/tools
+    filter:
+      - "**/*"
+  - package.json
+  - "!**/*.map"
+  - "!node_modules/onnxruntime-node/bin/napi-v6/linux{,/**/*}"
+  - "!node_modules/onnxruntime-node/bin/napi-v6/win32{,/**/*}"
+npmRebuild: false
+nodeGypRebuild: false
+buildDependenciesFromSource: false
+
+extraResources:
+  - from: .packaging/web-standalone
+    to: web
+  - from: .packaging/web-standalone/node_modules
+    to: web/node_modules
+  - from: ../../packages/web/.next/static
+    to: web/packages/web/.next/static
+  - from: ../../packages/web/public
+    to: web/packages/web/public
+  - from: ../../resources/icons
+    to: resources/icons
+  - from: ../../skills
+    to: skills
+  - from: ../../templates
+    to: templates
+  # Agent Worker 和依赖
+  - from: dist-electron/core/src/modules/collaboration-runtime/sandbox/agent-worker.mjs
+    to: agent-worker/agent-worker.mjs
+  - from: dist-electron/core/src/lib/paths.js
+    to: agent-worker/lib/paths.js
+  - from: dist-electron/core/src/lib/integrations/pi-agent/display-content.js
+    to: agent-worker/lib/display-content.js
+  - from: dist-electron/core/src/modules/collaboration-runtime/sandbox/cognitive-session-end.js
+    to: agent-worker/cognitive-session-end.js
+  - from: dist-electron/core/src/lib/integrations/pi-agent/project-agent/project-collaboration-context.js
+    to: agent-worker/core/lib/integrations/pi-agent/project-agent/project-collaboration-context.js
+  - from: dist-electron/core/src/lib/integrations/pi-agent/project-agent/collaboration-prompt.js
+    to: agent-worker/core/lib/integrations/pi-agent/project-agent/collaboration-prompt.js
+  - from: dist-electron/core/src/modules/collaboration-runtime/engine/agent-context-writer.js
+    to: agent-worker/core/modules/collaboration-runtime/engine/agent-context-writer.js
+  - from: dist-electron/core/src/lib/integrations/pi-agent/tools
+    to: agent-worker/core/lib/integrations/pi-agent/tools
+    filter:
+      - "*.js"
+
+mac:
+  icon: ../../resources/icons/icon.icns
+  category: public.app-category.developer-tools
+  type: distribution
+  extendInfo:
+    NSUserNotificationAlertStyle: alert
+  forceCodeSigning: true
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: ../../resources/entitlements.mac.plist
+  entitlementsInherit: ../../resources/entitlements.mac.inherit.plist
+  notarize: true
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+
+win:
+  icon: ../../resources/icons/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: zip
+      arch:
+        - x64
+
+nsis:
+  useZip: false
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  runAfterFinish: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+linux:
+  icon: ../../resources/icons/icon.png
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  category: Development
+
+publish:
+  provider: generic
+  url: https://cdn.artseeu.cn/originos-ce/updates/stable/
+  channel: stable
+  updaterCacheDirName: originos-ce-updater

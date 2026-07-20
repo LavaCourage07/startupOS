@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "../../dist-electron",
+    "baseUrl": ".",
+    "paths": {
+      "@originos/core": ["../core/src/index.ts"],
+      "@originos/core/*": ["../core/src/*"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "../core/src/modules/collaboration-runtime/sandbox/agent-worker.mts"
+  ],
+  "exclude": ["node_modules"]
+}

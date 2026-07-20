@@ -1,0 +1,291 @@
+/**
+ * OS.5: Acrylic Material System
+ * CSS Variables and Animations for glass-morphism effects
+ */
+
+/* ===========================================
+   CSS Variables - Acrylic Design Tokens
+   =========================================== */
+
+:root {
+  /* Acrylic Background Colors */
+  --acrylic-bg-standard: rgba(255, 255, 255, 0.72);
+  --acrylic-bg-standard-dark: rgba(30, 41, 59, 0.72);
+  --acrylic-bg-subtle: rgba(255, 255, 255, 0.85);
+  --acrylic-bg-subtle-dark: rgba(30, 41, 59, 0.85);
+  --acrylic-bg-strong: rgba(255, 255, 255, 0.60);
+  --acrylic-bg-strong-dark: rgba(30, 41, 59, 0.60);
+
+  /* Acrylic Blur Values */
+  --acrylic-blur-standard: 20px;
+  --acrylic-blur-subtle: 12px;
+  --acrylic-blur-strong: 30px;
+
+  /* Acrylic Saturation Values */
+  --acrylic-saturate-standard: 180%;
+  --acrylic-saturate-subtle: 150%;
+  --acrylic-saturate-strong: 200%;
+
+  /* Acrylic Border */
+  --acrylic-border-color: rgba(255, 255, 255, 0.50);
+  --acrylic-border-color-dark: rgba(255, 255, 255, 0.18);
+  --acrylic-border-width: 1px;
+  --acrylic-border-radius: 0.75rem;
+
+  /* Acrylic Shadows */
+  --acrylic-shadow-standard: 0 8px 32px rgba(0, 0, 0, 0.08);
+  --acrylic-shadow-standard-dark: 0 8px 32px rgba(0, 0, 0, 0.32);
+  --acrylic-shadow-elevated: 0 12px 48px rgba(0, 0, 0, 0.12);
+  --acrylic-shadow-elevated-dark: 0 12px 48px rgba(0, 0, 0, 0.40);
+
+  /* Acrylic Overlay */
+  --acrylic-overlay-bg: rgba(0, 0, 0, 0.40);
+  --acrylic-overlay-blur: 4px;
+
+  /* Acrylic Animation Timing */
+  --acrylic-animation-duration-enter: 200ms;
+  --acrylic-animation-duration-exit: 150ms;
+  --acrylic-animation-timing: cubic-bezier(0.16, 1, 0.3, 1);
+  --acrylic-animation-timing-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Acrylic Z-Index Layers */
+  --acrylic-z-panel: 10;
+  --acrylic-z-dialog: 50;
+  --acrylic-z-overlay: 40;
+}
+
+/* Dark Mode Adjustments */
+.dark {
+  --acrylic-bg-standard: var(--acrylic-bg-standard-dark);
+  --acrylic-bg-subtle: var(--acrylic-bg-subtle-dark);
+  --acrylic-bg-strong: var(--acrylic-bg-strong-dark);
+  --acrylic-border-color: var(--acrylic-border-color-dark);
+  --acrylic-shadow-standard: var(--acrylic-shadow-standard-dark);
+  --acrylic-shadow-elevated: var(--acrylic-shadow-elevated-dark);
+}
+
+/* ===========================================
+   Animation Keyframes
+   =========================================== */
+
+@keyframes acrylic-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes acrylic-exit {
+  from {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+}
+
+@keyframes acrylic-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes acrylic-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes acrylic-overlay-enter {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(var(--acrylic-overlay-blur));
+  }
+}
+
+@keyframes acrylic-overlay-exit {
+  from {
+    opacity: 1;
+    backdrop-filter: blur(var(--acrylic-overlay-blur));
+  }
+  to {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+}
+
+/* ===========================================
+   Animation Utility Classes
+   =========================================== */
+
+.acrylic-animate-enter {
+  animation: acrylic-enter var(--acrylic-animation-duration-enter) var(--acrylic-animation-timing) forwards;
+}
+
+.acrylic-animate-exit {
+  animation: acrylic-exit var(--acrylic-animation-duration-exit) var(--acrylic-animation-timing) forwards;
+}
+
+.acrylic-animate-fade-in {
+  animation: acrylic-fade-in var(--acrylic-animation-duration-enter) var(--acrylic-animation-timing) forwards;
+}
+
+.acrylic-animate-fade-out {
+  animation: acrylic-fade-out var(--acrylic-animation-duration-exit) var(--acrylic-animation-timing) forwards;
+}
+
+.acrylic-animate-overlay-enter {
+  animation: acrylic-overlay-enter var(--acrylic-animation-duration-enter) var(--acrylic-animation-timing) forwards;
+}
+
+.acrylic-animate-overlay-exit {
+  animation: acrylic-overlay-exit var(--acrylic-animation-duration-exit) var(--acrylic-animation-timing) forwards;
+}
+
+/* ===========================================
+   Acrylic Panel Base Styles
+   =========================================== */
+
+.acrylic-panel {
+  background: var(--acrylic-bg-standard);
+  backdrop-filter: blur(var(--acrylic-blur-standard)) saturate(var(--acrylic-saturate-standard));
+  -webkit-backdrop-filter: blur(var(--acrylic-blur-standard)) saturate(var(--acrylic-saturate-standard));
+  border: var(--acrylic-border-width) solid var(--acrylic-border-color);
+  border-radius: var(--acrylic-border-radius);
+  box-shadow: var(--acrylic-shadow-standard);
+}
+
+.acrylic-panel--subtle {
+  background: var(--acrylic-bg-subtle);
+  backdrop-filter: blur(var(--acrylic-blur-subtle)) saturate(var(--acrylic-saturate-subtle));
+  -webkit-backdrop-filter: blur(var(--acrylic-blur-subtle)) saturate(var(--acrylic-saturate-subtle));
+}
+
+.acrylic-panel--strong {
+  background: var(--acrylic-bg-strong);
+  backdrop-filter: blur(var(--acrylic-blur-strong)) saturate(var(--acrylic-saturate-strong));
+  -webkit-backdrop-filter: blur(var(--acrylic-blur-strong)) saturate(var(--acrylic-saturate-strong));
+}
+
+.acrylic-panel--elevated {
+  box-shadow: var(--acrylic-shadow-elevated);
+}
+
+/* ===========================================
+   Acrylic Overlay Styles
+   =========================================== */
+
+.acrylic-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--acrylic-z-overlay);
+  background: var(--acrylic-overlay-bg);
+  backdrop-filter: blur(var(--acrylic-overlay-blur));
+  -webkit-backdrop-filter: blur(var(--acrylic-overlay-blur));
+}
+
+/* ===========================================
+   Feature Detection & Fallbacks
+   =========================================== */
+
+/* Fallback for browsers without backdrop-filter support */
+@supports not (backdrop-filter: blur(1px)) {
+  .acrylic-panel {
+    background: rgba(255, 255, 255, 0.95);
+  }
+
+  .acrylic-panel--subtle {
+    background: rgba(255, 255, 255, 0.98);
+  }
+
+  .acrylic-panel--strong {
+    background: rgba(255, 255, 255, 0.92);
+  }
+
+  .dark .acrylic-panel,
+  .dark .acrylic-panel--subtle,
+  .dark .acrylic-panel--strong {
+    background: rgba(30, 41, 59, 0.98);
+  }
+
+  .acrylic-overlay {
+    background: rgba(0, 0, 0, 0.70);
+  }
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .acrylic-animate-enter,
+  .acrylic-animate-exit,
+  .acrylic-animate-fade-in,
+  .acrylic-animate-fade-out,
+  .acrylic-animate-overlay-enter,
+  .acrylic-animate-overlay-exit {
+    animation: none;
+    transition: opacity var(--acrylic-animation-duration-enter) ease;
+  }
+}
+
+/* ===========================================
+   Acrylic Drag State - macOS Style Frosted Glass
+   =========================================== */
+
+/* Enhanced blur and transparency during window drag */
+.acrylic-panel--dragging {
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(40px) saturate(220%);
+  -webkit-backdrop-filter: blur(40px) saturate(220%);
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.25),
+    0 8px 32px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  transition: background 150ms ease-out,
+              backdrop-filter 150ms ease-out,
+              box-shadow 150ms ease-out;
+}
+
+.dark .acrylic-panel--dragging {
+  background: rgba(30, 41, 59, 0.50);
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.50),
+    0 8px 32px rgba(0, 0, 0, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Strong variant during drag */
+.acrylic-panel--strong.acrylic-panel--dragging {
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(50px) saturate(240%);
+  -webkit-backdrop-filter: blur(50px) saturate(240%);
+}
+
+.dark .acrylic-panel--strong.acrylic-panel--dragging {
+  background: rgba(30, 41, 59, 0.40);
+}
+
+/* Subtle variant during drag */
+.acrylic-panel--subtle.acrylic-panel--dragging {
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(35px) saturate(200%);
+  -webkit-backdrop-filter: blur(35px) saturate(200%);
+}
+
+.dark .acrylic-panel--subtle.acrylic-panel--dragging {
+  background: rgba(30, 41, 59, 0.60);
+}

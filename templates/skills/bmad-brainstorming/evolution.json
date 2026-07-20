@@ -1,0 +1,12 @@
+{
+  "runs": [
+    {
+      "timestamp": "2026-06-12T13:38:24.890Z",
+      "sessionId": "d690c7d9-3442-4adc-a521-03dad2f2c6d7",
+      "success": true,
+      "turnCount": 3,
+      "duration": 5855
+    }
+  ],
+  "version": 1
+}
