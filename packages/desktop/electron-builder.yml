@@ -49,8 +49,6 @@ extraResources:
     to: web/packages/web/public
   - from: ../../resources/icons
     to: resources/icons
-  - from: ../../skills
-    to: skills
   - from: ../../templates
     to: templates
   # Agent Worker 和依赖

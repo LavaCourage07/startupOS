@@ -451,7 +451,13 @@ export function getDefaultSkillPaths(cwd: string): {
 }
 
 function getBundledSkillSeedDir(): string {
-	return join(getMonorepoRoot(), "skills");
+	// 打包环境下从 extraResources 的 templates/skills 读取
+	// 开发环境下从 monorepo 根目录的 templates/skills 读取
+	const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+	if (resourcesPath && (process as NodeJS.Process & { env?: Record<string, string> }).env?.['ELECTRON_RUN_AS_NODE'] !== '1') {
+		return join(resourcesPath, 'templates', 'skills');
+	}
+	return join(getMonorepoRoot(), "templates", "skills");
 }
 
 function hasSkillDefinition(dir: string): boolean {
