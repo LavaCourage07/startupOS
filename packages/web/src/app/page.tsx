@@ -48,7 +48,7 @@ import { SandboxWindow } from '@/components/sandbox';
 import { SkillDialog } from '@/components/skills';
 import { SolutionDesign } from '@/components/solution/SolutionDesign';
 import { Button } from '@/components/ui/button';
-import { HOME_APPS } from '@/config/homeApps';
+import { HOME_APPS, type HomeAppConfig } from '@/config/homeApps';
 import { getIpcRenderer, isElectron } from '@originos/core/lib/integrations/electron/env';
 import { IPC_CHANNELS } from '@originos/core/lib/integrations/electron/ipc-protocol';
 import { subscribeToNativeWindowClosed } from '@originos/core/lib/integrations/electron/window';
@@ -137,6 +137,17 @@ function isNonEmptyString(value: string | undefined): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+function buildSkillInitialMessage(skillName: string, name: string, initialMessage?: string): string {
+  if (initialMessage?.trim()) {
+    return initialMessage.trim();
+  }
+  if (skillName === 'role-agent-creator') {
+    return '请以 Persona 角色设计师的身份，帮我创建一个专属的角色 Agent。';
+  }
+  const displayName = name.split(' ')[0] || skillName;
+  return `请以${displayName}助手的身份开始，告诉我你可以怎么帮我。`;
+}
+
 function parseNotificationActivationTarget(payload: unknown): SystemNotificationActivationTarget | null {
   const record = payload && typeof payload === 'object'
     ? payload as Record<string, unknown>
@@ -170,14 +181,14 @@ function parseNotificationActivationTarget(payload: unknown): SystemNotification
 // Component: Welcome Section
 // ============================================================================
 
-function WelcomeSection({ onCreateProject, onSkillLaunch }: {
+function WelcomeSection({ onCreateProject, onAppLaunch }: {
   onCreateProject: () => void;
-  onSkillLaunch: (skillName: string, name: string) => void;
+  onAppLaunch: (app: HomeAppConfig) => void;
 }) {
   return (
     <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-black/20 p-8 text-center shadow-[0_30px_120px_rgba(0,0,0,0.35)] backdrop-blur-2xl md:p-12">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.2),transparent_38%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.14),transparent_32%)]" />
-      <div className="relative mx-auto flex max-w-4xl flex-col items-center justify-center">
+      <div className="relative mx-auto flex w-full max-w-[1800px] flex-col items-center justify-center">
         <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
           <Star className="h-3.5 w-3.5 text-amber-300" />
           桌面已就绪
@@ -224,7 +235,7 @@ function WelcomeSection({ onCreateProject, onSkillLaunch }: {
           ))}
         </div>
 
-        <div className="max-w-4xl mx-auto" data-tour="welcome-apps">
+        <div className="mx-auto w-full" data-tour="welcome-apps">
           <div className="mb-4 flex items-center justify-center gap-2">
             <LayoutGrid className="w-5 h-5 text-primary" />
             <h3 className="text-lg font-medium text-text-primary">应用启动器</h3>
@@ -240,7 +251,7 @@ function WelcomeSection({ onCreateProject, onSkillLaunch }: {
               color={app.color}
               dockType={app.type}
               skillName={app.skillName}
-              onClick={() => onSkillLaunch(app.skillName ?? app.action ?? '', app.name)}
+              onClick={() => onAppLaunch(app)}
               action="launch"
               tourId={app.id}
             />
@@ -639,15 +650,15 @@ export default function OSHomePage() {
         return;
       }
       if (detail.action === 'open-workspace') {
-        const entryType = detail.entryType as string | undefined;
-        const entryId = detail.entryId as string | undefined;
+        const entryType = detail.entryType;
+        const entryId = detail.entryId;
         if (entryType && entryId) {
           const windowManager = AppWindowManager.getInstance();
           windowManager.openComponentWindow(
             `workspace-${entryType}-${entryId}`,
-            (detail.title as string) || entryId,
+            detail.title || entryId,
             WorkspaceWindow,
-            { projectId: `${entryType}-${entryId}`, projectName: (detail.title as string) || entryId, entryType, entryId },
+            { projectId: `${entryType}-${entryId}`, projectName: detail.title || entryId, entryType, entryId },
             {
               position: { width: 1200, height: 800 },
               constraints: { minWidth: 800, minHeight: 600 },
@@ -670,7 +681,7 @@ export default function OSHomePage() {
           SkillDialog,
           {
             skillName,
-            initialMessage: '你好！有什么可以帮助你的吗？',
+            initialMessage: buildSkillInitialMessage(skillName, skillName),
           },
           {
             position: { width: 1200, height: 800 },
@@ -681,7 +692,7 @@ export default function OSHomePage() {
         return;
       }
       if (detail.action === 'launch-sandbox') {
-        const appId = detail.appId as string | undefined;
+        const appId = detail.appId;
         // If already open and a new appId is requested, update the active app
         if (appId && windowManager.isWindowOpen('sandbox')) {
           useSandboxStore.getState().setActiveApp(appId);
@@ -702,9 +713,9 @@ export default function OSHomePage() {
         return;
       }
       if (detail.action === 'launch-agent' && detail.agentId) {
-        const agentId = detail.agentId as string;
-        const agentName = (detail.agentName as string) || agentId;
-        const agentType = (detail.agentType as string) || 'role-agent';
+        const agentId = detail.agentId;
+        const agentName = detail.agentName || agentId;
+        const agentType = detail.agentType || 'role-agent';
         windowManager.openComponentWindow(
           `agent-dialog-${agentId}`,
           agentName,
@@ -719,7 +730,7 @@ export default function OSHomePage() {
         return;
       }
       if (detail.action === 'focus-window' && detail.windowId) {
-        windowManager.focusWindow(detail.windowId as string);
+        windowManager.focusWindow(detail.windowId);
         return;
       }
     };
@@ -866,7 +877,7 @@ export default function OSHomePage() {
       SkillDialog,
       {
         skillName,
-        initialMessage: initialMessage?.trim() || '你好！我是' + name.split(' ')[0] + '助手，有什么可以帮助你的吗？',
+        initialMessage: buildSkillInitialMessage(skillName, name, initialMessage),
       },
       {
         position: {
@@ -911,6 +922,27 @@ export default function OSHomePage() {
       }
     );
   };
+
+  const handleHomeAppLaunch = React.useCallback((app: HomeAppConfig) => {
+    if (app.type === 'skill' && app.skillName) {
+      handleSkillLaunch(app.skillName, app.name);
+      return;
+    }
+
+    if (app.action === 'create-agent') {
+      handleCreateProject();
+      return;
+    }
+
+    if (app.action === 'open-workspace') {
+      const firstProject = projectsRef.current[0];
+      if (firstProject) {
+        void handleOpenWorkspace(firstProject.id);
+        return;
+      }
+      handleCreateProject();
+    }
+  }, [handleOpenWorkspace, handleSkillLaunch]);
 
   const handleNotificationActivation = React.useCallback((target: SystemNotificationActivationTarget) => {
     if (target.entryType === 'project') {
@@ -1211,22 +1243,7 @@ export default function OSHomePage() {
       title: app.name,
       subtitle: app.description,
       icon: app.icon,
-      action: () => {
-        if (app.type === 'skill' && isNonEmptyString(app.skillName)) {
-          handleSkillLaunch(app.skillName, app.name);
-          return;
-        }
-        if (app.action === 'create-agent') {
-          handleCreateProject();
-          return;
-        }
-        if (app.action === 'open-workspace') {
-          const firstProject = projects[0];
-          if (firstProject) {
-            void handleOpenWorkspace(firstProject.id);
-          }
-        }
-      },
+      action: () => handleHomeAppLaunch(app),
       keywords: [app.id, app.name, app.description, app.type],
     }));
 
@@ -1279,7 +1296,7 @@ export default function OSHomePage() {
     }));
 
     return [...staticItems, ...appItems, ...projectItems, ...agentItems, ...skillItems];
-  }, [projects, userAgents, userSkills]);
+  }, [handleHomeAppLaunch, projects, userAgents, userSkills]);
 
   const { setItems } = useSpotlightStore();
   React.useEffect(() => {
@@ -1360,7 +1377,7 @@ export default function OSHomePage() {
             {/* Welcome Section - Show when no projects */}
             {!isLoadingProjects && projects.length === 0 && (
               <div data-tour="welcome-section">
-                <WelcomeSection onCreateProject={handleCreateProject} onSkillLaunch={handleSkillLaunch} />
+                <WelcomeSection onCreateProject={handleCreateProject} onAppLaunch={handleHomeAppLaunch} />
               </div>
             )}
 
@@ -1423,65 +1440,39 @@ export default function OSHomePage() {
             {!isLoadingProjects && (
               <>
                 {/* Home Apps Section */}
-                <section data-tour="apps-section" className="mb-12 rounded-[2rem] border border-white/10 bg-black/20 p-6 backdrop-blur-2xl md:p-8">
-                  <div className="mb-6 flex items-center justify-between">
-                    <div>
-                      <h2 className="text-2xl font-semibold text-text-primary">
-                        应用启动器
-                      </h2>
-                      <p className="mt-1 text-sm text-white/55">像桌面应用抽屉一样管理你的内置工具与入口</p>
+                {projects.length > 0 && (
+                  <section data-tour="apps-section" className="mb-12 rounded-[2rem] border border-white/10 bg-black/20 p-6 backdrop-blur-2xl md:p-8">
+                    <div className="mb-6 flex items-center justify-between">
+                      <div>
+                        <h2 className="text-2xl font-semibold text-text-primary">
+                          应用启动器
+                        </h2>
+                        <p className="mt-1 text-sm text-white/55">像桌面应用抽屉一样管理你的内置工具与入口</p>
+                      </div>
+                      <span className="text-sm text-muted-foreground">
+                        {HOME_APPS.length} 个应用
+                      </span>
                     </div>
-                    <span className="text-sm text-muted-foreground">
-                      {HOME_APPS.length} 个应用
-                    </span>
-                  </div>
 
-                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {HOME_APPS.map((app) => (
-                      <AppCard
-                        key={app.id}
-                        id={app.id}
-                        name={app.name}
-                        description={app.description}
-                        icon={app.icon}
-                        color={app.color}
-                        dockType={app.type}
-                        skillName={app.skillName}
-                        onClick={() => {
-                          if (app.type === 'skill' && app.skillName) {
-                            if (app.skillName === 'role-agent-creator') {
-                              const windowManager = AppWindowManager.getInstance();
-                              windowManager.openComponentWindow(
-                                `skill-role-agent-creator`,
-                                app.name,
-                                SkillDialog,
-                                {
-                                  skillName: 'role-agent-creator',
-                                  initialMessage: '你好！我是 Persona，角色设计师。我来帮你创建一个专属的角色 Agent。',
-                                },
-                                {
-                                  position: { width: 1200, height: 800 },
-                                  constraints: { minWidth: 600, minHeight: 400 },
-                                }
-                              );
-                            } else {
-                              handleSkillLaunch(app.skillName, app.name);
-                            }
-                          } else if (app.action === 'create-agent') {
-                            handleCreateProject();
-                          } else if (app.action === 'open-workspace') {
-                            const firstProject = projects[0];
-                            if (firstProject) {
-                              handleOpenWorkspace(firstProject.id);
-                            }
-                          }
-                        }}
-                        action="launch"
-                        tourId={app.id}
-                      />
-                    ))}
-                  </div>
-                </section>
+                    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {HOME_APPS.map((app) => (
+                        <AppCard
+                          key={app.id}
+                          id={app.id}
+                          name={app.name}
+                          description={app.description}
+                          icon={app.icon}
+                          color={app.color}
+                          dockType={app.type}
+                          skillName={app.skillName}
+                          onClick={() => handleHomeAppLaunch(app)}
+                          action="launch"
+                          tourId={app.id}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                )}
 
                 {/* User-created Agents Section */}
                 {userAgents.filter(a => a.agentType === 'assistant' || a.agentType === 'unknown').length > 0 && (

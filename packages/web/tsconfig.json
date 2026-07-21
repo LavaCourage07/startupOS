@@ -4,6 +4,7 @@
     "incremental": true,
     "noEmit": true,
     "plugins": [{ "name": "next" }],
+    "types": ["node", "react", "react-dom"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],

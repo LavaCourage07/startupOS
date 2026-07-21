@@ -116,7 +116,7 @@ function isCmdShell(shellPath: string): boolean {
  */
 function buildShellInvocation(shellPath: string, command: string): {
   shellArgs: string[];
-  env: NodeJS.ProcessEnv;
+  env: Record<string, string | undefined>;
 } {
   // Windows PowerShell
   if (isPowerShell(shellPath)) {
@@ -139,7 +139,7 @@ function buildShellInvocation(shellPath: string, command: string): {
   const shellConfig = isZsh ? ".zshrc" : ".bashrc";
   const loadConfigCmd = `[ -f ~/${shellConfig} ] && source ~/${shellConfig} 2>/dev/null || true; `;
   const fullCommand = loadConfigCmd + command;
-  const env: NodeJS.ProcessEnv = {};
+  const env: Record<string, string | undefined> = {};
 
   // Windows Git Bash 后备：MSYS 在 HOME 未设/异常时会回退到挂载根
   // （常表现为 /workspace），导致 pwd 返回错误路径。这里显式注入 HOME。
