@@ -106,6 +106,57 @@ function generateMacUpdateMetadata() {
   return metadataPath;
 }
 
+function generateWindowsUpdateMetadata() {
+  const releaseDate = new Date().toISOString();
+  const exeFileName = `OriginOS CE-${version}-x64.exe`;
+  const exeFilePath = path.join(releaseDir, exeFileName);
+
+  if (!fs.existsSync(exeFilePath)) {
+    console.warn('[publish-all-platforms] Windows exe not found, skipping Windows metadata generation');
+    return null;
+  }
+
+  const entries = [
+    {
+      fileName: exeFileName,
+      filePath: exeFilePath,
+      size: fs.statSync(exeFilePath).size,
+      sha512: sha512Base64(exeFilePath),
+    },
+  ];
+
+  // Also include zip if it exists
+  const zipFileName = `OriginOS CE-${version}-x64.zip`;
+  const zipFilePath = path.join(releaseDir, zipFileName);
+  if (fs.existsSync(zipFilePath)) {
+    entries.push({
+      fileName: zipFileName,
+      filePath: zipFilePath,
+      size: fs.statSync(zipFilePath).size,
+      sha512: sha512Base64(zipFilePath),
+    });
+  }
+
+  const primary = entries[0];
+  const lines = [
+    `version: ${version}`,
+    'files:',
+    ...entries.flatMap((entry) => [
+      `  - url: ${entry.fileName}`,
+      `    sha512: ${entry.sha512}`,
+      `    size: ${entry.size}`,
+    ]),
+    `path: ${primary.fileName}`,
+    `sha512: ${primary.sha512}`,
+    `releaseDate: '${releaseDate}'`,
+    '',
+  ];
+  const metadataPath = path.join(releaseDir, 'latest.yml');
+  fs.writeFileSync(metadataPath, lines.join('\n'), 'utf8');
+  fs.copyFileSync(metadataPath, path.join(releaseDir, 'stable.yml'));
+  return metadataPath;
+}
+
 function statObject(bucketManager, bucket, key) {
   return new Promise((resolve, reject) => {
     bucketManager.stat(bucket, key, (error, body, info) => {
@@ -154,7 +205,7 @@ function uploadFile({ mac, config, bucket, key, filePath, overwrite, cacheContro
   });
 }
 
-function buildArtifacts(metadataFile) {
+function buildArtifacts(macMetadataFile, winMetadataFile) {
   const files = [];
 
   // macOS versions
@@ -215,26 +266,50 @@ function buildArtifacts(metadataFile) {
     });
   }
 
-  // Metadata files
-  const metadataName = path.basename(metadataFile);
+  // macOS metadata files
+  const macMetadataName = path.basename(macMetadataFile);
   files.push({
-    fileName: metadataName,
-    filePath: metadataFile,
+    fileName: macMetadataName,
+    filePath: macMetadataFile,
     overwrite: true,
   });
 
-  if (metadataName !== 'latest-mac.yml') {
+  if (macMetadataName !== 'latest-mac.yml') {
     files.push({
       fileName: 'latest-mac.yml',
-      filePath: metadataFile,
+      filePath: macMetadataFile,
       overwrite: true,
     });
   } else {
     files.push({
       fileName: 'stable-mac.yml',
-      filePath: metadataFile,
+      filePath: macMetadataFile,
       overwrite: true,
     });
+  }
+
+  // Windows metadata files
+  if (winMetadataFile) {
+    const winMetadataName = path.basename(winMetadataFile);
+    files.push({
+      fileName: winMetadataName,
+      filePath: winMetadataFile,
+      overwrite: true,
+    });
+
+    if (winMetadataName !== 'latest.yml') {
+      files.push({
+        fileName: 'latest.yml',
+        filePath: winMetadataFile,
+        overwrite: true,
+      });
+    } else {
+      files.push({
+        fileName: 'stable.yml',
+        filePath: winMetadataFile,
+        overwrite: true,
+      });
+    }
   }
 
   return files;
@@ -319,8 +394,9 @@ async function main() {
   const mac = new qiniu.auth.digest.Mac(accessKey, secretKey);
   const bucketManager = new qiniu.rs.BucketManager(mac, config);
 
-  const metadataFile = generateMacUpdateMetadata();
-  const artifacts = buildArtifacts(metadataFile);
+  const macMetadataFile = generateMacUpdateMetadata();
+  const winMetadataFile = generateWindowsUpdateMetadata();
+  const artifacts = buildArtifacts(macMetadataFile, winMetadataFile);
 
   for (const artifact of artifacts) {
     assertFile(artifact.filePath);
