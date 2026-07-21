@@ -8,10 +8,12 @@
 - **技能加载优化**：内置技能现在直接从模板目录加载（`source: bundled`），不再复制到用户数据目录，避免与用户安装的技能混淆
 - **技能查找逻辑**：`findSkillFile` 现在同时搜索用户目录和内置模板目录，用户安装的同名技能优先
 - **macOS 打包**：修复 `create-mac-dmg.js` 脚本，自动生成 DMG 文件的 blockmap，支持自动更新
+- **Windows 自动更新**：发布脚本添加 Windows 更新元数据生成（`latest.yml` 和 `stable.yml`），修复 Windows 版本自动更新功能
+- **Windows 依赖缺失**：在 desktop 包中添加 `@anthropic-ai/sdk` 依赖，修复 Windows 版本启动时报错 `can not find package @anthropic-ai/sdk`
 
 ### 改进
 - **技能架构**：重构技能加载机制，内置技能和用户技能分离管理，提升可维护性
-- **发布流程**：优化七牛云发布脚本，确保所有必要文件（包括 blockmap）正确上传
+- **发布流程**：优化七牛云发布脚本，确保所有必要文件（包括 blockmap 和 Windows 元数据）正确上传
 
 ---
 
