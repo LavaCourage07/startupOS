@@ -17,7 +17,7 @@ import { getToolRegistry } from '../../../../lib/integrations/pi-agent/tools/reg
 import { buildPromptMemorySections } from '../../../../lib/integrations/pi-agent/memory-consumption';
 import { appendGlobalUserPreferencesPrompt } from '../../../../lib/integrations/pi-agent/user-preferences';
 import { getDataRoot } from '../../../paths';
-import { syncBundledSkillsToUserDirectory } from '../../../../lib/integrations/pi-agent/core/skills';
+import { getBundledSkillSeedDir } from '../../../../lib/integrations/pi-agent/core/skills';
 
 const MAX_TOOL_DESC_CHARS = 120;
 
@@ -317,13 +317,15 @@ function injectInheritedMemory(
  * 查找 SKILL.md 文件的路径
  */
 function findSkillFile(skillCode: string): { skillMdPath: string; baseDir: string } | null {
-  syncBundledSkillsToUserDirectory();
   const skillDirs = [
+    // 用户安装的技能优先
     path.join(getDataRoot(), 'skills'),
     path.join(getDataRoot(), '.originos', 'skills'),
+    // 内置技能模板目录（source: bundled）
+    getBundledSkillSeedDir(),
   ];
 
-  // 先尝试精确路径：data/skills/{code}/SKILL.md
+  // 先尝试精确路径：{base}/{code}/SKILL.md
   for (const base of skillDirs) {
     const dir = path.join(base, skillCode);
     const skillMd = path.join(dir, 'SKILL.md');

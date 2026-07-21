@@ -21,6 +21,7 @@ exports.loadSkillsFromDir = loadSkillsFromDir;
 exports.formatSkillsForPrompt = formatSkillsForPrompt;
 exports.loadSkillContent = loadSkillContent;
 exports.getDefaultSkillPaths = getDefaultSkillPaths;
+exports.getBundledSkillSeedDir = getBundledSkillSeedDir;
 exports.syncBundledSkillsToUserDirectory = syncBundledSkillsToUserDirectory;
 exports.loadSkills = loadSkills;
 const fs_1 = require("fs");
@@ -330,7 +331,13 @@ function getDefaultSkillPaths(cwd) {
     };
 }
 function getBundledSkillSeedDir() {
-    return (0, path_1.join)((0, paths_1.getMonorepoRoot)(), "skills");
+    // 打包环境下从 extraResources 的 templates/skills 读取
+    // 开发环境下从 monorepo 根目录的 templates/skills 读取
+    const resourcesPath = process.resourcesPath;
+    if (resourcesPath && process.env?.['ELECTRON_RUN_AS_NODE'] !== '1') {
+        return (0, path_1.join)(resourcesPath, 'templates', 'skills');
+    }
+    return (0, path_1.join)((0, paths_1.getMonorepoRoot)(), "templates", "skills");
 }
 function hasSkillDefinition(dir) {
     return (0, fs_1.existsSync)((0, path_1.join)(dir, "SKILL.md"));
@@ -355,12 +362,15 @@ function syncBundledSkillsToUserDirectory() {
         if (!hasSkillDefinition(sourceSkillDir))
             continue;
         const targetSkillDir = (0, path_1.join)(targetRoot, entry.name);
-        if ((0, fs_1.existsSync)(targetSkillDir))
+        // 只有目标目录里确实存在 SKILL.md 才跳过，否则重新同步
+        // （防止空目录或损坏的残留目录导致技能加载失败）
+        if (hasSkillDefinition(targetSkillDir))
             continue;
+        (0, fs_1.rmSync)(targetSkillDir, { recursive: true, force: true });
         (0, fs_1.cpSync)(sourceSkillDir, targetSkillDir, {
             recursive: true,
             errorOnExist: false,
-            force: false,
+            force: true,
         });
     }
 }
@@ -407,8 +417,13 @@ function loadSkills(options = {}) {
         }
     }
     if (includeDefaults) {
-        syncBundledSkillsToUserDirectory();
-        // 用户数据目录下的技能（包含首次启动同步过来的内置技能）
+        // 内置技能直接从模板目录加载，不复制到 data/skills
+        // 这样内置技能保持 source: "bundled"，与用户安装的技能区分开
+        const bundledSkillDir = getBundledSkillSeedDir();
+        if ((0, fs_1.existsSync)(bundledSkillDir)) {
+            addSkills(loadSkillsFromDir({ dir: bundledSkillDir, source: "bundled" }));
+        }
+        // 用户数据目录下用户安装的技能（不再包含内置技能）
         const dataSkillsDir = (0, path_1.join)((0, paths_1.getDataRoot)(), "skills");
         if ((0, fs_1.existsSync)(dataSkillsDir)) {
             addSkills(loadSkillsFromDir({ dir: dataSkillsDir, source: "user" }));

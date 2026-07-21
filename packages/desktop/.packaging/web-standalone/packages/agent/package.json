@@ -22,6 +22,6 @@
     }
   },
   "dependencies": {
-    "@mariozechner/pi-agent-core": "workspace:*"
+    "@mariozechner/pi-agent-core": "0.55.3"
   }
 }

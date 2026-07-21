@@ -11,7 +11,7 @@
  * - Manage skill lifecycle and validation
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "fs";
 import ignore from "ignore";
 import { basename, dirname, join, relative, resolve, sep } from "path";
 import { getDataRoot, getMonorepoRoot, getSkillsDataDir } from '../../../paths';
@@ -450,7 +450,7 @@ export function getDefaultSkillPaths(cwd: string): {
 	};
 }
 
-function getBundledSkillSeedDir(): string {
+export function getBundledSkillSeedDir(): string {
 	// 打包环境下从 extraResources 的 templates/skills 读取
 	// 开发环境下从 monorepo 根目录的 templates/skills 读取
 	const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
@@ -484,12 +484,15 @@ export function syncBundledSkillsToUserDirectory(): void {
 		if (!hasSkillDefinition(sourceSkillDir)) continue;
 
 		const targetSkillDir = join(targetRoot, entry.name);
-		if (existsSync(targetSkillDir)) continue;
+		// 只有目标目录里确实存在 SKILL.md 才跳过，否则重新同步
+		// （防止空目录或损坏的残留目录导致技能加载失败）
+		if (hasSkillDefinition(targetSkillDir)) continue;
 
+		rmSync(targetSkillDir, { recursive: true, force: true });
 		cpSync(sourceSkillDir, targetSkillDir, {
 			recursive: true,
 			errorOnExist: false,
-			force: false,
+			force: true,
 		});
 	}
 }
@@ -540,9 +543,14 @@ export function loadSkills(options: LoadSkillsOptions = {}): LoadSkillsResult {
 	}
 
 	if (includeDefaults) {
-		syncBundledSkillsToUserDirectory();
+		// 内置技能直接从模板目录加载，不复制到 data/skills
+		// 这样内置技能保持 source: "bundled"，与用户安装的技能区分开
+		const bundledSkillDir = getBundledSkillSeedDir();
+		if (existsSync(bundledSkillDir)) {
+			addSkills(loadSkillsFromDir({ dir: bundledSkillDir, source: "bundled" }));
+		}
 
-		// 用户数据目录下的技能（包含首次启动同步过来的内置技能）
+		// 用户数据目录下用户安装的技能（不再包含内置技能）
 		const dataSkillsDir = join(getDataRoot(), "skills");
 		if (existsSync(dataSkillsDir)) {
 			addSkills(loadSkillsFromDir({ dir: dataSkillsDir, source: "user" }));

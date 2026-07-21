@@ -277,12 +277,14 @@ function injectInheritedMemory(prompt, inheritedMemory) {
  * 查找 SKILL.md 文件的路径
  */
 function findSkillFile(skillCode) {
-    (0, skills_1.syncBundledSkillsToUserDirectory)();
     const skillDirs = [
+        // 用户安装的技能优先
         path_1.default.join((0, paths_1.getDataRoot)(), 'skills'),
         path_1.default.join((0, paths_1.getDataRoot)(), '.originos', 'skills'),
+        // 内置技能模板目录（source: bundled）
+        (0, skills_1.getBundledSkillSeedDir)(),
     ];
-    // 先尝试精确路径：data/skills/{code}/SKILL.md
+    // 先尝试精确路径：{base}/{code}/SKILL.md
     for (const base of skillDirs) {
         const dir = path_1.default.join(base, skillCode);
         const skillMd = path_1.default.join(dir, 'SKILL.md');

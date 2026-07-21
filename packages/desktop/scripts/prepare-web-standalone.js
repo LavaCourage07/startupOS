@@ -125,9 +125,23 @@ const pnpmRoot = path.join(rootNodeModules, '.pnpm');
 fs.mkdirSync(webNodeModules, { recursive: true });
 
 let hoistedCount = 0;
-for (const packageInfo of listPnpmPackages(pnpmRoot)) {
-  if (copyPackageIfMissing(packageInfo.source, packageInfo.name, webNodeModules)) {
-    hoistedCount += 1;
+if (fs.existsSync(pnpmRoot)) {
+  // pnpm .pnpm store exists — extract from it
+  for (const packageInfo of listPnpmPackages(pnpmRoot)) {
+    if (copyPackageIfMissing(packageInfo.source, packageInfo.name, webNodeModules)) {
+      hoistedCount += 1;
+    }
+  }
+} else {
+  // Next.js standalone already flattened deps into root node_modules
+  // Copy all packages directly to web/node_modules
+  for (const entry of fs.readdirSync(rootNodeModules, { withFileTypes: true })) {
+    const packageName = entry.name;
+    if (packageName === '.pnpm') continue;
+    const sourcePath = path.join(rootNodeModules, packageName);
+    if (copyPackageIfMissing(sourcePath, packageName, webNodeModules)) {
+      hoistedCount += 1;
+    }
   }
 }
 

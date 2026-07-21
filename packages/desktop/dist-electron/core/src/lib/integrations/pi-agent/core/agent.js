@@ -291,7 +291,7 @@ class OriginOSAgent {
                 ...currentModel,
             };
             if (currentModelUsesBearerAuth && currentModelAuthToken) {
-                delete opts['apiKey'];
+                opts['apiKey'] = currentModelAuthToken;
                 // pi-ai 的 Anthropic provider 从 options.headers 读取自定义 header（不是 model.headers），
                 // 所以 Bearer Authorization 必须放在 opts 中传递。
                 opts['headers'] = {
@@ -301,11 +301,11 @@ class OriginOSAgent {
                 streamModel = {
                     ...streamModel,
                     // pi-ai's Anthropic provider falls back to configured api-key auth.
-                    // Its Copilot path is the available Bearer-auth transport, so use it
-                    // only for the outbound request model while keeping the same API shape.
+                    // Its Copilot path is the available Bearer-auth transport. streamSimple
+                    // still resolves credentials from options.apiKey, so keep the token there.
                     provider: 'github-copilot',
-                    apiKey: currentModelAuthToken,
-                    authToken: currentModelAuthToken,
+                    apiKey: null,
+                    authToken: null,
                 };
             }
             else if (currentModelApiKey && !opts['apiKey']) {
@@ -314,6 +314,13 @@ class OriginOSAgent {
             // 调试：确认凭证传递
             const finalCredential = opts['apiKey'] || streamModel?.apiKey || streamModel?.authToken;
             console.error(`[streamFn] credential check: hasOptsApiKey=${!!opts['apiKey']}, modelApiKey=${currentModelApiKey ? 'set' : 'null'}, model.authToken=${streamModel?.authToken ? 'set' : 'null'}, bearer=${currentModelUsesBearerAuth}, final=${finalCredential ? finalCredential.toString().slice(0, 10) + '...' : 'NONE'}`);
+            console.error(`[streamFn] Calling pi-ai streamSimple with model:`, {
+                id: streamModel.id,
+                api: streamModel.api,
+                provider: streamModel.provider,
+                baseUrl: streamModel.baseUrl,
+            });
+            console.error(`[streamFn] Context messages count:`, context.messages?.length);
             const stream = piAi.streamSimple(streamModel, context, opts);
             return currentModelUsesBearerAuth ? normalizeStreamProvider(stream, model.provider) : stream;
         };

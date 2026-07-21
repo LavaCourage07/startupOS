@@ -2,6 +2,30 @@
   "name": "originos",
   "version": "0.1.15",
   "private": true,
+  "description": "An AI-native desktop OS prototype with Next.js, Electron, and multi-agent collaboration",
+  "author": "Archersado <archersado@hotmail.com>",
+  "license": "AGPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/archersado/originos.git"
+  },
+  "bugs": {
+    "url": "https://github.com/archersado/originos/issues"
+  },
+  "homepage": "https://github.com/archersado/originos#readme",
+  "keywords": [
+    "ai-native",
+    "desktop-os",
+    "electron",
+    "nextjs",
+    "multi-agent",
+    "collaboration",
+    "pi-agent"
+  ],
+  "engines": {
+    "node": ">=22.12.0",
+    "pnpm": ">=9.0.0"
+  },
   "scripts": {
     "dev": "pnpm --filter @originos/web dev",
     "dev:src": "next dev",
@@ -25,6 +49,7 @@
     "desktop:release:qiniu": "pnpm --filter @originos/desktop release:qiniu",
     "desktop:publish:qiniu": "pnpm --filter @originos/desktop publish:qiniu",
     "agents:check": "node scripts/check-agents-compliance.js",
+    "build:check-root-artifacts": "node scripts/check-root-build-artifacts.js",
     "docs:init-story": "node scripts/init-story-spec.js",
     "docs:index": "node scripts/update-docs-index.js",
     "clean": "rm -rf dist-electron dist .tmp",
@@ -36,7 +61,7 @@
     "@dagrejs/dagre": "^3.0.0",
     "@dnd-kit/core": "^6.3.1",
     "@mariozechner/agent": "workspace:*",
-    "@mariozechner/pi-ai": "workspace:*",
+    "@mariozechner/pi-ai": "0.55.3",
     "@micro-zoe/micro-app": "^1.0.0-rc.29",
     "@neural-nexus/neural-channel": "^0.1.5",
     "@neural-nexus/view-manager": "^0.1.5",

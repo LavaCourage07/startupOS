@@ -82,7 +82,10 @@ class AgentSessionService {
      * Get session by ID
      */
     async getSession(sessionId, projectId) {
-        const sessionData = await this.store.read(this.getSessionPath(sessionId, projectId));
+        const sessionPath = this.getSessionPath(sessionId, projectId);
+        console.error(`[DEBUG] getSession: sessionId=${sessionId}, projectId=${projectId}, path=${sessionPath}`);
+        const sessionData = await this.store.read(sessionPath);
+        console.error(`[DEBUG] getSession: sessionData=${sessionData ? 'found' : 'null'}`);
         return sessionData?.data ?? null;
     }
     /**

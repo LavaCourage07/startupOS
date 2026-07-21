@@ -8,7 +8,8 @@
     "paths": {
       "@originos/core": ["../core/src/index.ts"],
       "@originos/core/*": ["../core/src/*"]
-    }
+    },
+    "types": ["node"]
   },
   "include": [
     "src/**/*.ts",
