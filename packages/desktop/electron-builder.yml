@@ -32,6 +32,17 @@ files:
       - "**/*"
   - package.json
   - node_modules/**/*
+  # 显式从根 node_modules 收集 peer/间接依赖，electron-builder 默认不收集 peer deps
+  - from: ../../node_modules/@anthropic-ai/sdk
+    to: node_modules/@anthropic-ai/sdk
+  - from: ../../node_modules/electron-updater
+    to: node_modules/electron-updater
+  - from: ../../node_modules/electron-log
+    to: node_modules/electron-log
+  - from: ../../node_modules/js-yaml
+    to: node_modules/js-yaml
+  - from: ../../node_modules/argparse
+    to: node_modules/argparse
   - "!**/*.map"
   - "!node_modules/onnxruntime-node/bin/napi-v6/linux{,/**/*}"
   - "!node_modules/onnxruntime-node/bin/napi-v6/win32{,/**/*}"
@@ -54,16 +65,6 @@ extraResources:
     to: resources/icons
   - from: ../../templates
     to: templates
-  - from: ../../node_modules/@anthropic-ai/sdk
-    to: app/node_modules/@anthropic-ai/sdk
-  - from: ../../node_modules/electron-updater
-    to: app/node_modules/electron-updater
-  - from: ../../node_modules/electron-log
-    to: app/node_modules/electron-log
-  - from: ../../node_modules/js-yaml
-    to: app/node_modules/js-yaml
-  - from: ../../node_modules/argparse
-    to: app/node_modules/argparse
   # Agent Worker 和依赖
   - from: dist-electron/core/src/modules/collaboration-runtime/sandbox/agent-worker.mjs
     to: agent-worker/agent-worker.mjs
