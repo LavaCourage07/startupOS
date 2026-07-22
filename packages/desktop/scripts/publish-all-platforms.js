@@ -177,6 +177,22 @@ function statObject(bucketManager, bucket, key) {
   });
 }
 
+function deleteObject(bucketManager, bucket, key) {
+  return new Promise((resolve, reject) => {
+    bucketManager.delete(bucket, key, (error, body, info) => {
+      if (error && info.statusCode !== 612) {
+        reject(error);
+        return;
+      }
+      if (info.statusCode === 200 || info.statusCode === 612) {
+        resolve(true);
+        return;
+      }
+      reject(new Error(`Qiniu delete failed: ${key} status=${info.statusCode} body=${JSON.stringify(body)}`));
+    });
+  });
+}
+
 function uploadFile({ mac, config, bucket, key, filePath, overwrite, cacheControl }) {
   return new Promise((resolve, reject) => {
     const putPolicy = new qiniu.rs.PutPolicy({
@@ -416,8 +432,8 @@ async function main() {
     if (!artifact.overwrite) {
       const stat = await statObject(bucketManager, bucket, key);
       if (stat.exists) {
-        console.log(`[publish-all-platforms] skipping existing ${artifact.fileName}`);
-        continue;
+        console.log(`[publish-all-platforms] deleting existing ${artifact.fileName}`);
+        await deleteObject(bucketManager, bucket, key);
       }
     }
 
@@ -430,7 +446,7 @@ async function main() {
       bucket,
       key,
       filePath: artifact.filePath,
-      overwrite: artifact.overwrite,
+      overwrite: true, // 始终覆盖，因为我们已经删除了旧文件
       cacheControl,
     });
 
