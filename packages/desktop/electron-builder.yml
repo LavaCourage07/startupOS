@@ -31,9 +31,12 @@ files:
     filter:
       - "**/*"
   - package.json
+  - node_modules/**/*
   - "!**/*.map"
   - "!node_modules/onnxruntime-node/bin/napi-v6/linux{,/**/*}"
   - "!node_modules/onnxruntime-node/bin/napi-v6/win32{,/**/*}"
+  - "!node_modules/.cache"
+  - "!node_modules/.bin"
 npmRebuild: false
 nodeGypRebuild: false
 buildDependenciesFromSource: false
@@ -51,6 +54,16 @@ extraResources:
     to: resources/icons
   - from: ../../templates
     to: templates
+  - from: ../../node_modules/@anthropic-ai/sdk
+    to: app/node_modules/@anthropic-ai/sdk
+  - from: ../../node_modules/electron-updater
+    to: app/node_modules/electron-updater
+  - from: ../../node_modules/electron-log
+    to: app/node_modules/electron-log
+  - from: ../../node_modules/js-yaml
+    to: app/node_modules/js-yaml
+  - from: ../../node_modules/argparse
+    to: app/node_modules/argparse
   # Agent Worker 和依赖
   - from: dist-electron/core/src/modules/collaboration-runtime/sandbox/agent-worker.mjs
     to: agent-worker/agent-worker.mjs
