@@ -1,6 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.stripHiddenReasoning = stripHiddenReasoning;
 exports.extractDisplayContent = extractDisplayContent;
+exports.sanitizeAgentDisplayContent = sanitizeAgentDisplayContent;
+exports.sanitizeAgentDisplayMessage = sanitizeAgentDisplayMessage;
 function joinBlockTexts(content, type) {
     const text = content
         .filter((block) => !!block &&
@@ -14,16 +17,16 @@ function joinBlockTexts(content, type) {
     })
         .filter(Boolean)
         .join('');
-    return type === 'text' ? stripThinkingMarkup(text) : text;
+    return type === 'text' ? stripHiddenReasoning(text) : text;
 }
-function stripThinkingMarkup(text) {
+function stripHiddenReasoning(text) {
     return text
         .replace(/<think(?:ing)?\b[^>]*>[\s\S]*?<\/think(?:ing)?>/gi, '')
         .trim();
 }
 function extractDisplayContent(content, options = {}) {
     if (typeof content === 'string') {
-        return stripThinkingMarkup(content);
+        return stripHiddenReasoning(content);
     }
     if (!Array.isArray(content)) {
         return '';
@@ -48,4 +51,14 @@ function extractDisplayContent(content, options = {}) {
     return typeof thinkingBlock.thinking === 'string'
         ? thinkingBlock.thinking
         : '';
+}
+function sanitizeAgentDisplayContent(content) {
+    return extractDisplayContent(content);
+}
+function sanitizeAgentDisplayMessage(message) {
+    const { metadata: _metadata, ...rest } = message;
+    return {
+        ...rest,
+        content: sanitizeAgentDisplayContent(message.content),
+    };
 }

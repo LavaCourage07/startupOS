@@ -309,16 +309,6 @@ function createAutoModel(modelId, options) {
  */
 function createRuntimeModel(llmConfig) {
     llmConfig = (0, llm_config_1.normalizeRuntimeLLMConfig)(llmConfig) ?? llmConfig;
-    console.error(`[createRuntimeModel] input llmConfig:`, {
-        provider: llmConfig.provider,
-        baseUrl: llmConfig.anthropicBaseUrl || llmConfig.baseUrl,
-        anthropicApiKey: llmConfig.anthropicApiKey ? `${llmConfig.anthropicApiKey.slice(0, 8)}...` : undefined,
-        apiKey: llmConfig.apiKey ? `${llmConfig.apiKey.slice(0, 8)}...` : undefined,
-        model: llmConfig.model,
-        maxTokens: llmConfig.maxTokens,
-        anthropicCredentialSource: llmConfig.anthropicCredentialSource,
-        enabled: llmConfig.enabled,
-    });
     const modelId = llmConfig.model?.trim() || undefined;
     const provider = llmConfig.provider;
     const anthropicCredentialSource = llmConfig.anthropicCredentialSource;

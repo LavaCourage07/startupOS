@@ -450,14 +450,37 @@ export function getDefaultSkillPaths(cwd: string): {
 	};
 }
 
-export function getBundledSkillDir(): string {
-	// 打包环境下从 extraResources 的 templates/skills 读取
-	// 开发环境下从 monorepo 根目录的 templates/skills 读取
-	const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-	if (resourcesPath && (process as NodeJS.Process & { env?: Record<string, string> }).env?.['ELECTRON_RUN_AS_NODE'] !== '1') {
-		return join(resourcesPath, 'templates', 'skills');
+function addUniquePath(paths: string[], candidate: string | undefined): void {
+	if (!candidate) return;
+	const resolved = resolve(candidate);
+	if (!paths.includes(resolved)) {
+		paths.push(resolved);
 	}
-	return join(getMonorepoRoot(), "templates", "skills");
+}
+
+export function getBundledSkillDirs(): string[] {
+	const paths: string[] = [];
+	const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+	const envRoot = process.env['MONOREPO_ROOT'];
+	const explicitBundledDir = process.env['ORIGINOS_BUNDLED_SKILLS_DIR'];
+
+	addUniquePath(paths, explicitBundledDir);
+	addUniquePath(paths, resourcesPath ? join(resourcesPath, 'templates', 'skills') : undefined);
+	addUniquePath(paths, envRoot ? join(envRoot, 'templates', 'skills') : undefined);
+	addUniquePath(paths, join(getMonorepoRoot(), 'templates', 'skills'));
+
+	return paths;
+}
+
+export function getBundledSkillDir(): string {
+	// 打包环境下从 extraResources 的 templates/skills 读取；Next standalone
+	// 会通过 ELECTRON_RUN_AS_NODE=1 启动，仍然需要优先使用 resourcesPath。
+	const candidates = getBundledSkillDirs();
+	const existing = candidates.find((candidate) => existsSync(candidate));
+	if (existing) {
+		return existing;
+	}
+	return candidates[0] ?? join(getMonorepoRoot(), 'templates', 'skills');
 }
 
 /**
@@ -521,8 +544,10 @@ export function loadSkills(options: LoadSkillsOptions = {}): LoadSkillsResult {
 		}
 
 		const defaults = getDefaultSkillPaths(cwd);
-		if (existsSync(defaults.bundled)) {
-			addSkills(loadSkillsFromDir({ dir: defaults.bundled, source: "bundled" }));
+		for (const bundledDir of getBundledSkillDirs()) {
+			if (existsSync(bundledDir)) {
+				addSkills(loadSkillsFromDir({ dir: bundledDir, source: "bundled" }));
+			}
 		}
 
 		// Project-local skills

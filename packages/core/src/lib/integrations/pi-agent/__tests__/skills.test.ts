@@ -9,6 +9,7 @@ import {
 	loadSkillContent,
 	getDefaultSkillPaths,
 	getBundledSkillDir,
+	getBundledSkillDirs,
 	type Skill,
 } from "../core/skills.js";
 import {
@@ -159,6 +160,79 @@ describe("Skill Framework", () => {
 					delete process.env.DATA_ROOT;
 				} else {
 					process.env.DATA_ROOT = originalDataRoot;
+				}
+			}
+		});
+
+		it("should resolve bundled skills from Electron resources when running standalone server as node", () => {
+			const originalRoot = getMonorepoRoot();
+			const originalDataRoot = process.env.DATA_ROOT;
+			const originalMonorepoRoot = process.env.MONOREPO_ROOT;
+			const originalElectronRunAsNode = process.env.ELECTRON_RUN_AS_NODE;
+			const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+			const tempRoot = mkdtempSync(join(tmpdir(), "originos-skill-resources-"));
+			const resourcesRoot = join(tempRoot, "resources");
+			const fallbackRoot = join(tempRoot, "missing-repo");
+			const dataRoot = join(tempRoot, "data");
+			const bundledSkillDir = join(resourcesRoot, "templates", "skills", "skill-creator-app");
+			mkdirSync(bundledSkillDir, { recursive: true });
+			writeFileSync(
+				join(bundledSkillDir, "SKILL.md"),
+				[
+					"---",
+					"name: skill-creator-app",
+					"code: skill-creator-app",
+					"description: Skill creator bundled from resources",
+					"---",
+					"",
+					"Use this packaged skill.",
+				].join("\n"),
+				"utf8",
+			);
+
+			try {
+				setMonorepoRoot(fallbackRoot);
+				process.env.DATA_ROOT = dataRoot;
+				process.env.MONOREPO_ROOT = fallbackRoot;
+				process.env.ELECTRON_RUN_AS_NODE = "1";
+				Object.defineProperty(process, "resourcesPath", {
+					value: resourcesRoot,
+					configurable: true,
+				});
+
+				const dirs = getBundledSkillDirs();
+				const result = loadSkills({ includeDefaults: true });
+				const loadedSkill = result.skills.find((skill) => skill.code === "skill-creator-app");
+
+				expect(dirs[0]).toBe(join(resourcesRoot, "templates", "skills"));
+				expect(getBundledSkillDir()).toBe(join(resourcesRoot, "templates", "skills"));
+				expect(loadedSkill?.source).toBe("bundled");
+				expect(loadedSkill?.baseDir).toBe(bundledSkillDir);
+				expect(existsSync(join(dataRoot, "skills", "skill-creator-app", "SKILL.md"))).toBe(false);
+			} finally {
+				setMonorepoRoot(originalRoot);
+				if (originalDataRoot === undefined) {
+					delete process.env.DATA_ROOT;
+				} else {
+					process.env.DATA_ROOT = originalDataRoot;
+				}
+				if (originalMonorepoRoot === undefined) {
+					delete process.env.MONOREPO_ROOT;
+				} else {
+					process.env.MONOREPO_ROOT = originalMonorepoRoot;
+				}
+				if (originalElectronRunAsNode === undefined) {
+					delete process.env.ELECTRON_RUN_AS_NODE;
+				} else {
+					process.env.ELECTRON_RUN_AS_NODE = originalElectronRunAsNode;
+				}
+				if (originalResourcesPath === undefined) {
+					delete (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+				} else {
+					Object.defineProperty(process, "resourcesPath", {
+						value: originalResourcesPath,
+						configurable: true,
+					});
 				}
 			}
 		});

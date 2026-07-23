@@ -330,7 +330,13 @@ function getDefaultSkillPaths(cwd) {
     };
 }
 function getBundledSkillSeedDir() {
-    return (0, path_1.join)((0, paths_1.getMonorepoRoot)(), "skills");
+    // 打包环境下从 extraResources 的 templates/skills 读取
+    // 开发环境下从 monorepo 根目录的 templates/skills 读取
+    const resourcesPath = process.resourcesPath;
+    if (resourcesPath && process.env?.['ELECTRON_RUN_AS_NODE'] !== '1') {
+        return (0, path_1.join)(resourcesPath, 'templates', 'skills');
+    }
+    return (0, path_1.join)((0, paths_1.getMonorepoRoot)(), "templates", "skills");
 }
 function hasSkillDefinition(dir) {
     return (0, fs_1.existsSync)((0, path_1.join)(dir, "SKILL.md"));

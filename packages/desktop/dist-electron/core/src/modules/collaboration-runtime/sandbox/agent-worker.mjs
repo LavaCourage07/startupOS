@@ -100,6 +100,7 @@ function summarizeWorkerModel(modelConfig) {
         hasCredential: Boolean(modelConfig.anthropicAuthToken || modelConfig.anthropicApiKey || modelConfig.authToken || modelConfig.apiKey),
         credentialSource: credentialSource ?? "none",
         maxTokens: modelConfig.maxTokens ?? "default",
+        hasMapping: Boolean(modelConfig.mapping),
     };
 }
 function logRuntime(phase, data) {
@@ -117,6 +118,7 @@ async function createWorkerModel(modelConfig) {
         anthropicApiKey: modelConfig.anthropicApiKey ? `${modelConfig.anthropicApiKey.slice(0, 8)}...` : undefined,
         model: modelConfig.model ?? modelConfig.id,
         anthropicCredentialSource: modelConfig.anthropicCredentialSource,
+        mapping: modelConfig.mapping,
     } : "undefined — will fallback to createAutoModel()");
     if (modelConfig) {
         const model = createRuntimeModel({
@@ -130,6 +132,7 @@ async function createWorkerModel(modelConfig) {
             model: modelConfig.model ?? modelConfig.id,
             maxTokens: modelConfig.maxTokens,
             anthropicCredentialSource: modelConfig.anthropicCredentialSource,
+            mapping: modelConfig.mapping,
         });
         logRuntime("worker.model.create.done", {
             model: summarizeWorkerModel(modelConfig),
