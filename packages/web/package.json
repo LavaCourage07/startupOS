@@ -43,6 +43,7 @@
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^2.0.0",
     "undici": "^5.0.0",
+    "uuid": "^14.0.0",
     "zustand": "^4.0.0"
   },
   "devDependencies": {

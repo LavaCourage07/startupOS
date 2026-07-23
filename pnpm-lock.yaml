@@ -189,6 +189,9 @@ importers:
 
   packages/core:
     dependencies:
+      uuid:
+        specifier: ^14.0.0
+        version: 14.0.1
       zod:
         specifier: ^3.25.76
         version: 3.25.76
@@ -358,6 +361,9 @@ importers:
       undici:
         specifier: ^5.0.0
         version: 5.0.0
+      uuid:
+        specifier: ^14.0.0
+        version: 14.0.1
       zustand:
         specifier: ^4.0.0
         version: 4.5.7(@types/react@18.3.31)(react@18.0.0)
