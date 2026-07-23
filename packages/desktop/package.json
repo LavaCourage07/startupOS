@@ -14,16 +14,16 @@
     "dist:mac:app": "pnpm build:app && electron-builder --config electron-builder.yml --mac dir --arm64 --x64 --publish never",
     "dist:mac": "pnpm dist:mac:app && NODE_OPTIONS= node scripts/create-mac-dmg.js",
     "dist:mac:publish": "pnpm build:app && electron-builder --config electron-builder.yml --mac --arm64 --x64 --publish always",
-    "verify:mac-signing": "NODE_OPTIONS= node scripts/verify-mac-signing.js",
+    "verify:mac-signing": "node scripts/verify-mac-signing.js",
     "bump-version": "node scripts/bump-release-version.js",
     "publish:qiniu": "node scripts/publish-qiniu-updates.js",
     "release:qiniu": "node scripts/release-qiniu.js",
     "dist:qiniu": "pnpm release:qiniu",
     "dist:win": "ORIGINOS_WINDOWS_SHORT_ZIP=1 pnpm build:app && electron-builder --config electron-builder.yml --win --publish never",
     "dist:linux": "pnpm build:app && electron-builder --config electron-builder.yml --linux --publish never",
-    "verify:win-package": "NODE_OPTIONS= node scripts/verify-windows-package.js",
-    "verify:release-artifacts": "NODE_OPTIONS= node scripts/verify-release-artifacts.js",
-    "verify:asar-requires": "NODE_OPTIONS= node scripts/verify-asar-relative-requires.js"
+    "verify:win-package": "node scripts/verify-windows-package.js",
+    "verify:release-artifacts": "node scripts/verify-release-artifacts.js",
+    "verify:asar-requires": "node scripts/verify-asar-relative-requires.js"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "^0.0.51",
