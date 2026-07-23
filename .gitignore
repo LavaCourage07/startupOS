@@ -13,6 +13,8 @@ dist-electron
 dist-*
 *.tsbuildinfo
 btsconfig.tsbuildinfo
+.agents
+.wine-originos/
 
 # Runtime data (user-specific)
 /data

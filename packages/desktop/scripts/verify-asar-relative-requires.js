@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const asar = require('@electron/asar');
 
 const desktopDir = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(desktopDir, '..', '..');
@@ -11,7 +12,6 @@ const releaseDir = path.join(repoRoot, 'release');
 const asarPath = process.env.ORIGINOS_ASAR_PATH
   ? path.resolve(process.env.ORIGINOS_ASAR_PATH)
   : path.join(releaseDir, 'win-unpacked', 'resources', 'app.asar');
-const asarBin = path.join(repoRoot, 'node_modules/.bin/asar');
 
 function fail(message) {
   console.error(`[verify-asar-relative-requires] ${message}`);
@@ -56,17 +56,16 @@ function candidateEntries(fromEntry, specifier) {
   ];
 }
 
+function normalizeAsarEntry(entry) {
+  return entry.replace(/^(?:pack|unpack)\s*:\s*/, '');
+}
+
 if (!fs.existsSync(asarPath)) {
   fail(`app.asar not found: ${asarPath}`);
   process.exit();
 }
 
-if (!fs.existsSync(asarBin)) {
-  fail(`asar binary not found: ${asarBin}`);
-  process.exit();
-}
-
-const entries = run(asarBin, ['list', asarPath]).split(/\r?\n/).filter(Boolean);
+const entries = asar.listPackage(asarPath, { isPack: true }).map(normalizeAsarEntry);
 const entrySet = new Set(entries);
 const runtimeEntries = entries.filter(isJsRuntimeEntry);
 const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'originos-asar-requires-'));
@@ -76,7 +75,7 @@ try {
     const relativeEntry = entry.replace(/^\//, '');
     const extractedPath = path.join(extractDir, relativeEntry);
     fs.mkdirSync(path.dirname(extractedPath), { recursive: true });
-    fs.writeFileSync(extractedPath, run(asarBin, ['extract-file', asarPath, relativeEntry]));
+    fs.writeFileSync(extractedPath, asar.extractFile(asarPath, relativeEntry));
   }
 
   for (const entry of runtimeEntries) {

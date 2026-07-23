@@ -72,6 +72,7 @@
 | OS.14 | Agent Runtime 工作目录与输出目录边界收敛 | ✅ Complete | High | 2026-06-29 | 1-2 天 |
 | OS.15 | 桌面应用自动更新机制 | 📋 Planning | High | TBD | 4-6 天 |
 | OS.16 | 系统级定时任务与定时唤起能力 | 📋 Planning | High | TBD | 4-6 天 |
+| OS.17 | 无项目首页与 Agent 思考内容显示优化 | 📋 Planning | High | 2026-07-22 | 1-2 天 |
 
 ---
 

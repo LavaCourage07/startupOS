@@ -170,9 +170,8 @@ function parseNotificationActivationTarget(payload: unknown): SystemNotification
 // Component: Welcome Section
 // ============================================================================
 
-function WelcomeSection({ onCreateProject, onSkillLaunch }: {
+function WelcomeSection({ onCreateProject }: {
   onCreateProject: () => void;
-  onSkillLaunch: (skillName: string, name: string) => void;
 }) {
   return (
     <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-black/20 p-8 text-center shadow-[0_30px_120px_rgba(0,0,0,0.35)] backdrop-blur-2xl md:p-12">
@@ -224,29 +223,16 @@ function WelcomeSection({ onCreateProject, onSkillLaunch }: {
           ))}
         </div>
 
-        <div className="max-w-4xl mx-auto" data-tour="welcome-apps">
-          <div className="mb-4 flex items-center justify-center gap-2">
-            <LayoutGrid className="w-5 h-5 text-primary" />
-            <h3 className="text-lg font-medium text-text-primary">应用启动器</h3>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {HOME_APPS.map((app) => (
-            <AppCard
-              key={app.id}
-              id={app.id}
-              name={app.name}
-              description={app.description}
-              icon={app.icon}
-              color={app.color}
-              dockType={app.type}
-              skillName={app.skillName}
-              onClick={() => onSkillLaunch(app.skillName ?? app.action ?? '', app.name)}
-              action="launch"
-              tourId={app.id}
-            />
-          ))}
-          </div>
-        </div>
+        <button
+          type="button"
+          onClick={() => {
+            document.querySelector('[data-tour="apps-section"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }}
+          className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/70 transition-colors hover:border-primary/30 hover:bg-white/10"
+        >
+          <LayoutGrid className="h-4 w-4 text-primary" />
+          打开应用启动器
+        </button>
       </div>
     </div>
   );
@@ -1360,7 +1346,7 @@ export default function OSHomePage() {
             {/* Welcome Section - Show when no projects */}
             {!isLoadingProjects && projects.length === 0 && (
               <div data-tour="welcome-section">
-                <WelcomeSection onCreateProject={handleCreateProject} onSkillLaunch={handleSkillLaunch} />
+                <WelcomeSection onCreateProject={handleCreateProject} />
               </div>
             )}
 

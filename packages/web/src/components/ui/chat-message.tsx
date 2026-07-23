@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
 import { cn } from '@originos/core/lib/utils';
+import { sanitizeAgentDisplayContent } from '@originos/core/lib/integrations/pi-agent/display-content';
 import { MermaidDiagram } from './MermaidDiagram';
 
 // Register YAML language for syntax highlighting
@@ -205,6 +206,7 @@ interface MarkdownContentProps {
 }
 
 export function MarkdownContent({ content, isStreaming }: MarkdownContentProps) {
+  const safeContent = sanitizeAgentDisplayContent(content);
   return (
     <div className="min-w-0 overflow-hidden break-words text-inherit">
       <ReactMarkdown
@@ -316,7 +318,7 @@ export function MarkdownContent({ content, isStreaming }: MarkdownContentProps) 
           },
         }}
       >
-        {content}
+        {safeContent}
       </ReactMarkdown>
       {isStreaming && (
         <span className="inline-block w-2 h-4 ml-1 bg-current animate-pulse opacity-70" />
@@ -352,8 +354,9 @@ export function ChatMessage({ message, className, onAnswer, isAnswered }: ChatMe
     );
   }
 
-  const parsedQuestion = onAnswer ? parseAskUserQuestion(message.content) : null;
-  const displayContent = parsedQuestion ? removeYamlBlock(message.content) : message.content;
+  const safeMessageContent = sanitizeAgentDisplayContent(message.content);
+  const parsedQuestion = onAnswer ? parseAskUserQuestion(safeMessageContent) : null;
+  const displayContent = parsedQuestion ? removeYamlBlock(safeMessageContent) : safeMessageContent;
 
   return (
     <div className={cn('flex justify-start', className)}>

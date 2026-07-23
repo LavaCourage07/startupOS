@@ -102,6 +102,31 @@ function listPnpmPackages(pnpmRoot) {
   return packages;
 }
 
+function listNodeModulesPackages(nodeModulesRoot) {
+  if (!fs.existsSync(nodeModulesRoot)) {
+    return [];
+  }
+
+  const packages = [];
+  for (const packageEntry of fs.readdirSync(nodeModulesRoot, { withFileTypes: true })) {
+    if (packageEntry.name === '.bin' || packageEntry.name === '.pnpm') continue;
+    const packagePath = path.join(nodeModulesRoot, packageEntry.name);
+    if (packageEntry.name.startsWith('@') && packageEntry.isDirectory()) {
+      for (const scopedEntry of fs.readdirSync(packagePath, { withFileTypes: true })) {
+        if (!scopedEntry.isDirectory() && !scopedEntry.isSymbolicLink()) continue;
+        packages.push({
+          name: `${packageEntry.name}/${scopedEntry.name}`,
+          source: path.join(packagePath, scopedEntry.name),
+        });
+      }
+      continue;
+    }
+    if (!packageEntry.isDirectory() && !packageEntry.isSymbolicLink()) continue;
+    packages.push({ name: packageEntry.name, source: packagePath });
+  }
+  return packages;
+}
+
 let materializedCount = 0;
 for (let pass = 0; pass < 20; pass += 1) {
   const symlinks = collectSymlinks(target);
@@ -125,7 +150,10 @@ const pnpmRoot = path.join(rootNodeModules, '.pnpm');
 fs.mkdirSync(webNodeModules, { recursive: true });
 
 let hoistedCount = 0;
-for (const packageInfo of listPnpmPackages(pnpmRoot)) {
+for (const packageInfo of [
+  ...listPnpmPackages(pnpmRoot),
+  ...listNodeModulesPackages(rootNodeModules),
+]) {
   if (copyPackageIfMissing(packageInfo.source, packageInfo.name, webNodeModules)) {
     hoistedCount += 1;
   }

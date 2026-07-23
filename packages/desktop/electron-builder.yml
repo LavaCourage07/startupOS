@@ -30,10 +30,20 @@ files:
     to: dist-electron/core/src/lib/integrations/pi-agent/tools
     filter:
       - "**/*"
+  - from: ../../packages/agent
+    to: node_modules/@mariozechner/agent
+    filter:
+      - "package.json"
+      - "index.js"
+      - "index.d.ts"
+  - from: ../../node_modules/@mariozechner/pi-agent-core
+    to: node_modules/@mariozechner/pi-agent-core
+    filter:
+      - "package.json"
+      - "dist/**/*"
   - package.json
   - "!**/*.map"
   - "!node_modules/onnxruntime-node/bin/napi-v6/linux{,/**/*}"
-  - "!node_modules/onnxruntime-node/bin/napi-v6/win32{,/**/*}"
 npmRebuild: false
 nodeGypRebuild: false
 buildDependenciesFromSource: false

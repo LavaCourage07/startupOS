@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractDisplayContent } from '../display-content';
+import { extractDisplayContent, sanitizeAgentDisplayMessage } from '../display-content';
 
 describe('extractDisplayContent', () => {
   it('returns text blocks when present', () => {
@@ -42,5 +42,18 @@ describe('extractDisplayContent', () => {
     ]);
 
     expect(result).toBe('final answer');
+  });
+
+  it('removes thinking metadata from display messages', () => {
+    const result = sanitizeAgentDisplayMessage({
+      role: 'assistant',
+      content: '<think>hidden</think>\nfinal answer',
+      metadata: {
+        thinking: { content: 'hidden', status: 'completed' },
+      },
+    });
+
+    expect(result.content).toBe('final answer');
+    expect('metadata' in result).toBe(false);
   });
 });

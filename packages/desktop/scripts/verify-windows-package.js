@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { createRequire } = require('node:module');
+const asar = require('@electron/asar');
 
 const desktopDir = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(desktopDir, '..', '..');
@@ -15,7 +17,6 @@ const desktopPackage = require(path.join(desktopDir, 'package.json'));
 const zipPath = process.env.WINDOWS_ZIP_PATH
   ? path.resolve(process.env.WINDOWS_ZIP_PATH)
   : path.join(releaseDir, `OriginOS CE-${desktopPackage.version}-x64.zip`);
-const asarBin = path.join(repoRoot, 'node_modules/.bin/asar');
 const verifyAsarRequiresScript = path.join(desktopDir, 'scripts', 'verify-asar-relative-requires.js');
 
 function fail(message) {
@@ -42,12 +43,15 @@ function run(command, args, options = {}) {
   });
 }
 
+function normalizeAsarEntry(entry) {
+  return entry.replace(/^(?:pack|unpack)\s*:\s*/, '');
+}
+
 function verifyAsar() {
   requireFile(asarPath);
-  requireFile(asarBin);
   if (process.exitCode) return;
 
-  const entries = run(asarBin, ['list', asarPath]).split(/\r?\n/).filter(Boolean);
+  const entries = asar.listPackage(asarPath, { isPack: true }).map(normalizeAsarEntry);
   const requiredEntries = [
     '/dist-electron/core/src/lib/paths.js',
     '/dist-electron/core/src/lib/integrations/pi-agent/display-content.js',
@@ -56,6 +60,8 @@ function verifyAsar() {
     '/dist-electron/core/src/lib/integrations/pi-agent/tools/loop-detector.js',
     '/dist-electron/core/src/lib/integrations/pi-agent/tools/schedule-tools.js',
     '/dist-electron/desktop/src/main/main.js',
+    '/node_modules/@mariozechner/agent/index.js',
+    '/node_modules/@mariozechner/pi-agent-core/dist/index.js',
   ];
 
   for (const entry of requiredEntries) {
@@ -71,15 +77,14 @@ function verifyAsar() {
     'dist-electron/core/src/lib/integrations/pi-agent/tools/schedule-tools.js',
   ];
 
-  for (const modulePath of modules) {
-    const outputPath = path.join(smokeDir, modulePath);
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    fs.writeFileSync(outputPath, run(asarBin, ['extract-file', asarPath, modulePath]));
-  }
+  asar.extractAll(asarPath, smokeDir);
 
+  const smokeRequire = createRequire(path.join(smokeDir, 'package.json'));
   for (const modulePath of modules) {
-    require(path.join(smokeDir, modulePath));
+    smokeRequire.resolve(path.join(smokeDir, modulePath));
   }
+  smokeRequire.resolve('@mariozechner/agent');
+  smokeRequire.resolve('@mariozechner/pi-agent-core');
 
   run(process.execPath, [verifyAsarRequiresScript], {
     env: {
@@ -100,6 +105,8 @@ function verifyResources() {
     'agent-worker/agent-worker.mjs',
     'agent-worker/core/lib/integrations/pi-agent/tools/loop-detector.js',
     'agent-worker/core/lib/integrations/pi-agent/tools/schedule-tools.js',
+    'app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime_binding.node',
+    'app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime.dll',
   ];
 
   for (const relativePath of requiredFiles) {
@@ -125,6 +132,8 @@ function verifyWindowsZip() {
     '  "resources/web/packages/web/node_modules/styled-jsx/package.json",',
     '  "resources/agent-worker/core/lib/integrations/pi-agent/tools/loop-detector.js",',
     '  "resources/agent-worker/core/lib/integrations/pi-agent/tools/schedule-tools.js",',
+    '  "resources/app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime_binding.node",',
+    '  "resources/app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime.dll",',
     ']',
     'with zipfile.ZipFile(zip_path) as archive:',
     '    names = archive.namelist()',

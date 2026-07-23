@@ -5,7 +5,7 @@
  * 让角色在不同阶段展现不同的行为特征。
  */
 
-import type { AgentMessage } from '@mariozechner/agent/dist/types.js';
+import type { AgentMessage } from '@mariozechner/agent';
 
 // ============================================================================
 // 类型定义

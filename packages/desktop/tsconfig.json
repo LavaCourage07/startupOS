@@ -4,6 +4,7 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "outDir": "../../dist-electron",
+    "types": ["node"],
     "baseUrl": ".",
     "paths": {
       "@originos/core": ["../core/src/index.ts"],

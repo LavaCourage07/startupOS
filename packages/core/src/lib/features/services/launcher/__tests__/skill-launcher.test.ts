@@ -16,13 +16,13 @@ class TestSkillLauncher extends SkillLauncher {
 }
 
 describe('SkillLauncher', () => {
-  it('loads bundled skills from data skills and defaults output dir to working dir', async () => {
+  it('loads bundled template skills without copying definitions into data skills', async () => {
     const originalRoot = getMonorepoRoot();
     const originalDataRoot = process.env.DATA_ROOT;
     const tempRoot = mkdtempSync(path.join(tmpdir(), 'originos-skill-launcher-'));
     const monorepoRoot = path.join(tempRoot, 'repo');
     const dataRoot = path.join(tempRoot, 'data');
-    const bundledSkillDir = path.join(monorepoRoot, 'skills', 'windows-skill');
+    const bundledSkillDir = path.join(monorepoRoot, 'templates', 'skills', 'windows-skill');
     mkdirSync(bundledSkillDir, { recursive: true });
     writeFileSync(
       path.join(bundledSkillDir, 'SKILL.md'),
@@ -50,10 +50,11 @@ describe('SkillLauncher', () => {
 
       expect(result.success).toBe(true);
       expect(result.baseDir).toBe(expectedWorkingDir);
+      expect(result.systemPrompt).toContain(`Skill source directory: ${bundledSkillDir}`);
       expect(result.systemPrompt).toContain(`Write artifacts to ${expectedWorkingDir}.`);
       expect(result.systemPrompt).not.toContain('${OUTPUT_DIR}');
       expect(result.systemPrompt).not.toContain('/workspace');
-      expect(existsSync(path.join(expectedWorkingDir, 'SKILL.md'))).toBe(true);
+      expect(existsSync(path.join(expectedWorkingDir, 'SKILL.md'))).toBe(false);
     } finally {
       setMonorepoRoot(originalRoot);
       if (originalDataRoot === undefined) {
@@ -70,7 +71,7 @@ describe('SkillLauncher', () => {
     const tempRoot = mkdtempSync(path.join(tmpdir(), 'originos-skill-launcher-'));
     const monorepoRoot = path.join(tempRoot, 'repo');
     const dataRoot = path.join(tempRoot, 'data');
-    const bundledSkillDir = path.join(monorepoRoot, 'skills', 'windows-skill');
+    const bundledSkillDir = path.join(monorepoRoot, 'templates', 'skills', 'windows-skill');
     mkdirSync(bundledSkillDir, { recursive: true });
     writeFileSync(
       path.join(bundledSkillDir, 'SKILL.md'),

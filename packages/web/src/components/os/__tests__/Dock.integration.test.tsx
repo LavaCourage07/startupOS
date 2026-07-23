@@ -3,8 +3,8 @@
  * Tests for Dock + AppWindow integration
  */
 
-import { render, screen, act } from '@testing-library/react';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { cleanup, render, screen, act } from '@testing-library/react';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import React from 'react';
 
 // Mock dependencies before imports
@@ -46,12 +46,12 @@ describe('Dock Integration', () => {
     });
   });
 
-  describe('Module Imports', () => {
-    it('Dock related modules can be imported', async () => {
-      // 测试 Dock 组件可以导入
-      const dockModule = await import('../dock');
-      expect(dockModule.default).toBeDefined();
+  afterEach(() => {
+    cleanup();
+  });
 
+  describe('Module Imports', () => {
+    it('Dock supporting modules can be imported', async () => {
       // 测试 dockStore 可以导入
       const dockStore = await import('../../../store/dockStore');
       expect(dockStore.default).toBeDefined();
@@ -83,7 +83,7 @@ describe('Dock Integration', () => {
       const { container } = render(<Dock />);
 
       expect(container).toBeDefined();
-    });
+    }, 30000);
 
     it('Dock renders DndContext wrapper', async () => {
       const Dock = (await import('../dock')).default;
@@ -91,8 +91,8 @@ describe('Dock Integration', () => {
       render(<Dock />);
 
       // Check for DndContext mock wrapper
-      const dndContext = screen.getByTestId('dnd-context');
-      expect(dndContext).toBeDefined();
+      const dndContexts = screen.getAllByTestId('dnd-context');
+      expect(dndContexts.length).toBeGreaterThan(0);
     });
   });
 

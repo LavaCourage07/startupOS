@@ -3,6 +3,7 @@
 import { useRef, useEffect } from 'react';
 import { Loader2, Wrench } from 'lucide-react';
 import { cn } from '@originos/core/lib/utils';
+import { sanitizeAgentDisplayContent } from '@originos/core/lib/integrations/pi-agent/display-content';
 import ToolExecutionFrame, { type ToolExecution } from '@/components/os/agent-dialog/ToolExecutionFrame';
 import { MarkdownContent, normalizeAskUserQuestion, parseAskUserQuestion, removeYamlBlock, AskUserQuestionComponent, type ChatMessageData } from '@/components/ui/chat-message';
 
@@ -155,13 +156,15 @@ export function ChatMessageList({
           );
         }
 
+        const safeContent = sanitizeAgentDisplayContent(msg.content);
+
         // Skip empty non-streaming assistant messages
-        if (!msg.content && !msg.isStreaming) return null;
+        if (!safeContent && !msg.isStreaming) return null;
 
         // Parse AskUserQuestion
-        const parsedQuestion = onQuestionAnswer ? parseAskUserQuestion(msg.content) : null;
+        const parsedQuestion = onQuestionAnswer ? parseAskUserQuestion(safeContent) : null;
         const isAnswered = answeredQuestions.has(index);
-        const displayContent = parsedQuestion ? removeYamlBlock(msg.content) : msg.content;
+        const displayContent = parsedQuestion ? removeYamlBlock(safeContent) : safeContent;
 
         return (
           <div key={key} className="flex min-w-0 justify-start gap-2 items-start">

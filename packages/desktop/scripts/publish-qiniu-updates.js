@@ -13,6 +13,7 @@ const desktopRoot = path.resolve(__dirname, '..');
 const desktopPackage = require('../package.json');
 const version = desktopPackage.version;
 const releaseDir = path.join(repoRoot, 'release');
+const MIN_RELEASE_PACKAGE_BYTES = 1024 * 1024;
 
 function loadEnvFiles() {
   const envFiles = [
@@ -66,6 +67,15 @@ function assertFile(filePath) {
   if (!fs.existsSync(filePath)) {
     throw new Error(`Missing release artifact: ${filePath}`);
   }
+}
+
+function hasReleasePackage(fileName) {
+  const filePath = path.join(releaseDir, fileName);
+  if (!fs.existsSync(filePath)) {
+    return false;
+  }
+
+  return fs.statSync(filePath).size >= MIN_RELEASE_PACKAGE_BYTES;
 }
 
 function sha512Base64(filePath) {
@@ -136,6 +146,11 @@ function generateUpdateMetadata(platform) {
   const stableName = `stable-${platform}.yml`;
   fs.copyFileSync(metadataPath, path.join(releaseDir, stableName));
 
+  if (platform === 'win') {
+    fs.copyFileSync(metadataPath, path.join(releaseDir, 'latest.yml'));
+    fs.copyFileSync(metadataPath, path.join(releaseDir, 'stable.yml'));
+  }
+
   return metadataPath;
 }
 
@@ -190,99 +205,66 @@ function uploadFile({ mac, config, bucket, key, filePath, overwrite, cacheContro
 
 function buildArtifacts(metadataFiles, metadataOnly, force) {
   const files = [];
+  const pushArtifact = (fileName, overwrite = force) => {
+    files.push({
+      fileName,
+      filePath: path.join(releaseDir, fileName),
+      overwrite,
+    });
+  };
+  const pushOptionalArtifact = (fileName, overwrite = force) => {
+    if (fs.existsSync(path.join(releaseDir, fileName))) {
+      pushArtifact(fileName, overwrite);
+    }
+  };
 
   if (!metadataOnly) {
     // macOS 版本
     for (const arch of ['arm64', 'x64']) {
       const dmg = `OriginOS CE-${version}-${arch}.dmg`;
-      const dmgPath = path.join(releaseDir, dmg);
-      if (fs.existsSync(dmgPath)) {
-        files.push({
-          fileName: dmg,
-          filePath: dmgPath,
-          overwrite: force,
-        });
-        files.push({
-          fileName: `${dmg}.blockmap`,
-          filePath: path.join(releaseDir, `${dmg}.blockmap`),
-          overwrite: force,
-        });
-      }
+      if (hasReleasePackage(dmg)) {
+        pushArtifact(dmg);
+        pushOptionalArtifact(`${dmg}.blockmap`);
 
-      // ZIP 格式（electron-updater 自动更新需要）
-      const zip = `OriginOS CE-${version}-${arch}.zip`;
-      const zipPath = path.join(releaseDir, zip);
-      if (fs.existsSync(zipPath)) {
-        files.push({
-          fileName: zip,
-          filePath: zipPath,
-          overwrite: force,
-        });
-        files.push({
-          fileName: `${zip}.blockmap`,
-          filePath: path.join(releaseDir, `${zip}.blockmap`),
-          overwrite: force,
-        });
+        // ZIP 格式（electron-updater 自动更新需要）。macOS x64 zip 与
+        // Windows zip 文件名相同，只有对应 dmg 存在时才归类为 macOS。
+        const zip = `OriginOS CE-${version}-${arch}.zip`;
+        if (hasReleasePackage(zip)) {
+          pushArtifact(zip);
+          pushOptionalArtifact(`${zip}.blockmap`);
+        }
       }
     }
 
     // Windows 版本
     const exe = `OriginOS CE-${version}-x64.exe`;
-    const exePath = path.join(releaseDir, exe);
-    if (fs.existsSync(exePath)) {
-      files.push({
-        fileName: exe,
-        filePath: exePath,
-        overwrite: force,
-      });
-      files.push({
-        fileName: `${exe}.blockmap`,
-        filePath: path.join(releaseDir, `${exe}.blockmap`),
-        overwrite: force,
-      });
+    if (hasReleasePackage(exe)) {
+      pushArtifact(exe);
+      pushOptionalArtifact(`${exe}.blockmap`);
     }
 
     // Windows ZIP（electron-updater 需要）
     const winZip = `OriginOS CE-${version}-x64.zip`;
-    const winZipPath = path.join(releaseDir, winZip);
-    if (fs.existsSync(winZipPath)) {
-      // 检查是否和 macOS x64 zip 同名（macOS 也有 x64 zip）
-      const macX64Zip = `OriginOS CE-${version}-x64.zip`;
-      const macX64ZipPath = path.join(releaseDir, macX64Zip);
-      if (!fs.existsSync(macX64ZipPath) || winZipPath === macX64ZipPath) {
-        // Windows zip 和 macOS x64 zip 是同一个文件，不需要重复添加
-      } else {
-        files.push({
-          fileName: winZip,
-          filePath: winZipPath,
-          overwrite: force,
-        });
-        files.push({
-          fileName: `${winZip}.blockmap`,
-          filePath: path.join(releaseDir, `${winZip}.blockmap`),
-          overwrite: force,
-        });
-      }
+    if (hasReleasePackage(winZip)) {
+      pushArtifact(winZip);
+      pushOptionalArtifact(`${winZip}.blockmap`);
     }
   }
 
   // 添加元数据文件
   for (const metadataFile of metadataFiles) {
     const metadataName = path.basename(metadataFile);
-    files.push({
-      fileName: metadataName,
-      filePath: metadataFile,
-      overwrite: true,
-    });
+    pushArtifact(metadataName, true);
 
     // 添加 stable 版本
     const stableName = metadataName.replace('latest-', 'stable-');
     if (stableName !== metadataName) {
-      files.push({
-        fileName: stableName,
-        filePath: path.join(releaseDir, stableName),
-        overwrite: true,
-      });
+      pushArtifact(stableName, true);
+    }
+
+    if (metadataName === 'latest-win.yml') {
+      pushArtifact('latest.yml', true);
+      pushArtifact('stable.yml', true);
     }
   }
 
@@ -315,6 +297,7 @@ async function main() {
   const metadataOnly = process.env.QINIU_METADATA_ONLY === '1';
   const force = process.env.QINIU_FORCE === '1';
   const resumeExisting = process.env.QINIU_RESUME_EXISTING === '1';
+  const skipLocalPackageVerify = process.env.QINIU_SKIP_LOCAL_PACKAGE_VERIFY === '1';
 
   const config = new qiniu.conf.Config();
   config.regionsProvider = qiniu.httpc.Region.fromRegionId(region);
@@ -322,15 +305,20 @@ async function main() {
   const bucketManager = new qiniu.rs.BucketManager(mac, config);
 
   // 检测有哪些平台的构建产物
-  const hasMacArm64 = fs.existsSync(path.join(releaseDir, `OriginOS CE-${version}-arm64.dmg`));
-  const hasMacX64 = fs.existsSync(path.join(releaseDir, `OriginOS CE-${version}-x64.dmg`));
-  const hasWinExe = fs.existsSync(path.join(releaseDir, `OriginOS CE-${version}-x64.exe`));
-  const hasWinZip = fs.existsSync(path.join(releaseDir, `OriginOS CE-${version}-x64.zip`));
+  const hasMacArm64 = hasReleasePackage(`OriginOS CE-${version}-arm64.dmg`);
+  const hasMacX64 = hasReleasePackage(`OriginOS CE-${version}-x64.dmg`);
+  const hasMacUpdateZip =
+    hasMacArm64 &&
+    hasMacX64 &&
+    hasReleasePackage(`OriginOS CE-${version}-arm64.zip`) &&
+    hasReleasePackage(`OriginOS CE-${version}-x64.zip`);
+  const hasWinExe = hasReleasePackage(`OriginOS CE-${version}-x64.exe`);
+  const hasWinZip = hasReleasePackage(`OriginOS CE-${version}-x64.zip`);
 
   const metadataFiles = [];
 
   // 生成 macOS 元数据
-  if (hasMacArm64 || hasMacX64) {
+  if (hasMacUpdateZip) {
     console.log('[publish-qiniu-updates] generating macOS update metadata');
     metadataFiles.push(generateUpdateMetadata('mac'));
   }
@@ -347,7 +335,7 @@ async function main() {
     assertFile(artifact.filePath);
   }
 
-  if (!metadataOnly) {
+  if (!metadataOnly && !skipLocalPackageVerify) {
     if (hasMacArm64 || hasMacX64) {
       verifyMacSigning();
     }
@@ -365,6 +353,7 @@ async function main() {
     metadataOnly,
     force,
     resumeExisting,
+    skipLocalPackageVerify,
     platforms: {
       mac: hasMacArm64 || hasMacX64,
       windows: hasWinExe || hasWinZip,
@@ -409,13 +398,38 @@ async function main() {
     }
   }
 
-  // Notify the official website release service
-  await notifyReleaseService(version, baseUrl, prefix);
+  // Notify the official website release service only after package URLs are reachable.
+  await notifyReleaseService(version, baseUrl, prefix, { skipCdnVerify });
 
   console.log('[publish-qiniu-updates] published successfully');
 }
 
-async function notifyReleaseService(version, baseUrl, prefix) {
+function appendDownloadUrl(releaseData, fieldName, cdnBase, fileName) {
+  if (!hasReleasePackage(fileName)) {
+    return false;
+  }
+
+  releaseData[fieldName] = new URL(fileName, cdnBase).toString();
+  return true;
+}
+
+function requireDownloadUrl(releaseData, fieldName, cdnBase, fileNames) {
+  const candidates = Array.isArray(fileNames) ? fileNames : [fileNames];
+
+  for (const fileName of candidates) {
+    if (appendDownloadUrl(releaseData, fieldName, cdnBase, fileName)) {
+      return;
+    }
+  }
+
+  throw new Error(
+    `Missing release package for ${fieldName}. Expected one of: ${candidates
+      .map((fileName) => path.join(releaseDir, fileName))
+      .join(', ')}`
+  );
+}
+
+async function notifyReleaseService(version, baseUrl, prefix, options = {}) {
   const releaseApiUrl = process.env.ORIGINOS_RELEASE_API_URL;
   const releaseApiKey = process.env.ORIGINOS_RELEASE_API_KEY;
 
@@ -435,17 +449,35 @@ async function notifyReleaseService(version, baseUrl, prefix) {
 
   const releaseData = {
     version: version,
-    win_x64_url: new URL(`OriginOS CE-${version}-x64.exe`, cdnBase).toString(),
-    mac_arm64_url: new URL(`OriginOS CE-${version}-arm64.dmg`, cdnBase).toString(),
-    mac_x64_url: new URL(`OriginOS CE-${version}-x64.dmg`, cdnBase).toString(),
     release_summary: releaseNotes.summary,
     release_notes: releaseNotes.markdown,
     changelog: releaseNotes,
   };
 
+  requireDownloadUrl(releaseData, 'win_x64_url', cdnBase, [
+    `OriginOS CE-${version}-x64.exe`,
+    `OriginOS CE-${version}-x64.zip`,
+  ]);
+  requireDownloadUrl(releaseData, 'mac_arm64_url', cdnBase, `OriginOS CE-${version}-arm64.dmg`);
+  requireDownloadUrl(releaseData, 'mac_x64_url', cdnBase, `OriginOS CE-${version}-x64.dmg`);
+
+  const downloadFields = Object.entries(releaseData).filter(([key]) => key.endsWith('_url'));
+  if (downloadFields.length === 0) {
+    console.warn('[publish-qiniu-updates] no release packages found, skipping release service notification');
+    return;
+  }
+
+  if (!options.skipCdnVerify) {
+    for (const [fieldName, url] of downloadFields) {
+      console.log(`[publish-qiniu-updates] verifying release package ${fieldName} ${url}`);
+      await verifyCdnUrl(url);
+    }
+  }
+
   console.log('[publish-qiniu-updates] notifying release service', {
     url: releaseApiUrl,
     version: releaseData.version,
+    downloadFields: downloadFields.map(([key]) => key),
     changelogItems: releaseNotes.items.length,
   });
 

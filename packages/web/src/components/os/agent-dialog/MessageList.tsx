@@ -4,7 +4,6 @@
  * Uses the shared ChatMessageList component.
  */
 
-import { ThinkingProcess } from '@/components/os/cui/thinking';
 import type { ThinkingData } from '@originos/core/types';
 import type { ChatMessageItem } from '@/components/ui/chat';
 import type { ToolExecution } from '@/components/os/agent-dialog/ToolExecutionFrame';
@@ -32,23 +31,6 @@ export default function MessageList({ messages, isLoading, toolExecutions, onQue
       toolExecutions={toolExecutions}
       onQuestionAnswer={onQuestionAnswer}
       answeredQuestions={answeredQuestions}
-      assistantMessageExtra={(msg) => {
-        // Render thinking process for assistant messages with thinking data
-        if (msg.role === 'assistant' && (msg as Message).thinking) {
-          return (
-            <ThinkingProcess
-              thinking={(msg as Message).thinking!}
-              preference={{
-                displayMode: 'user-choice',
-                autoExpandStreaming: false,
-                showToolCalls: true,
-                showConfidence: false,
-              }}
-            />
-          );
-        }
-        return null;
-      }}
     />
   );
 }

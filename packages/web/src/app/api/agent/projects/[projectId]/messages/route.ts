@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { persistentAgentManager } from '@originos/core/lib/integrations/pi-agent/persistent-agent-manager';
+import { sanitizeAgentDisplayContent } from '@originos/core/lib/integrations/pi-agent/display-content';
 import { getVisibleStreamDelta, reconcileFinalStreamContent } from '@originos/core/lib/integrations/pi-agent/stream-dedupe';
 import { getRuntimeAgent, setRuntimeAgent, type ProjectRuntimeAgent } from '@/app/api/agent/_runtime-agent-registry';
 import { getGlobalSpawner } from '@originos/core/modules/collaboration-runtime/sandbox/agent-spawner';
@@ -35,18 +36,7 @@ interface StreamMessage {
  * 提取文本内容
  */
 function extractTextContent(content: unknown): string {
-  if (typeof content === 'string') {
-    return content;
-  }
-  if (Array.isArray(content)) {
-    return content
-      .filter((block): block is { type: 'text'; text: string } =>
-        block && block.type === 'text' && typeof block.text === 'string'
-      )
-      .map(block => block.text)
-      .join('');
-  }
-  return '';
+  return sanitizeAgentDisplayContent(content);
 }
 
 /**
@@ -219,7 +209,6 @@ function createEventStream(
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let assistantContent = '';
-  let thinkingContent = '';
 
   return new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -247,7 +236,6 @@ function createEventStream(
         try {
           switch (event.type) {
             case 'thinking_delta':
-              thinkingContent += event['delta'] || '';
               break;
             case 'thinking_end':
               break;
@@ -255,7 +243,7 @@ function createEventStream(
             case 'message_update':
               if (event['assistantMessageEvent']?.type === 'text_delta' &&
                   typeof event['assistantMessageEvent'].delta === 'string') {
-                const delta = event['assistantMessageEvent'].delta;
+                const delta = sanitizeAgentDisplayContent(event['assistantMessageEvent'].delta);
                 const merged = getVisibleStreamDelta(assistantContent, delta);
                 assistantContent = merged.content;
                 if (merged.delta) {
@@ -525,7 +513,11 @@ function createRuntimeEventStream(
               // was already forwarded — only pass genuinely new content.
               const delta = event.payload?.['delta'];
               const text = event.payload?.['text'];
-              const newText = typeof delta === 'string' ? delta : typeof text === 'string' ? text : null;
+              const newText = typeof delta === 'string'
+                ? sanitizeAgentDisplayContent(delta)
+                : typeof text === 'string'
+                  ? sanitizeAgentDisplayContent(text)
+                  : null;
               if (newText) {
                 const merged = getVisibleStreamDelta(sentTextAccumulator, newText);
                 sentTextAccumulator = merged.content;
@@ -537,7 +529,7 @@ function createRuntimeEventStream(
             }
             case 'ASSISTANT_MESSAGE':
               if (event.payload?.['content']) {
-                const content = String(event.payload['content']);
+                const content = sanitizeAgentDisplayContent(String(event.payload['content']));
                 latestCompleteMessage = content;
                 assistantContent.push(content);
                 enqueueEvent({ type: 'assistant_message', data: { content, isStreaming: false } });
@@ -555,7 +547,7 @@ function createRuntimeEventStream(
                     (b: any) => b && b.type === 'text' && b.text
                   );
                   if (textBlock) {
-                    latestCompleteMessage = textBlock.text;
+                    latestCompleteMessage = sanitizeAgentDisplayContent(textBlock.text);
                   }
                 }
                 if (!latestCompleteMessage) {
@@ -584,7 +576,7 @@ function createRuntimeEventStream(
                     (b: any) => b && b.type === 'text' && b.text
                   );
                   if (textBlock) {
-                    fullContent = reconcileFinalStreamContent(fullContent, textBlock.text);
+                    fullContent = reconcileFinalStreamContent(fullContent, sanitizeAgentDisplayContent(textBlock.text));
                   }
                 }
                 if (!fullContent) {

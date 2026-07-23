@@ -25,10 +25,10 @@ function joinBlockTexts(
     })
     .filter(Boolean)
     .join('');
-  return type === 'text' ? stripThinkingMarkup(text) : text;
+  return type === 'text' ? stripHiddenReasoning(text) : text;
 }
 
-function stripThinkingMarkup(text: string): string {
+export function stripHiddenReasoning(text: string): string {
   return text
     .replace(/<think(?:ing)?\b[^>]*>[\s\S]*?<\/think(?:ing)?>/gi, '')
     .trim();
@@ -39,7 +39,7 @@ export function extractDisplayContent(
   options: ExtractDisplayContentOptions = {},
 ): string {
   if (typeof content === 'string') {
-    return stripThinkingMarkup(content);
+    return stripHiddenReasoning(content);
   }
   if (!Array.isArray(content)) {
     return '';
@@ -73,4 +73,30 @@ export function extractDisplayContent(
   return typeof thinkingBlock.thinking === 'string'
     ? thinkingBlock.thinking
     : '';
+}
+
+export interface AgentDisplayMessageLike {
+  role?: unknown;
+  content?: unknown;
+  metadata?: unknown;
+}
+
+export interface SanitizedAgentDisplayMessage {
+  role?: unknown;
+  content: string;
+  metadata?: unknown;
+}
+
+export function sanitizeAgentDisplayContent(content: unknown): string {
+  return extractDisplayContent(content);
+}
+
+export function sanitizeAgentDisplayMessage<T extends AgentDisplayMessageLike>(
+  message: T,
+): T & SanitizedAgentDisplayMessage {
+  const { metadata: _metadata, ...rest } = message;
+  return {
+    ...rest,
+    content: sanitizeAgentDisplayContent(message.content),
+  } as T & SanitizedAgentDisplayMessage;
 }

@@ -1,6 +1,6 @@
 {
   "name": "@originos/desktop",
-  "version": "0.1.15",
+  "version": "0.1.17",
   "private": true,
   "main": "dist-electron/desktop/src/main/main.js",
   "scripts": {
@@ -22,6 +22,7 @@
     "dist:win": "ORIGINOS_WINDOWS_SHORT_ZIP=1 pnpm build:app && electron-builder --config electron-builder.yml --win --publish never",
     "dist:linux": "pnpm build:app && electron-builder --config electron-builder.yml --linux --publish never",
     "verify:win-package": "NODE_OPTIONS= node scripts/verify-windows-package.js",
+    "verify:release-artifacts": "NODE_OPTIONS= node scripts/verify-release-artifacts.js",
     "verify:asar-requires": "NODE_OPTIONS= node scripts/verify-asar-relative-requires.js"
   },
   "dependencies": {

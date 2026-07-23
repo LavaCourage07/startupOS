@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { agentSessionService } from '@originos/core/lib/features/agent';
 import { agentManager } from '@originos/core/lib/integrations/pi-agent/agent-manager';
-import { extractDisplayContent } from '@originos/core/lib/integrations/pi-agent/display-content';
+import { sanitizeAgentDisplayContent } from '@originos/core/lib/integrations/pi-agent/display-content';
 import { getVisibleStreamDelta, reconcileFinalStreamContent } from '@originos/core/lib/integrations/pi-agent/stream-dedupe';
 import type { ApiResponse } from '@originos/core/types';
 import type { AgentMessage } from '@originos/core/types';
@@ -40,7 +40,7 @@ interface StreamMessage {
  * Content can be a string or array of TextContent/ImageContent objects
  */
 function extractTextContent(content: unknown): string {
-  return extractDisplayContent(content);
+  return sanitizeAgentDisplayContent(content);
 }
 
 export async function POST(
@@ -149,19 +149,19 @@ export async function POST(
         switch (event.type) {
           case 'text_delta':
             if (event['delta']) {
-              assistantContent = getVisibleStreamDelta(assistantContent, event['delta'] as string).content;
+              assistantContent = getVisibleStreamDelta(assistantContent, sanitizeAgentDisplayContent(event['delta'] as string)).content;
             }
             break;
           case 'message_delta':
             if ((event as any).delta?.text) {
-              assistantContent = getVisibleStreamDelta(assistantContent, (event as any).delta.text).content;
+              assistantContent = getVisibleStreamDelta(assistantContent, sanitizeAgentDisplayContent((event as any).delta.text)).content;
             }
             break;
           case 'message_update':
             if (event.assistantMessageEvent) {
               const subEvent = event.assistantMessageEvent as any;
               if (subEvent.type === 'text_delta' && subEvent.delta) {
-                assistantContent = getVisibleStreamDelta(assistantContent, subEvent.delta).content;
+                assistantContent = getVisibleStreamDelta(assistantContent, sanitizeAgentDisplayContent(subEvent.delta)).content;
               }
             }
             if ((event as any).message?.content && (event as any).message?.role === 'assistant') {
@@ -377,7 +377,11 @@ function createRuntimeEventStream(
           case 'MESSAGE_SENT': {
             const text = event.payload?.['text'];
             const delta = event.payload?.['delta'];
-            const newText = typeof delta === 'string' ? delta : typeof text === 'string' ? text : null;
+            const newText = typeof delta === 'string'
+              ? sanitizeAgentDisplayContent(delta)
+              : typeof text === 'string'
+                ? sanitizeAgentDisplayContent(text)
+                : null;
             if (newText) {
               const merged = getVisibleStreamDelta(sentTextAccumulator, newText);
               sentTextAccumulator = merged.content;
@@ -389,7 +393,7 @@ function createRuntimeEventStream(
           }
           case 'ASSISTANT_MESSAGE':
             if (event.payload?.['content']) {
-              const content = String(event.payload['content']);
+              const content = sanitizeAgentDisplayContent(String(event.payload['content']));
               latestCompleteMessage = content;
               if (content && content !== lastAssistantMessageContent) {
                 lastAssistantMessageContent = content;
@@ -407,7 +411,7 @@ function createRuntimeEventStream(
                 const textBlock = msg.content.find(
                   (b: any) => b && b.type === 'text' && b.text
                 );
-                if (textBlock) latestCompleteMessage = textBlock.text;
+                if (textBlock) latestCompleteMessage = sanitizeAgentDisplayContent(textBlock.text);
               }
               if (!latestCompleteMessage) {
                 latestCompleteMessage = extractTextContent(msg.content) || '';
@@ -429,7 +433,7 @@ function createRuntimeEventStream(
                 const textBlock = lastAssistantMsg.content.find(
                   (b: any) => b && b.type === 'text' && b.text
                 );
-                if (textBlock) fullContent = reconcileFinalStreamContent(fullContent, textBlock.text);
+                if (textBlock) fullContent = reconcileFinalStreamContent(fullContent, sanitizeAgentDisplayContent(textBlock.text));
               }
               if (!fullContent) {
                 fullContent = reconcileFinalStreamContent(fullContent, extractTextContent(lastAssistantMsg.content));
@@ -509,8 +513,6 @@ function createInProcessEventStream(
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   let assistantContent = '';
-  let thinkingContent = '';
-  let thinkingSignature: string | undefined;
   let assistantMessageSent = false;
   let lastSentDelta = '';
 
@@ -530,15 +532,13 @@ function createInProcessEventStream(
           switch (event.type) {
             // Silently accumulate thinking (not pushed to client)
             case 'thinking_delta':
-              thinkingContent += (event as any)['delta'] || '';
               break;
             case 'thinking_end':
-              thinkingSignature = (event as any)['signature'];
               break;
 
             // Runtime mode bridge emits top-level text_delta events
             case 'text_delta': {
-              const delta = (event as any)['delta'] as string | undefined;
+              const delta = sanitizeAgentDisplayContent((event as any)['delta'] as string | undefined);
               if (typeof delta === 'string') {
                 if (delta === lastSentDelta) break;
                 const merged = getVisibleStreamDelta(assistantContent, delta);
@@ -557,7 +557,7 @@ function createInProcessEventStream(
             case 'message_update': {
               const asm = event['assistantMessageEvent'] as { type?: string; delta?: string } | undefined;
               if (asm?.type === 'text_delta' && typeof asm.delta === 'string') {
-                const delta = asm.delta;
+                const delta = sanitizeAgentDisplayContent(asm.delta);
                 if (delta === lastSentDelta) break;
                 const merged = getVisibleStreamDelta(assistantContent, delta);
                 assistantContent = merged.content;
@@ -652,13 +652,8 @@ function createInProcessEventStream(
         if (assistantContent) {
           const messageData: Omit<AgentMessage, 'id' | 'timestamp'> = {
             role: 'assistant',
-            content: assistantContent,
+            content: sanitizeAgentDisplayContent(assistantContent),
           };
-          if (thinkingContent) {
-            messageData.metadata = {
-              thinking: { content: thinkingContent, signature: thinkingSignature, status: 'completed' },
-            };
-          }
           await agentSessionService.addMessage(sessionId, messageData, projectId);
         }
 

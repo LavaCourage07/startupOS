@@ -1,7 +1,7 @@
 /**
  * Skill Launcher
  *
- * 启动流程（data/skills/{code}/ 或 .claude/skills/）：
+ * 启动流程（data/skills/{code}/ 或 templates/skills/{code}/）：
  * 1. 读取 SKILL.md → 解析 frontmatter + body
  * 2. 提取依赖声明（dependencies / prerequisites），注入系统提示词
  * 3. 构建系统提示词（含依赖安装指引）
@@ -17,7 +17,7 @@ import { getToolRegistry } from '../../../../lib/integrations/pi-agent/tools/reg
 import { buildPromptMemorySections } from '../../../../lib/integrations/pi-agent/memory-consumption';
 import { appendGlobalUserPreferencesPrompt } from '../../../../lib/integrations/pi-agent/user-preferences';
 import { getDataRoot } from '../../../paths';
-import { syncBundledSkillsToUserDirectory } from '../../../../lib/integrations/pi-agent/core/skills';
+import { getBundledSkillDir } from '../../../../lib/integrations/pi-agent/core/skills';
 
 const MAX_TOOL_DESC_CHARS = 120;
 
@@ -134,22 +134,24 @@ function parseSkillFrontmatter(content: string): {
 function buildSkillSystemPrompt(
   skillName: string,
   skillContent: string,
-  baseDir: string,
+  agentWorkingDir: string,
+  skillSourceDir: string,
   dependencies: string[],
   prerequisites: string[],
   outputDir?: string,
 ): string {
   const lines: string[] = [];
 
-  // Base directory (working directory for bash and cognitive writes)
-  lines.push(`Base directory for this skill: ${baseDir}`);
+  // Working directory for bash/file/cognitive writes.
+  lines.push(`Working directory for this skill: ${agentWorkingDir}`);
   lines.push('');
-  lines.push('You are running in the skill\'s directory. All relative paths for bash commands and cognitive files are resolved from this directory.');
-  lines.push('You can also use `${CLAUDE_SKILL_DIR}` in shell commands to reference this directory.');
+  lines.push('All relative paths for bash commands, file tools, and cognitive files are resolved from this writable working directory.');
+  lines.push(`Skill source directory: ${skillSourceDir}`);
+  lines.push('Use `${CLAUDE_SKILL_DIR}` only when you need to read bundled skill reference files or assets.');
   lines.push('');
 
   // Output directory (for creating artifacts like agents)
-  if (outputDir && outputDir !== baseDir) {
+  if (outputDir && outputDir !== agentWorkingDir) {
     lines.push(`Output directory for artifacts: ${outputDir}`);
     lines.push('');
     lines.push('Use `${OUTPUT_DIR}` only when you explicitly want to create exported artifacts under that directory.');
@@ -317,13 +319,13 @@ function injectInheritedMemory(
  * 查找 SKILL.md 文件的路径
  */
 function findSkillFile(skillCode: string): { skillMdPath: string; baseDir: string } | null {
-  syncBundledSkillsToUserDirectory();
   const skillDirs = [
     path.join(getDataRoot(), 'skills'),
     path.join(getDataRoot(), '.originos', 'skills'),
+    getBundledSkillDir(),
   ];
 
-  // 先尝试精确路径：data/skills/{code}/SKILL.md
+  // 先尝试精确路径：data/skills/{code}/SKILL.md 或 templates/skills/{code}/SKILL.md
   for (const base of skillDirs) {
     const dir = path.join(base, skillCode);
     const skillMd = path.join(dir, 'SKILL.md');
@@ -412,13 +414,14 @@ export class SkillLauncher extends Launcher {
         ctx.entryId,
         skillMd,
         agentWorkingDir,
+        skillInfo.baseDir,
         dependencies,
         prerequisites,
         resolvedOutputDir,
       );
       const inheritedMemory = resolveInheritedMemory(agentWorkingDir);
       const resolvedPrompt = injectInheritedMemory(systemPrompt, inheritedMemory)
-        .replace(/\$\{CLAUDE_SKILL_DIR\}/g, agentWorkingDir)
+        .replace(/\$\{CLAUDE_SKILL_DIR\}/g, skillInfo.baseDir)
         .replace(/\$\{OUTPUT_DIR\}/g, resolvedOutputDir ?? '');
 
       // 4. 创建/恢复会话

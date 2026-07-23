@@ -11,7 +11,7 @@
  * - Manage skill lifecycle and validation
  */
 
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "fs";
 import ignore from "ignore";
 import { basename, dirname, join, relative, resolve, sep } from "path";
 import { getDataRoot, getMonorepoRoot, getSkillsDataDir } from '../../../paths';
@@ -444,13 +444,13 @@ export function getDefaultSkillPaths(cwd: string): {
 	project: string;
 } {
 	return {
-		bundled: resolve(cwd, "skills"),
+		bundled: getBundledSkillDir(),
 		user: getSkillsDataDir(),
 		project: resolve(cwd, ".originos", "skills"),
 	};
 }
 
-function getBundledSkillSeedDir(): string {
+export function getBundledSkillDir(): string {
 	// 打包环境下从 extraResources 的 templates/skills 读取
 	// 开发环境下从 monorepo 根目录的 templates/skills 读取
 	const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
@@ -460,38 +460,12 @@ function getBundledSkillSeedDir(): string {
 	return join(getMonorepoRoot(), "templates", "skills");
 }
 
-function hasSkillDefinition(dir: string): boolean {
-	return existsSync(join(dir, "SKILL.md"));
-}
-
 /**
- * Seed bundled skills into the user skill directory.
- *
- * Runtime must load skills from data/skills so bundled skills and user-installed
- * skills share the same startup path. Existing user skill directories are never
- * overwritten.
+ * @deprecated Bundled template skills are loaded directly from templates/skills.
+ * This function intentionally does not copy definitions into data/skills.
  */
 export function syncBundledSkillsToUserDirectory(): void {
-	const sourceDir = getBundledSkillSeedDir();
-	if (!existsSync(sourceDir)) return;
-
-	const targetRoot = getSkillsDataDir();
-	mkdirSync(targetRoot, { recursive: true });
-
-	for (const entry of readdirSync(sourceDir, { withFileTypes: true })) {
-		if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-		const sourceSkillDir = join(sourceDir, entry.name);
-		if (!hasSkillDefinition(sourceSkillDir)) continue;
-
-		const targetSkillDir = join(targetRoot, entry.name);
-		if (existsSync(targetSkillDir)) continue;
-
-		cpSync(sourceSkillDir, targetSkillDir, {
-			recursive: true,
-			errorOnExist: false,
-			force: false,
-		});
-	}
+	return;
 }
 
 /**
@@ -540,16 +514,18 @@ export function loadSkills(options: LoadSkillsOptions = {}): LoadSkillsResult {
 	}
 
 	if (includeDefaults) {
-		syncBundledSkillsToUserDirectory();
-
-		// 用户数据目录下的技能（包含首次启动同步过来的内置技能）
+		// 用户数据目录下的技能。模板技能不会复制到这里，避免污染用户运行时目录。
 		const dataSkillsDir = join(getDataRoot(), "skills");
 		if (existsSync(dataSkillsDir)) {
 			addSkills(loadSkillsFromDir({ dir: dataSkillsDir, source: "user" }));
 		}
 
-		// Project-local skills
 		const defaults = getDefaultSkillPaths(cwd);
+		if (existsSync(defaults.bundled)) {
+			addSkills(loadSkillsFromDir({ dir: defaults.bundled, source: "bundled" }));
+		}
+
+		// Project-local skills
 		if (existsSync(defaults.project)) {
 			addSkills(loadSkillsFromDir({ dir: defaults.project, source: "project" }));
 		}
