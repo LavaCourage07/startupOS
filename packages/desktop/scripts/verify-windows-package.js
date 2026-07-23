@@ -122,37 +122,75 @@ function verifyWindowsZip() {
     return;
   }
 
-  const script = [
-    'import sys, zipfile',
-    'zip_path = sys.argv[1]',
-    'required_suffixes = [',
-    '  "resources/app.asar",',
-    '  "resources/web/packages/web/server.js",',
-    '  "resources/web/packages/web/node_modules/next/dist/server/next.js",',
-    '  "resources/web/packages/web/node_modules/styled-jsx/package.json",',
-    '  "resources/agent-worker/core/lib/integrations/pi-agent/tools/loop-detector.js",',
-    '  "resources/agent-worker/core/lib/integrations/pi-agent/tools/schedule-tools.js",',
-    '  "resources/app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime_binding.node",',
-    '  "resources/app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime.dll",',
-    ']',
-    'with zipfile.ZipFile(zip_path) as archive:',
-    '    names = archive.namelist()',
-    '    missing = [suffix for suffix in required_suffixes if not any(name == suffix or name.endswith("/" + suffix) for name in names)]',
-    '    if missing:',
-    '        print("missing " + ",".join(missing), file=sys.stderr)',
-    '        sys.exit(2)',
-    '    if any("/.pnpm/" in name for name in names):',
-    '        print("shortpath zip still contains .pnpm paths", file=sys.stderr)',
-    '        sys.exit(3)',
-    '    if any(name.startswith("__MACOSX/") for name in names):',
-    '        print("shortpath zip contains __MACOSX entries", file=sys.stderr)',
-    '        sys.exit(4)',
-    '    longest = max((len(name), name) for name in names)',
-    '    print(f"entries={len(names)} longest={longest[0]} {longest[1]}")',
-  ].join('\n');
+  const names = listZipEntries(zipPath);
+  const requiredSuffixes = [
+    'resources/app.asar',
+    'resources/web/packages/web/server.js',
+    'resources/web/packages/web/node_modules/next/dist/server/next.js',
+    'resources/web/packages/web/node_modules/styled-jsx/package.json',
+    'resources/agent-worker/core/lib/integrations/pi-agent/tools/loop-detector.js',
+    'resources/agent-worker/core/lib/integrations/pi-agent/tools/schedule-tools.js',
+    'resources/app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime_binding.node',
+    'resources/app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime.dll',
+  ];
+  const missing = requiredSuffixes.filter(
+    (suffix) => !names.some((name) => name === suffix || name.endsWith(`/${suffix}`)),
+  );
+  if (missing.length > 0) {
+    fail(`Windows zip missing ${missing.join(',')}`);
+    return;
+  }
+  if (names.some((name) => name.includes('/.pnpm/'))) {
+    fail('shortpath zip still contains .pnpm paths');
+    return;
+  }
+  if (names.some((name) => name.startsWith('__MACOSX/'))) {
+    fail('shortpath zip contains __MACOSX entries');
+    return;
+  }
 
-  const output = run('python3', ['-c', script, zipPath]).trim();
-  console.log(`[verify-windows-package] Windows zip ok ${output}`);
+  const longest = names.reduce((current, name) => (name.length > current.length ? name : current), '');
+  console.log(`[verify-windows-package] Windows zip ok entries=${names.length} longest=${longest.length} ${longest}`);
+}
+
+function listZipEntries(filePath) {
+  const buffer = fs.readFileSync(filePath);
+  const eocdOffset = findEndOfCentralDirectory(buffer);
+  const totalEntries = buffer.readUInt16LE(eocdOffset + 10);
+  const centralDirectorySize = buffer.readUInt32LE(eocdOffset + 12);
+  const centralDirectoryOffset = buffer.readUInt32LE(eocdOffset + 16);
+  const centralDirectoryEnd = centralDirectoryOffset + centralDirectorySize;
+  if (centralDirectoryEnd > buffer.length) {
+    throw new Error(`invalid ZIP central directory in ${path.relative(repoRoot, filePath)}`);
+  }
+
+  const names = [];
+  let offset = centralDirectoryOffset;
+  for (let index = 0; index < totalEntries; index += 1) {
+    if (buffer.readUInt32LE(offset) !== 0x02014b50) {
+      throw new Error(`invalid ZIP central directory header at offset ${offset}`);
+    }
+    const fileNameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const commentLength = buffer.readUInt16LE(offset + 32);
+    const fileNameStart = offset + 46;
+    const fileNameEnd = fileNameStart + fileNameLength;
+    names.push(buffer.toString('utf8', fileNameStart, fileNameEnd).replace(/\\/g, '/'));
+    offset = fileNameEnd + extraLength + commentLength;
+  }
+
+  return names;
+}
+
+function findEndOfCentralDirectory(buffer) {
+  const signature = 0x06054b50;
+  const minOffset = Math.max(0, buffer.length - 22 - 0xffff);
+  for (let offset = buffer.length - 22; offset >= minOffset; offset -= 1) {
+    if (buffer.readUInt32LE(offset) === signature) {
+      return offset;
+    }
+  }
+  throw new Error('ZIP end of central directory not found');
 }
 
 verifyAsar();
