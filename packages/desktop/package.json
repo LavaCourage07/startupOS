@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "concurrently \"pnpm --filter @originos/web dev\" \"tsc -p tsconfig.json --watch\" \"wait-on tcp:3000 ../../dist-electron/desktop/src/main/main.js && electron ../../dist-electron/desktop/src/main/main.js\"",
     "build": "tsc -p tsconfig.json",
-    "build:app": "rm -rf ../web/.next ../../dist-electron && pnpm --filter @originos/web build && node scripts/prepare-web-standalone.js && pnpm build && node ../../scripts/check-root-build-artifacts.js && node scripts/verify-agent-worker-runtime.js && rm -rf dist-electron && mkdir -p dist-electron && cp -R ../../dist-electron/. dist-electron/ && node ../../scripts/check-root-build-artifacts.js",
+    "build:app": "rm -rf ../web/.next ../../dist-electron && pnpm --filter @originos/web build && node scripts/prepare-web-standalone.js && node scripts/prepare-pi-ai-runtime-deps.js && pnpm build && node ../../scripts/check-root-build-artifacts.js && node scripts/verify-agent-worker-runtime.js && rm -rf dist-electron && mkdir -p dist-electron && cp -R ../../dist-electron/. dist-electron/ && node ../../scripts/check-root-build-artifacts.js",
     "pack": "pnpm build:app && electron-builder --config electron-builder.yml --dir",
     "dist": "pnpm build:app && electron-builder --config electron-builder.yml --publish never",
+    "dist:win:local": "node scripts/build-windows-local.js",
     "dist:mac:arm64": "pnpm build:app && electron-builder --config electron-builder.yml --mac --arm64 --publish never",
     "dist:mac:x64": "pnpm build:app && electron-builder --config electron-builder.yml --mac --x64 --publish never",
     "dist:mac:app": "pnpm build:app && electron-builder --config electron-builder.yml --mac dir --arm64 --x64 --publish never",

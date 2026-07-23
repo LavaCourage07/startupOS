@@ -18,6 +18,15 @@ const zipPath = process.env.WINDOWS_ZIP_PATH
   ? path.resolve(process.env.WINDOWS_ZIP_PATH)
   : path.join(releaseDir, `OriginOS CE-${desktopPackage.version}-x64.zip`);
 const verifyAsarRequiresScript = path.join(desktopDir, 'scripts', 'verify-asar-relative-requires.js');
+const piAiRuntimeDependencies = [
+  '@aws-sdk/client-bedrock-runtime',
+  '@google/genai',
+  '@mistralai/mistralai',
+  'ajv',
+  'ajv-formats',
+  'proxy-agent',
+  'zod-to-json-schema',
+];
 
 function fail(message) {
   console.error(`[verify-windows-package] ${message}`);
@@ -43,6 +52,32 @@ function run(command, args, options = {}) {
   });
 }
 
+function verifyPiAiProviderImports(smokeDir) {
+  const script = [
+    "const { createRequire } = require('node:module');",
+    "const { pathToFileURL } = require('node:url');",
+    "const req = createRequire(process.cwd() + '/package.json');",
+    `const deps = ${JSON.stringify(piAiRuntimeDependencies)};`,
+    "(async () => {",
+    "  for (const dep of deps) {",
+    "    const entry = req.resolve(dep);",
+    "    await import(pathToFileURL(entry).href);",
+    "  }",
+    "})().catch((error) => {",
+    "  console.error(error);",
+    "  process.exit(1);",
+    "});",
+  ].join('\n');
+
+  run(process.execPath, ['-e', script], {
+    cwd: smokeDir,
+    env: {
+      ...process.env,
+      NODE_OPTIONS: '',
+    },
+  });
+}
+
 function normalizeAsarEntry(entry) {
   const normalized = entry
     .replace(/^(?:pack|unpack)\s*:\s*/, '')
@@ -65,6 +100,7 @@ function verifyAsar() {
     'dist-electron/desktop/src/main/main.js',
     'node_modules/@mariozechner/agent/index.js',
     'node_modules/@mariozechner/pi-agent-core/dist/index.js',
+    ...piAiRuntimeDependencies.map((dependency) => `node_modules/${dependency}/package.json`),
   ];
 
   for (const entry of requiredEntries) {
@@ -88,6 +124,10 @@ function verifyAsar() {
   }
   smokeRequire.resolve('@mariozechner/agent');
   smokeRequire.resolve('@mariozechner/pi-agent-core');
+  for (const dependency of piAiRuntimeDependencies) {
+    smokeRequire.resolve(dependency);
+  }
+  verifyPiAiProviderImports(smokeDir);
 
   run(process.execPath, [verifyAsarRequiresScript], {
     env: {

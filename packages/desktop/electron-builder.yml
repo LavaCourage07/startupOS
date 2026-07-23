@@ -41,6 +41,8 @@ files:
     filter:
       - "package.json"
       - "dist/**/*"
+  - from: .packaging/pi-ai-runtime/node_modules
+    to: node_modules
   - package.json
   - "!**/*.map"
   - "!node_modules/onnxruntime-node/bin/napi-v6/linux{,/**/*}"

@@ -4,6 +4,7 @@
   "private": true,
   "description": "An AI-native desktop OS prototype with Next.js, Electron, and multi-agent collaboration",
   "author": "Archersado <archersado@hotmail.com>",
+  "packageManager": "pnpm@9.15.9",
   "license": "AGPL-3.0",
   "repository": {
     "type": "git",
@@ -42,6 +43,7 @@
     "desktop:dev": "pnpm --filter @originos/desktop dev",
     "desktop:build": "pnpm --filter @originos/desktop build:app",
     "desktop:dist": "pnpm --filter @originos/desktop dist",
+    "desktop:dist:win:local": "node packages/desktop/scripts/build-windows-local.js",
     "desktop:dist:mac": "pnpm --filter @originos/desktop dist:mac",
     "desktop:dist:mac:publish": "pnpm --filter @originos/desktop dist:mac:publish",
     "desktop:bump-version": "pnpm --filter @originos/desktop bump-version",
