@@ -32,7 +32,8 @@ permissions:
 
 env:
   NODE_VERSION: "24"
-  PNPM_VERSION: "9"
+  PNPM_VERSION: "9.15.9"
+  ONNXRUNTIME_NODE_INSTALL: "skip"
 
 jobs:
   windows:
@@ -52,6 +53,8 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+        env:
+          npm_config_onnxruntime_node_install: skip
 
       - run: pnpm --filter @originos/desktop build:app
 
@@ -94,6 +97,8 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+        env:
+          npm_config_onnxruntime_node_install: skip
 
       - run: pnpm --filter @originos/desktop build:app
 
@@ -148,6 +153,8 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+        env:
+          npm_config_onnxruntime_node_install: skip
 
       - run: pnpm --filter @originos/desktop build:app
 
@@ -207,6 +214,8 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+        env:
+          npm_config_onnxruntime_node_install: skip
 
       - uses: actions/download-artifact@v4
         with:
