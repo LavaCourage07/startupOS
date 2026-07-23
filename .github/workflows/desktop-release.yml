@@ -130,6 +130,9 @@ jobs:
             echo "APPLE_API_KEY must contain the .p8 private key content or its base64 encoding." >&2
             exit 1
           fi
+          printf '\n' >> "$key_file"
+          grep -q -- '-----END PRIVATE KEY-----' "$key_file"
+          openssl ec -in "$key_file" -noout -check >/dev/null
           chmod 600 "$key_file"
           echo "APPLE_API_KEY=$key_file" >> "$GITHUB_ENV"
 
@@ -137,7 +140,11 @@ jobs:
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: xcrun notarytool history --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER"
+        run: |
+          xcrun notarytool store-credentials originos-notarytool \
+            --key "$APPLE_API_KEY" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER"
 
       - name: Build macOS arm64 package
         working-directory: packages/desktop
@@ -209,6 +216,9 @@ jobs:
             echo "APPLE_API_KEY must contain the .p8 private key content or its base64 encoding." >&2
             exit 1
           fi
+          printf '\n' >> "$key_file"
+          grep -q -- '-----END PRIVATE KEY-----' "$key_file"
+          openssl ec -in "$key_file" -noout -check >/dev/null
           chmod 600 "$key_file"
           echo "APPLE_API_KEY=$key_file" >> "$GITHUB_ENV"
 
@@ -216,7 +226,11 @@ jobs:
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: xcrun notarytool history --key "$APPLE_API_KEY" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER"
+        run: |
+          xcrun notarytool store-credentials originos-notarytool \
+            --key "$APPLE_API_KEY" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER"
 
       - name: Build macOS x64 package
         working-directory: packages/desktop
