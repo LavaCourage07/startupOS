@@ -44,7 +44,10 @@ function run(command, args, options = {}) {
 }
 
 function normalizeAsarEntry(entry) {
-  return entry.replace(/^(?:pack|unpack)\s*:\s*/, '');
+  const normalized = entry
+    .replace(/^(?:pack|unpack)\s*:\s*/, '')
+    .replace(/\\/g, '/');
+  return normalized.startsWith('/') ? normalized.slice(1) : normalized;
 }
 
 function verifyAsar() {
@@ -53,15 +56,15 @@ function verifyAsar() {
 
   const entries = asar.listPackage(asarPath, { isPack: true }).map(normalizeAsarEntry);
   const requiredEntries = [
-    '/dist-electron/core/src/lib/paths.js',
-    '/dist-electron/core/src/lib/integrations/pi-agent/display-content.js',
-    '/dist-electron/core/src/lib/integrations/pi-agent/core/agent.js',
-    '/dist-electron/core/src/lib/integrations/pi-agent/tools/index.js',
-    '/dist-electron/core/src/lib/integrations/pi-agent/tools/loop-detector.js',
-    '/dist-electron/core/src/lib/integrations/pi-agent/tools/schedule-tools.js',
-    '/dist-electron/desktop/src/main/main.js',
-    '/node_modules/@mariozechner/agent/index.js',
-    '/node_modules/@mariozechner/pi-agent-core/dist/index.js',
+    'dist-electron/core/src/lib/paths.js',
+    'dist-electron/core/src/lib/integrations/pi-agent/display-content.js',
+    'dist-electron/core/src/lib/integrations/pi-agent/core/agent.js',
+    'dist-electron/core/src/lib/integrations/pi-agent/tools/index.js',
+    'dist-electron/core/src/lib/integrations/pi-agent/tools/loop-detector.js',
+    'dist-electron/core/src/lib/integrations/pi-agent/tools/schedule-tools.js',
+    'dist-electron/desktop/src/main/main.js',
+    'node_modules/@mariozechner/agent/index.js',
+    'node_modules/@mariozechner/pi-agent-core/dist/index.js',
   ];
 
   for (const entry of requiredEntries) {
