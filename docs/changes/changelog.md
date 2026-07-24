@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-24 — docs：更新应用版本到 0.1.20
+
+**类型**：docs
+**影响模块**：`package.json`, `packages/desktop/package.json`, `docs/changes/releases/v0.1.20/changelog.md`
+**摘要**：将 OriginOS CE 桌面发布版本从 `0.1.19` 更新到 `0.1.20`，用于发布包含 Windows 内置 skill fallback 和角色附件按钮修复的完整安装包。
+
 ## 2026-07-24 — fix：修复角色窗体附件按钮禁用
 
 **类型**：fix
