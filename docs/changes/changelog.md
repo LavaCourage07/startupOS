@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-24 — docs：更新应用版本到 0.1.21
+
+**类型**：docs
+**影响模块**：`package.json`, `packages/desktop/package.json`, `docs/changes/releases/v0.1.21/changelog.md`
+**摘要**：将 OriginOS CE 桌面发布版本从 `0.1.20` 更新到 `0.1.21`，用于重新触发包含 Windows verifier unpacked runtime 修复的发布链路。
+
 ## 2026-07-24 — fix：修复 Windows package verifier 读取 unpacked runtime
 
 **类型**：fix
