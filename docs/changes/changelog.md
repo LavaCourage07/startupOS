@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-24 — docs：更新应用版本到 0.1.19
+
+**类型**：docs
+**影响模块**：`package.json`, `packages/desktop/package.json`, `docs/changes/releases/v0.1.19/changelog.md`
+**摘要**：将 OriginOS CE 桌面发布版本从 `0.1.18` 更新到 `0.1.19`，用于触发 `desktop-v0.1.19` GitHub Actions 发布，把 Windows 安装态内置 skill bundled fallback 修复推送给已安装 0.1.18 的用户。
+
 ## 2026-07-24 — fix：修复 Windows 安装态内置 skill bundled fallback
 
 **类型**：fix
