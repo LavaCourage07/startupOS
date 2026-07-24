@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-24 — docs：更新应用版本到 0.1.18
+
+**类型**：docs
+**影响模块**：`package.json`, `packages/desktop/package.json`, `docs/changes/releases/v0.1.18/changelog.md`
+**摘要**：将 OriginOS CE 桌面发布版本从 `0.1.17` 更新到 `0.1.18`，用于触发 `desktop-v0.1.18` GitHub Actions 发布。新增 v0.1.18 版本归档，包含 Windows 内置模板技能加载、pi-ai provider 依赖、自动更新 sha512 metadata 校验和构建产物忽略规则等修复说明。
+
 ## 2026-07-24 — docs：归档 Story OS.18 Windows 内置模板技能加载修复
 
 **类型**：docs
