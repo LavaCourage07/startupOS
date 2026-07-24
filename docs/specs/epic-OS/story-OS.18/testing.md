@@ -86,6 +86,17 @@
 **And** 用户数据目录没有模板技能副本  
 **And** release log 没有 SkillService not found 错误
 
+### TC8: Windows 自动更新远端 sha512 校验
+
+**类型:** 发布后验收 / update metadata verification
+**覆盖:** 后续 Bugfix TODO
+
+**Given** Windows 自动更新 metadata 已发布到七牛/CDN
+**When** 读取 `latest.yml` / `stable.yml` 中的安装包、zip、blockmap URL
+**Then** 每个 URL 都可访问且返回当前发布批次资源
+**And** 远端资源按 electron-updater 规则计算出的 `sha512` 与 metadata 完全一致
+**And** Windows 客户端执行自动更新不出现 `sha512 checksum mismatch`
+
 ---
 
 ## 必跑命令
