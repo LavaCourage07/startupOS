@@ -85,6 +85,18 @@ function normalizeAsarEntry(entry) {
   return normalized.startsWith('/') ? normalized.slice(1) : normalized;
 }
 
+function readAsarEntryOrUnpacked(relativePath) {
+  try {
+    return asar.extractFile(asarPath, relativePath).toString('utf8');
+  } catch (error) {
+    const unpackedPath = path.join(resourcesDir, 'app.asar.unpacked', relativePath);
+    if (exists(unpackedPath)) {
+      return fs.readFileSync(unpackedPath, 'utf8');
+    }
+    throw error;
+  }
+}
+
 function verifyAsar() {
   requireFile(asarPath);
   if (process.exitCode) return;
@@ -116,10 +128,9 @@ function verifyAsar() {
     'dist-electron/core/src/lib/integrations/pi-agent/tools/loop-detector.js',
     'dist-electron/core/src/lib/integrations/pi-agent/tools/schedule-tools.js',
   ];
-  const launcherRuntime = asar.extractFile(
-    asarPath,
+  const launcherRuntime = readAsarEntryOrUnpacked(
     'dist-electron/core/src/lib/features/services/launcher/skill.js',
-  ).toString('utf8');
+  );
   if (!launcherRuntime.includes('getBundledSkillDirs')) {
     fail('SkillLauncher runtime does not scan all bundled skill directories');
   }

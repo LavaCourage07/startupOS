@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-24 — fix：修复 Windows package verifier 读取 unpacked runtime
+
+**类型**：fix
+**影响模块**：`packages/desktop/scripts/verify-windows-package.js`
+**摘要**：Windows package verifier 检查 `SkillLauncher` runtime 时，`asar.listPackage(..., { isPack: true })` 会列出 unpacked 文件，但 `asar.extractFile()` 不能读取 unpacked 条目，导致 GitHub Actions 在 `verify:win-package` 阶段抛 `"dist-electron/core/src/lib/features/services/launcher/skill.js" was not found in this archive`。现在读取 runtime 时会先尝试 app.asar，失败后回退到 `resources/app.asar.unpacked`。
+
 ## 2026-07-24 — docs：更新应用版本到 0.1.20
 
 **类型**：docs
