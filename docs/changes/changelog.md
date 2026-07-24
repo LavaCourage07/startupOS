@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-24 — fix：对齐 0.1.19 Windows 本地与 Actions 包校验
+
+**类型**：fix
+**影响模块**：`packages/desktop/scripts/verify-windows-package.js`, `package.json`, `packages/desktop/package.json`, `docs/changes/releases/v0.1.19/changelog.md`
+**摘要**：将桌面版本回退到 `0.1.19` 继续发布，并修复 Windows package verifier 对 `SkillLauncher` runtime 的读取方式。Verifier 现在先确认 required entries 无缺失再进入 smoke check，并基于 `asar.extractAll()` 后的实际运行视图读取 `skill.js`，避免 Actions 中因 asar/unpacked 路径差异抛误导性的 `was not found in this archive` 异常。本地已通过完整 Windows 构建和 `verify:win-package`。
+
 ## 2026-07-24 — docs：更新应用版本到 0.1.21
 
 **类型**：docs
