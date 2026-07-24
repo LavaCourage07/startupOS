@@ -147,12 +147,15 @@ pnpm --filter @originos/desktop verify:win-package
 | TC5 | ✅ Passed | 本地生成 Windows `exe`、`zip` 和 `win-unpacked` 并通过 package verifier |
 | TC6 | ✅ Passed | bundled fallback 不改变 user/project source 优先级 |
 | TC7 | ✅ Passed | GitHub Actions Windows 构建发布链路已走通，package verifier 纳入发布前验证 |
+| TC8 | ✅ Passed | Windows update metadata 本地生成与校验通过，发布脚本会校验远端 sha512 |
 
 ### 已执行命令
 
 ```bash
 node packages/desktop/scripts/build-windows-local.js
 pnpm --filter @originos/desktop verify:win-package
+pnpm --filter @originos/desktop generate:update-metadata
+pnpm --filter @originos/desktop verify:update-metadata
 npx pnpm@9.15.9 lint
 ```
 

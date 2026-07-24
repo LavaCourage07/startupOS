@@ -6,6 +6,12 @@
 **影响模块**：`docs/specs/epic-OS/README.md`, `docs/specs/epic-OS/story-OS.18/**`
 **摘要**：Story OS.18 标记为 ✅ Complete，补齐完成归档、实施摘要、测试验证记录和 Epic OS 状态。归档记录覆盖 Windows packaged build 读取 `skill-creator-app`、模板技能不复制到用户 `data/skills`、本地 Windows 包构建验证、`pi-ai` provider 依赖打包和 `verify:win-package` 通过结果。
 
+## 2026-07-24 — fix：修复 Windows 自动更新 sha512 mismatch
+
+**类型**：fix
+**影响模块**：`.github/workflows/desktop-release.yml`, `packages/desktop/scripts/generate-update-metadata.js`, `packages/desktop/scripts/verify-update-metadata.js`, `packages/desktop/scripts/publish-qiniu-updates.js`, `packages/desktop/package.json`
+**摘要**：Windows 构建完成后由项目脚本重写 update metadata，确保 `latest-win.yml`、`stable-win.yml`、`latest.yml`、`stable.yml` 都指向 NSIS `.exe` 且 sha512/size 与本地产物一致。GitHub Actions 在上传 Windows artifact 前执行 metadata 校验，七牛发布脚本上传资源后刷新 CDN 并下载远端内容重新计算 sha512，若 CDN 返回旧资源或 metadata 不匹配则发布失败，避免客户端自动更新出现 `sha512 checksum mismatch`。
+
 ## 2026-07-24 — chore：移除已跟踪桌面构建产物
 
 **类型**：chore

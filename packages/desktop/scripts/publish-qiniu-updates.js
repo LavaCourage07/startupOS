@@ -84,6 +84,12 @@ function sha512Base64(filePath) {
   return hash.digest('base64');
 }
 
+function sha512Base64Buffer(buffer) {
+  const hash = crypto.createHash('sha512');
+  hash.update(buffer);
+  return hash.digest('base64');
+}
+
 function verifyMacSigning() {
   execFileSync(process.execPath, [path.join(__dirname, 'verify-mac-signing.js')], {
     stdio: 'inherit',
@@ -104,54 +110,14 @@ function verifyWindowsPackage() {
   });
 }
 
-function generateUpdateMetadata(platform) {
-  const releaseDate = new Date().toISOString();
-  const isMac = platform === 'mac';
-
-  const archOrder = isMac ? ['x64', 'arm64'] : ['x64'];
-  const ext = isMac ? 'zip' : 'zip';
-  const prefix = isMac ? '' : 'OriginOS CE-';
-
-  const entries = archOrder.map((arch) => {
-    const zipFileName = `OriginOS CE-${version}-${arch}.zip`;
-    const zipFilePath = path.join(releaseDir, zipFileName);
-    assertFile(zipFilePath);
-    return {
-      fileName: zipFileName,
-      filePath: zipFilePath,
-      size: fs.statSync(zipFilePath).size,
-      sha512: sha512Base64(zipFilePath),
-    };
+function generateUpdateMetadataFiles() {
+  execFileSync(process.execPath, [path.join(__dirname, 'generate-update-metadata.js')], {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      NODE_OPTIONS: '',
+    },
   });
-
-  const primary = entries[0];
-  const lines = [
-    `version: ${version}`,
-    'files:',
-    ...entries.flatMap((entry) => [
-      `  - url: ${entry.fileName}`,
-      `    sha512: ${entry.sha512}`,
-      `    size: ${entry.size}`,
-    ]),
-    `path: ${primary.fileName}`,
-    `sha512: ${primary.sha512}`,
-    `releaseDate: '${releaseDate}'`,
-    '',
-  ];
-
-  const metadataName = `latest-${platform}.yml`;
-  const metadataPath = path.join(releaseDir, metadataName);
-  fs.writeFileSync(metadataPath, lines.join('\n'), 'utf8');
-
-  const stableName = `stable-${platform}.yml`;
-  fs.copyFileSync(metadataPath, path.join(releaseDir, stableName));
-
-  if (platform === 'win') {
-    fs.copyFileSync(metadataPath, path.join(releaseDir, 'latest.yml'));
-    fs.copyFileSync(metadataPath, path.join(releaseDir, 'stable.yml'));
-  }
-
-  return metadataPath;
 }
 
 function statObject(bucketManager, bucket, key) {
@@ -203,13 +169,38 @@ function uploadFile({ mac, config, bucket, key, filePath, overwrite, cacheContro
   });
 }
 
+function refreshCdnUrls(cdnManager, urls) {
+  if (!urls.length) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    cdnManager.refreshUrls(urls, (error, body, info) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      if (info.statusCode >= 200 && info.statusCode < 300) {
+        resolve(body);
+        return;
+      }
+      reject(new Error(`Qiniu CDN refresh failed: status=${info.statusCode} body=${JSON.stringify(body)}`));
+    });
+  });
+}
+
+function isMetadataArtifact(fileName) {
+  return fileName.endsWith('.yml') || fileName.endsWith('.yaml');
+}
+
 function buildArtifacts(metadataFiles, metadataOnly, force) {
   const files = [];
   const pushArtifact = (fileName, overwrite = force) => {
+    const filePath = path.join(releaseDir, fileName);
     files.push({
       fileName,
-      filePath: path.join(releaseDir, fileName),
+      filePath,
       overwrite,
+      size: fs.existsSync(filePath) ? fs.statSync(filePath).size : null,
+      sha512: fs.existsSync(filePath) ? sha512Base64(filePath) : null,
     });
   };
   const pushOptionalArtifact = (fileName, overwrite = force) => {
@@ -286,6 +277,66 @@ async function verifyCdnUrl(url) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function fetchRemoteBuffer(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`CDN verification failed: ${response.status} ${url}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
+async function verifyCdnArtifact(url, artifact, options = {}) {
+  if (!url) return;
+
+  const expectedSize = fs.statSync(artifact.filePath).size;
+  const expectedSha512 = sha512Base64(artifact.filePath);
+  const retries = Number.parseInt(process.env.QINIU_CDN_VERIFY_RETRIES || '6', 10);
+  const retryDelayMs = Number.parseInt(process.env.QINIU_CDN_VERIFY_RETRY_DELAY_MS || '10000', 10);
+  const attempts = Math.max(1, options.retries ?? retries);
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const buffer = await fetchRemoteBuffer(url);
+      const actualSize = buffer.length;
+      const actualSha512 = sha512Base64Buffer(buffer);
+
+      if (actualSize !== expectedSize) {
+        throw new Error(
+          `CDN size mismatch for ${artifact.fileName}: expected=${expectedSize} actual=${actualSize} url=${url}`,
+        );
+      }
+      if (actualSha512 !== expectedSha512) {
+        throw new Error(
+          `CDN sha512 mismatch for ${artifact.fileName}: expected=${expectedSha512} actual=${actualSha512} url=${url}`,
+        );
+      }
+
+      console.log(`[publish-qiniu-updates] verified remote sha512 ${artifact.fileName}`);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || isMetadataArtifact(artifact.fileName)) {
+        break;
+      }
+      console.warn(
+        `[publish-qiniu-updates] remote verification attempt ${attempt}/${attempts} failed for ${artifact.fileName}: ${
+          error instanceof Error ? error.message : error
+        }; retrying in ${retryDelayMs}ms`,
+      );
+      await sleep(retryDelayMs);
+    }
+  }
+
+  throw lastError;
+}
+
 async function main() {
   const accessKey = requiredEnv('QINIU_ACCESS_KEY', 'QINIU_AK');
   const secretKey = requiredEnv('QINIU_SECRET_KEY', 'QINIU_AS');
@@ -303,6 +354,7 @@ async function main() {
   config.regionsProvider = qiniu.httpc.Region.fromRegionId(region);
   const mac = new qiniu.auth.digest.Mac(accessKey, secretKey);
   const bucketManager = new qiniu.rs.BucketManager(mac, config);
+  const cdnManager = new qiniu.cdn.CdnManager(mac);
 
   // 检测有哪些平台的构建产物
   const hasMacArm64 = hasReleasePackage(`OriginOS CE-${version}-arm64.dmg`);
@@ -315,19 +367,13 @@ async function main() {
   const hasWinExe = hasReleasePackage(`OriginOS CE-${version}-x64.exe`);
   const hasWinZip = hasReleasePackage(`OriginOS CE-${version}-x64.zip`);
 
-  const metadataFiles = [];
+  console.log('[publish-qiniu-updates] generating update metadata');
+  generateUpdateMetadataFiles();
 
-  // 生成 macOS 元数据
-  if (hasMacUpdateZip) {
-    console.log('[publish-qiniu-updates] generating macOS update metadata');
-    metadataFiles.push(generateUpdateMetadata('mac'));
-  }
-
-  // 生成 Windows 元数据
-  if (hasWinExe || hasWinZip) {
-    console.log('[publish-qiniu-updates] generating Windows update metadata');
-    metadataFiles.push(generateUpdateMetadata('win'));
-  }
+  const metadataFiles = [
+    hasMacUpdateZip ? path.join(releaseDir, 'latest-mac.yml') : null,
+    hasWinExe || hasWinZip ? path.join(releaseDir, 'latest-win.yml') : null,
+  ].filter(Boolean);
 
   const artifacts = buildArtifacts(metadataFiles, metadataOnly, force);
 
@@ -379,7 +425,7 @@ async function main() {
 
     console.log(`[publish-qiniu-updates] uploading ${artifact.fileName} -> ${key}`);
     // 为元数据文件设置较短的 cache-control
-    const isMetadata = artifact.fileName.endsWith('.yml') || artifact.fileName.endsWith('.yaml');
+    const isMetadata = isMetadataArtifact(artifact.fileName);
     const cacheControl = isMetadata ? 'public, max-age=300' : undefined;
     await uploadFile({
       mac,
@@ -392,9 +438,23 @@ async function main() {
     });
 
     const url = cdnUrl(baseUrl, key, prefix);
+    if (url && !skipCdnVerify && process.env.QINIU_SKIP_CDN_REFRESH !== '1') {
+      try {
+        console.log(`[publish-qiniu-updates] refreshing CDN ${url}`);
+        await refreshCdnUrls(cdnManager, [url]);
+      } catch (error) {
+        console.warn(
+          `[publish-qiniu-updates] CDN refresh failed for ${url}: ${error instanceof Error ? error.message : error}`,
+        );
+      }
+    }
     if (url && !skipCdnVerify) {
       console.log(`[publish-qiniu-updates] verifying ${url}`);
-      await verifyCdnUrl(url);
+      if (isMetadata) {
+        await verifyCdnArtifact(url, artifact, { retries: 1 });
+      } else {
+        await verifyCdnArtifact(url, artifact);
+      }
     }
   }
 

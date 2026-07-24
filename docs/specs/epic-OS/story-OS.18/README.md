@@ -58,9 +58,9 @@
 
 ## 后续 Bugfix TODO
 
-- [ ] Windows 自动更新失败：用户侧更新时报 `sha512 checksum mismatch`。
+- [x] Windows 自动更新失败：用户侧更新时报 `sha512 checksum mismatch`。
   - 现象：自动更新下载到的 Windows 安装包或 blockmap 与 `latest.yml` / `stable.yml` 中记录的 `sha512` 不一致。
-  - 初步排查方向：确认七牛资源包、blockmap、`latest.yml`/`stable.yml` 是否同批次全量覆盖；确认 CDN 缓存是否仍返回旧 exe/zip/blockmap；确认发布脚本在覆盖同版本资源后重新生成并上传匹配的 metadata。
+  - 修复：GitHub Actions Windows job 在上传 artifact 前重写并校验 update metadata，Windows `latest/stable` metadata 统一指向 NSIS `.exe`；七牛发布脚本上传后刷新 CDN，并用远端内容重新计算 `sha512` 与本地 metadata 对比。
   - 验收要求：发布后必须逐个校验 metadata 中 URL 可访问，并计算远端资源 `sha512` 与 metadata 完全一致；Windows 客户端自动更新不再出现 checksum mismatch。
 
 ---

@@ -23,7 +23,9 @@
     "dist:win": "ORIGINOS_WINDOWS_SHORT_ZIP=1 pnpm build:app && electron-builder --config electron-builder.yml --win --publish never",
     "dist:linux": "pnpm build:app && electron-builder --config electron-builder.yml --linux --publish never",
     "verify:win-package": "node scripts/verify-windows-package.js",
-    "verify:release-artifacts": "node scripts/verify-release-artifacts.js",
+    "verify:release-artifacts": "node scripts/verify-release-artifacts.js && node scripts/verify-update-metadata.js",
+    "verify:update-metadata": "node scripts/verify-update-metadata.js",
+    "generate:update-metadata": "node scripts/generate-update-metadata.js",
     "verify:asar-requires": "node scripts/verify-asar-relative-requires.js"
   },
   "dependencies": {

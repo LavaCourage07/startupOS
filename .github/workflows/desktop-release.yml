@@ -63,7 +63,11 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: pnpm exec electron-builder --config electron-builder.yml --win --publish never
 
+      - run: pnpm --filter @originos/desktop generate:update-metadata
+
       - run: pnpm --filter @originos/desktop verify:win-package
+
+      - run: pnpm --filter @originos/desktop verify:update-metadata
 
       - uses: actions/upload-artifact@v4
         with:
