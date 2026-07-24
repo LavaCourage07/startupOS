@@ -2,7 +2,7 @@
 
 **Story:** Windows 内置模板技能加载修复
 **版本:** 1.0
-**最后更新:** 2026-07-23
+**最后更新:** 2026-07-24
 
 ---
 
@@ -105,3 +105,24 @@
 - Windows packaged path 是否只在 desktop 适配层处理。
 - SkillService 错误日志是否足以定位 searched roots。
 - CI package verify 是否能防止后续发布再次缺内置技能。
+
+---
+
+## 实施完成记录
+
+**状态:** ✅ Complete
+**完成日期:** 2026-07-24
+
+### 已完成改动
+
+- `packages/core/src/lib/integrations/pi-agent/core/skills.ts` 增加 packaged-safe bundled skill roots，覆盖 Electron packaged `process.resourcesPath/templates/skills`。
+- `packages/desktop/scripts/verify-windows-package.js` 增加 `skill-creator-app/SKILL.md` package resource 校验和运行时模块 smoke。
+- `packages/desktop/scripts/prepare-pi-ai-runtime-deps.js` 收集 `@mariozechner/pi-ai` 动态 provider 依赖，并在 Windows package 中打入 `@google/genai` 等运行时包。
+- `packages/desktop/scripts/build-windows-local.js` 固定本地 Windows 构建为 pnpm 9.15.9 frozen install，与 GitHub Actions Windows job 对齐。
+- `packages/desktop/electron-builder.yml` 将 `.packaging/pi-ai-runtime/node_modules` 作为 package files 输入。
+
+### 兼容性结论
+
+- 模板技能仍作为只读 bundled/template source 加载，不复制到用户 `data/skills`。
+- 用户/project/bundled 多源加载优先级保持既有语义，bundled source 仅作为内置模板技能可读源。
+- Windows 本地包和 CI 包使用同一 package verification，防止后续再次出现 bundled skill 或 provider 依赖缺失。

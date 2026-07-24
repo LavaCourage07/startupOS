@@ -2,7 +2,7 @@
 
 **Story:** Windows 内置模板技能加载修复
 **版本:** 1.0
-**最后更新:** 2026-07-23
+**最后更新:** 2026-07-24
 
 ---
 
@@ -117,3 +117,49 @@ pnpm --filter @originos/desktop verify:win-package
 
 - 若用户历史目录中已有同名损坏技能，默认优先级可能仍读取用户源并失败，需要实现时明确降级策略。
 - macOS/Linux packaged path 可能与 Windows 不同，建议将 resolver 测试做成跨平台路径矩阵。
+
+---
+
+## 验证归档
+
+**验证日期:** 2026-07-24
+**状态:** ✅ Passed
+
+### 自动化与脚本化验证结果
+
+| 用例 | 结果 | 证据 |
+|------|------|------|
+| TC1 | ✅ Passed | bundled skill resolver 支持 packaged resources root |
+| TC2 | ✅ Passed | package smoke 能读取 bundled `skill-creator-app` 内容 |
+| TC3 | ✅ Passed | 修复未引入模板技能到用户 `data/skills` 的复制逻辑 |
+| TC4 | ✅ Passed | `verify:win-package` 确认 package resources 包含 `skill-creator-app/SKILL.md` |
+| TC5 | ✅ Passed | 本地生成 Windows `exe`、`zip` 和 `win-unpacked` 并通过 package verifier |
+| TC6 | ✅ Passed | bundled fallback 不改变 user/project source 优先级 |
+| TC7 | ✅ Passed | GitHub Actions Windows 构建发布链路已走通，package verifier 纳入发布前验证 |
+
+### 已执行命令
+
+```bash
+node packages/desktop/scripts/build-windows-local.js
+pnpm --filter @originos/desktop verify:win-package
+npx pnpm@9.15.9 lint
+```
+
+### 产物
+
+- `release/OriginOS CE-0.1.17-x64.exe`
+- `release/OriginOS CE-0.1.17-x64.exe.blockmap`
+- `release/OriginOS CE-0.1.17-x64.zip`
+- `release/win-unpacked/`
+
+### 校验输出摘要
+
+- `app.asar module smoke ok`
+- `unpacked resources ok`
+- `Windows zip ok`
+- `verified Windows package runtime files`
+
+### 剩余风险处理
+
+- 同名损坏用户技能属于既有优先级策略下的用户数据问题，不阻塞本 Story；后续可单独增加“损坏用户技能降级到 bundled source”的增强 Story。
+- macOS/Linux packaged path 不属于本 Windows bugfix 的关闭条件；当前 resolver 以跨平台 Node path API 实现，后续如出现平台差异再补路径矩阵。

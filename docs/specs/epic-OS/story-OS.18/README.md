@@ -1,10 +1,10 @@
 # Story OS.18: Windows 内置模板技能加载修复
 
 **Epic:** OS - Phase 0 OS 交互基础
-**Status:** Planning
+**Status:** ✅ Complete
 **Owner:** Product / Engineering
 **Created:** 2026-07-23
-**Last Updated:** 2026-07-23
+**Last Updated:** 2026-07-24
 
 ---
 
@@ -26,12 +26,12 @@
 
 ### 验收标准（简要）
 
-- [ ] AC1: Windows packaged build 中点击 `skill-creator-app` 能成功加载技能内容，不再报 not found。
-- [ ] AC2: 首次启动和升级启动都不会把模板技能复制到用户 `data/skills`。
-- [ ] AC3: SkillService 多源加载顺序包含 bundled/template skills，并能在 Electron packaged 环境解析真实路径。
-- [ ] AC4: 用户 `data/skills` 中同名技能如存在，应按既定优先级处理，不能被模板源静默覆盖。
-- [ ] AC5: 自动化或脚本化验收覆盖 Windows 打包资源、技能内容 API/IPC、用户目录不污染。
-- [ ] AC6: 本地必须构建出 Windows 安装包或 `win-unpacked`，并完成安装/启动级验证后才能关闭 Story。
+- [x] AC1: Windows packaged build 中点击 `skill-creator-app` 能成功加载技能内容，不再报 not found。
+- [x] AC2: 首次启动和升级启动都不会把模板技能复制到用户 `data/skills`。
+- [x] AC3: SkillService 多源加载顺序包含 bundled/template skills，并能在 Electron packaged 环境解析真实路径。
+- [x] AC4: 用户 `data/skills` 中同名技能如存在，应按既定优先级处理，不能被模板源静默覆盖。
+- [x] AC5: 自动化或脚本化验收覆盖 Windows 打包资源、技能内容 API/IPC、用户目录不污染。
+- [x] AC6: 本地必须构建出 Windows 安装包或 `win-unpacked`，并完成安装/启动级验证后才能关闭 Story。
 
 ---
 
@@ -49,10 +49,32 @@
 ## 进度跟踪
 
 - [x] Story 文档创建
-- [ ] 问题复现与路径定位
-- [ ] 实施
-- [ ] 本地 Windows 包构建与启动验证
-- [ ] 发布链路验证
+- [x] 问题复现与路径定位
+- [x] 实施
+- [x] 本地 Windows 包构建与启动验证
+- [x] 发布链路验证
+
+---
+
+## 完成归档
+
+**完成日期:** 2026-07-24
+**代码提交:** `b6468e1`, `d6e373b`
+**归档提交:** 本次 Story 归档提交
+
+### 实施摘要
+
+- SkillService bundled/template skill resolver 已支持 Windows packaged resources path，内置技能不再依赖用户 `data/skills` 副本。
+- Windows package verification 已覆盖 `templates/skills/skill-creator-app/SKILL.md`，并增加 packaged runtime smoke。
+- 本地 Windows 构建入口固定为 `pnpm@9.15.9` frozen install，与 GitHub Actions 步骤对齐。
+- Windows package 显式打入 `@mariozechner/pi-ai` 动态 provider 运行时依赖，避免 `Cannot find module '@google/genai'`。
+
+### 验证摘要
+
+- `node packages/desktop/scripts/build-windows-local.js` 通过。
+- `pnpm --filter @originos/desktop verify:win-package` 通过。
+- 生成并验证 `release/OriginOS CE-0.1.17-x64.exe`、`release/OriginOS CE-0.1.17-x64.zip`。
+- `npx pnpm@9.15.9 lint` 通过，存在既有 warning，无 error。
 
 ---
 
@@ -60,4 +82,5 @@
 
 | 日期 | 变更内容 | 变更人 |
 |------|---------|--------|
+| 2026-07-24 | 完成 Story OS.18 实施、Windows 本地包验证与归档 | Codex |
 | 2026-07-23 | 创建 Windows 内置模板技能加载 bugfix Story | Codex |
