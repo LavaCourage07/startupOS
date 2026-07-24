@@ -6,6 +6,12 @@
 **影响模块**：`docs/specs/epic-OS/README.md`, `docs/specs/epic-OS/story-OS.18/**`
 **摘要**：Story OS.18 标记为 ✅ Complete，补齐完成归档、实施摘要、测试验证记录和 Epic OS 状态。归档记录覆盖 Windows packaged build 读取 `skill-creator-app`、模板技能不复制到用户 `data/skills`、本地 Windows 包构建验证、`pi-ai` provider 依赖打包和 `verify:win-package` 通过结果。
 
+## 2026-07-24 — chore：移除已跟踪桌面构建产物
+
+**类型**：chore
+**影响模块**：`.gitignore`, `packages/desktop/.packaging/**`, `packages/desktop/dist-electron/**`
+**摘要**：将嵌套 `dist-electron` 和 `.packaging` 构建产物加入忽略规则，并从 Git 索引移除已跟踪的桌面 standalone 与 Electron 编译产物，避免后续本地构建污染工作区。
+
 ## 2026-07-24 — fix：Windows 包打入 pi-ai provider 动态依赖
 
 **类型**：fix
