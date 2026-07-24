@@ -62,6 +62,10 @@
   - 现象：自动更新下载到的 Windows 安装包或 blockmap 与 `latest.yml` / `stable.yml` 中记录的 `sha512` 不一致。
   - 修复：GitHub Actions Windows job 在上传 artifact 前重写并校验 update metadata，Windows `latest/stable` metadata 统一指向 NSIS `.exe`；七牛发布脚本上传后刷新 CDN，并用远端内容重新计算 `sha512` 与本地 metadata 对比。
   - 验收要求：发布后必须逐个校验 metadata 中 URL 可访问，并计算远端资源 `sha512` 与 metadata 完全一致；Windows 客户端自动更新不再出现 checksum mismatch。
+- [x] Windows 0.1.18 官网下载后仍找不到内置 skill。
+  - 现象：线上资源包中存在 `resources/templates/skills/skill-creator-app/SKILL.md`，但安装态点击技能仍报 `Skill "skill-creator-app" not found`，技能工作空间入口打开为空目录。
+  - 原因：模板技能不再复制到用户 `data/skills` 后，`SkillLauncher` 仍只取第一个存在的 bundled skill root；安装态若前序候选目录存在但不含目标技能，会提前锁定错误根目录。本地 0.1.17 构建通常只有 repo `templates/skills` 一个有效候选，因此没有触发。
+  - 修复：`SkillLauncher` 与 `loadSkills()` 对齐，遍历所有 `getBundledSkillDirs()` 候选；Windows package verifier 增加 runtime 静态检查，确保编译后的 launcher 包含多 bundled root fallback。
 
 ---
 
@@ -75,6 +79,7 @@
 
 - SkillService bundled/template skill resolver 已支持 Windows packaged resources path，内置技能不再依赖用户 `data/skills` 副本。
 - Windows package verification 已覆盖 `templates/skills/skill-creator-app/SKILL.md`，并增加 packaged runtime smoke。
+- Windows package verification 已追加 `SkillLauncher` 多 bundled root fallback 检查，避免只校验资源存在但运行时仍选错路径。
 - 本地 Windows 构建入口固定为 `pnpm@9.15.9` frozen install，与 GitHub Actions 步骤对齐。
 - Windows package 显式打入 `@mariozechner/pi-ai` 动态 provider 运行时依赖，避免 `Cannot find module '@google/genai'`。
 
@@ -92,4 +97,5 @@
 | 日期 | 变更内容 | 变更人 |
 |------|---------|--------|
 | 2026-07-24 | 完成 Story OS.18 实施、Windows 本地包验证与归档 | Codex |
+| 2026-07-24 | 修复官网 0.1.18 Windows 安装态内置 skill fallback 失效 | Codex |
 | 2026-07-23 | 创建 Windows 内置模板技能加载 bugfix Story | Codex |

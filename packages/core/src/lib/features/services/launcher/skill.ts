@@ -17,7 +17,7 @@ import { getToolRegistry } from '../../../../lib/integrations/pi-agent/tools/reg
 import { buildPromptMemorySections } from '../../../../lib/integrations/pi-agent/memory-consumption';
 import { appendGlobalUserPreferencesPrompt } from '../../../../lib/integrations/pi-agent/user-preferences';
 import { getDataRoot } from '../../../paths';
-import { getBundledSkillDir } from '../../../../lib/integrations/pi-agent/core/skills';
+import { getBundledSkillDirs } from '../../../../lib/integrations/pi-agent/core/skills';
 
 const MAX_TOOL_DESC_CHARS = 120;
 
@@ -322,7 +322,7 @@ function findSkillFile(skillCode: string): { skillMdPath: string; baseDir: strin
   const skillDirs = [
     path.join(getDataRoot(), 'skills'),
     path.join(getDataRoot(), '.originos', 'skills'),
-    getBundledSkillDir(),
+    ...getBundledSkillDirs(),
   ];
 
   // 先尝试精确路径：data/skills/{code}/SKILL.md 或 templates/skills/{code}/SKILL.md

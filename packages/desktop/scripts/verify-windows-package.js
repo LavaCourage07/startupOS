@@ -97,6 +97,7 @@ function verifyAsar() {
     'dist-electron/core/src/lib/integrations/pi-agent/tools/index.js',
     'dist-electron/core/src/lib/integrations/pi-agent/tools/loop-detector.js',
     'dist-electron/core/src/lib/integrations/pi-agent/tools/schedule-tools.js',
+    'dist-electron/core/src/lib/features/services/launcher/skill.js',
     'dist-electron/desktop/src/main/main.js',
     'node_modules/@mariozechner/agent/index.js',
     'node_modules/@mariozechner/pi-agent-core/dist/index.js',
@@ -115,6 +116,13 @@ function verifyAsar() {
     'dist-electron/core/src/lib/integrations/pi-agent/tools/loop-detector.js',
     'dist-electron/core/src/lib/integrations/pi-agent/tools/schedule-tools.js',
   ];
+  const launcherRuntime = asar.extractFile(
+    asarPath,
+    'dist-electron/core/src/lib/features/services/launcher/skill.js',
+  ).toString('utf8');
+  if (!launcherRuntime.includes('getBundledSkillDirs')) {
+    fail('SkillLauncher runtime does not scan all bundled skill directories');
+  }
 
   asar.extractAll(asarPath, smokeDir);
 

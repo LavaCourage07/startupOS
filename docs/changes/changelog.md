@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-24 — fix：修复 Windows 安装态内置 skill bundled fallback
+
+**类型**：fix
+**影响模块**：`packages/core/src/lib/features/services/launcher/skill.ts`, `packages/core/src/lib/features/services/launcher/__tests__/skill-launcher.test.ts`, `packages/desktop/scripts/verify-windows-package.js`, `docs/specs/epic-OS/story-OS.18/**`
+**摘要**：官网 0.1.18 Windows 包内实际包含 `resources/templates/skills/skill-creator-app/SKILL.md`，但安装态 `SkillLauncher` 只取第一个存在的 bundled skill root，当前序候选目录存在但缺少目标 skill 时会报 not found。修复为遍历所有 `getBundledSkillDirs()`，并在 Windows package verifier 中检查编译后 launcher runtime 包含多 bundled root fallback，避免资源存在但运行时选错路径。
+
 ## 2026-07-24 — docs：更新应用版本到 0.1.18
 
 **类型**：docs

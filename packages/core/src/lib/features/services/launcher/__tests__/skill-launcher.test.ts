@@ -16,6 +16,59 @@ class TestSkillLauncher extends SkillLauncher {
 }
 
 describe('SkillLauncher', () => {
+  it('falls back across bundled skill roots when an earlier root is present but incomplete', async () => {
+    const originalRoot = getMonorepoRoot();
+    const originalDataRoot = process.env.DATA_ROOT;
+    const originalBundledDir = process.env.ORIGINOS_BUNDLED_SKILLS_DIR;
+    const tempRoot = mkdtempSync(path.join(tmpdir(), 'originos-skill-launcher-'));
+    const emptyBundledRoot = path.join(tempRoot, 'empty-bundled-skills');
+    const monorepoRoot = path.join(tempRoot, 'repo');
+    const dataRoot = path.join(tempRoot, 'data');
+    const bundledSkillDir = path.join(monorepoRoot, 'templates', 'skills', 'skill-creator-app');
+    mkdirSync(emptyBundledRoot, { recursive: true });
+    mkdirSync(bundledSkillDir, { recursive: true });
+    writeFileSync(
+      path.join(bundledSkillDir, 'SKILL.md'),
+      [
+        '---',
+        'name: skill-creator-app',
+        'description: Bundled fallback skill',
+        '---',
+        '',
+        'Create a skill.',
+      ].join('\n'),
+      'utf8',
+    );
+
+    try {
+      setMonorepoRoot(monorepoRoot);
+      process.env.DATA_ROOT = dataRoot;
+      process.env.ORIGINOS_BUNDLED_SKILLS_DIR = emptyBundledRoot;
+
+      const launcher = new TestSkillLauncher();
+      const result = await launcher.launch({
+        entryId: 'skill-creator-app',
+        entryType: 'skill',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.systemPrompt).toContain(`Skill source directory: ${bundledSkillDir}`);
+      expect(result.systemPrompt).toContain('Create a skill.');
+    } finally {
+      setMonorepoRoot(originalRoot);
+      if (originalDataRoot === undefined) {
+        delete process.env.DATA_ROOT;
+      } else {
+        process.env.DATA_ROOT = originalDataRoot;
+      }
+      if (originalBundledDir === undefined) {
+        delete process.env.ORIGINOS_BUNDLED_SKILLS_DIR;
+      } else {
+        process.env.ORIGINOS_BUNDLED_SKILLS_DIR = originalBundledDir;
+      }
+    }
+  });
+
   it('loads bundled template skills without copying definitions into data skills', async () => {
     const originalRoot = getMonorepoRoot();
     const originalDataRoot = process.env.DATA_ROOT;
