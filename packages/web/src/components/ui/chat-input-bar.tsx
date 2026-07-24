@@ -145,7 +145,7 @@ export function ChatInputBar({
           <button
             type="button"
             onClick={onUpload}
-            disabled={disabled || isGenerating || uploading}
+            disabled={uploading}
             className={cn('p-2 rounded-lg border disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0', uploadBtnClass)}
             title="上传文件"
           >

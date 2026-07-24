@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-24 — fix：修复角色窗体附件按钮禁用
+
+**类型**：fix
+**影响模块**：`packages/web/src/components/ui/chat-input-bar.tsx`, `packages/web/src/components/ui/__tests__/chat-input-bar.test.tsx`
+**摘要**：角色 Agent 窗体会在 running/thinking 状态下禁用输入框，`ChatInputBar` 之前把同一个 disabled 状态复用到附件按钮，导致 Windows 版本中创建出来的角色点击上传附件按钮没有反应。附件按钮现在只在上传进行中禁用，即使消息输入暂时不可发送，也可以正常打开文件选择器。
+
 ## 2026-07-24 — docs：更新应用版本到 0.1.19
 
 **类型**：docs
