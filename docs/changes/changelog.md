@@ -2,6 +2,24 @@
 
 ---
 
+## 2026-07-25 — docs：更新应用版本到 0.1.22
+
+**类型**：docs
+**影响模块**：`package.json`, `packages/desktop/package.json`, `docs/changes/releases/v0.1.22/changelog.md`
+**摘要**：将 OriginOS CE 桌面发布版本从 `0.1.19` 更新到 `0.1.22`，用于发布内置技能按需 materialize、系统技能过滤和 macOS `pi-agent-core` runtime 校验修复。远端已存在失败的 `0.1.20/0.1.21` tag，因此本次使用新的补丁版本。
+
+## 2026-07-25 — fix：内置技能按需同步到 data 后运行
+
+**类型**：fix
+**影响模块**：`packages/core/src/lib/integrations/pi-agent/core/skills.ts`, `packages/core/src/lib/features/skills/service.ts`, `packages/core/src/lib/features/services/launcher/skill.ts`, `packages/core/src/lib/features/user-registry/index.ts`, `packages/core/src/lib/integrations/pi-agent/tools/skill-tools.ts`, `templates/skills/*/SKILL.md`
+**摘要**：内置模板技能首次点击或启动前会从 `resources/templates/skills/{skill}` 同步到 `data/skills/{skill}`，本次 SkillDialog 和 Agent 启动即使用 data 目录，避免第一次和后续运行的记忆、附件、工作空间与产物目录不一致。内置模板 `SKILL.md` 增加 `originos-system: true` 元数据，用户自定义技能区域、`/api/user-skills` 和 `list_skills` 工具会过滤这些系统技能。
+
+## 2026-07-24 — fix：修复 macOS 包缺失 pi-agent-core 运行依赖
+
+**类型**：fix
+**影响模块**：`packages/desktop/package.json`, `packages/desktop/electron-builder.yml`, `packages/desktop/scripts/verify-mac-package.js`, `.github/workflows/desktop-release.yml`, `pnpm-lock.yaml`
+**摘要**：macOS 0.1.19 安装包打开时报 `Cannot find module '@mariozechner/pi-agent-core'`，原因是 `@mariozechner/agent` 的 workspace 包运行时转发到 `pi-agent-core`，但 desktop 包没有显式声明该依赖，Mac 构建也只有签名校验，没有 app.asar runtime smoke check。现在 desktop 显式依赖 `@mariozechner/pi-agent-core`，electron-builder 从 desktop package 边界复制该依赖，并在 macOS arm64/x64 Actions 中新增 `verify:mac-package` 校验。
+
 ## 2026-07-24 — fix：对齐 0.1.19 Windows 本地与 Actions 包校验
 
 **类型**：fix

@@ -66,6 +66,10 @@ function extractFirstParagraph(content: string): string {
   return body.split('\n').find((line) => line.trim() && !line.startsWith('#')) || '';
 }
 
+function isTruthyFrontmatterValue(value: string | undefined): boolean {
+  return value === 'true' || value === 'yes' || value === '1';
+}
+
 // ============================================================================
 // User Agents
 // ============================================================================
@@ -145,6 +149,9 @@ export function listUserSkills(): UserSkill[] {
     try {
       const content = readFileSync(skillMdPath, 'utf-8');
       const frontmatter = parseFrontmatter(content);
+      if (isTruthyFrontmatterValue(frontmatter['originos-system'])) {
+        continue;
+      }
       const tags = frontmatter['tags'];
 
       skills.push({

@@ -122,20 +122,21 @@ describe("Skill Framework", () => {
 			);
 		});
 
-		it("should load bundled template skills without copying them into data skills", () => {
+		it("should classify materialized system skills as bundled", () => {
 			const originalRoot = getMonorepoRoot();
 			const originalDataRoot = process.env.DATA_ROOT;
 			const tempRoot = mkdtempSync(join(tmpdir(), "originos-skill-template-"));
 			const monorepoRoot = join(tempRoot, "repo");
 			const dataRoot = join(tempRoot, "data");
-			const bundledSkillDir = join(monorepoRoot, "templates", "skills", "demo-skill");
-			mkdirSync(bundledSkillDir, { recursive: true });
+			const materializedSkillDir = join(dataRoot, "skills", "demo-skill");
+			mkdirSync(materializedSkillDir, { recursive: true });
 			writeFileSync(
-				join(bundledSkillDir, "SKILL.md"),
+				join(materializedSkillDir, "SKILL.md"),
 				[
 					"---",
 					"name: demo-skill",
 					"description: Demo bundled skill",
+					"originos-system: true",
 					"---",
 					"",
 					"Use this demo skill.",
@@ -148,12 +149,11 @@ describe("Skill Framework", () => {
 				process.env.DATA_ROOT = dataRoot;
 
 				const result = loadSkills({ includeDefaults: true });
-				const copiedSkillPath = join(dataRoot, "skills", "demo-skill", "SKILL.md");
 				const seededSkill = result.skills.find((skill) => skill.name === "demo-skill");
 
-				expect(existsSync(copiedSkillPath)).toBe(false);
 				expect(seededSkill?.source).toBe("bundled");
-				expect(seededSkill?.baseDir).toBe(bundledSkillDir);
+				expect(seededSkill?.systemManaged).toBe(true);
+				expect(seededSkill?.baseDir).toBe(materializedSkillDir);
 			} finally {
 				setMonorepoRoot(originalRoot);
 				if (originalDataRoot === undefined) {
@@ -183,6 +183,7 @@ describe("Skill Framework", () => {
 					"name: skill-creator-app",
 					"code: skill-creator-app",
 					"description: Skill creator bundled from resources",
+					"originos-system: true",
 					"---",
 					"",
 					"Use this packaged skill.",
@@ -208,6 +209,7 @@ describe("Skill Framework", () => {
 				expect(getBundledSkillDir()).toBe(join(resourcesRoot, "templates", "skills"));
 				expect(loadedSkill?.source).toBe("bundled");
 				expect(loadedSkill?.baseDir).toBe(bundledSkillDir);
+				expect(loadedSkill?.systemManaged).toBe(true);
 				expect(existsSync(join(dataRoot, "skills", "skill-creator-app", "SKILL.md"))).toBe(false);
 			} finally {
 				setMonorepoRoot(originalRoot);

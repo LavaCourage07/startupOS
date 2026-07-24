@@ -1,6 +1,7 @@
 ---
 name: model-review
 description: 审阅和修改业务经验模型。展示当前模型，支持查看、修改、补充和完善，确保模型准确反映用户的实际工作方式。具备智能审阅能力，能主动发现遗漏和不一致之处。
+originos-system: true
 ---
 
 # Model Review Skill

@@ -11,7 +11,7 @@
  * - Manage skill lifecycle and validation
  */
 
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "fs";
 import ignore from "ignore";
 import { basename, dirname, join, relative, resolve, sep } from "path";
 import { getDataRoot, getMonorepoRoot, getSkillsDataDir } from '../../../paths';
@@ -32,6 +32,7 @@ export interface SkillFrontmatter {
 	code?: string;
 	description?: string;
 	"disable-model-invocation"?: boolean;
+	"originos-system"?: boolean | string;
 	[key: string]: unknown;
 }
 
@@ -46,6 +47,7 @@ export interface Skill {
 	baseDir: string;
 	source: "bundled" | "user" | "project";
 	disableModelInvocation: boolean;
+	systemManaged?: boolean;
 	/** 产物输出目录（与 workingDirectory 分离）。相对路径基于 getDataRoot() 解析 */
 	outputDir?: string;
 }
@@ -192,6 +194,14 @@ function validateDescription(description: string | undefined): string[] {
 	return errors;
 }
 
+function isTruthyFrontmatterValue(value: unknown): boolean {
+	return value === true || value === "true" || value === "yes" || value === "1";
+}
+
+export function isSystemSkillFrontmatter(frontmatter: SkillFrontmatter | Record<string, unknown>): boolean {
+	return isTruthyFrontmatterValue(frontmatter["originos-system"]);
+}
+
 /**
  * Parse YAML frontmatter from markdown content
  */
@@ -270,6 +280,9 @@ function loadSkillFromFile(
 			return { skill: null, diagnostics };
 		}
 
+		const systemManaged = isSystemSkillFrontmatter(frontmatter);
+		const effectiveSource = systemManaged ? "bundled" : source;
+
 		return {
 			skill: {
 				name,
@@ -277,8 +290,9 @@ function loadSkillFromFile(
 				description: frontmatter.description,
 				filePath,
 				baseDir: skillDir,
-				source,
+				source: effectiveSource,
 				disableModelInvocation: frontmatter["disable-model-invocation"] === true,
+				systemManaged,
 				outputDir: typeof frontmatter["outputDir"] === "string" ? frontmatter["outputDir"] : undefined,
 			},
 			diagnostics,
@@ -483,9 +497,73 @@ export function getBundledSkillDir(): string {
 	return candidates[0] ?? join(getMonorepoRoot(), 'templates', 'skills');
 }
 
+export function findBundledSkillDir(skillCode: string): string | null {
+	for (const bundledDir of getBundledSkillDirs()) {
+		const candidate = join(bundledDir, skillCode);
+		if (existsSync(join(candidate, "SKILL.md"))) {
+			return candidate;
+		}
+	}
+
+	for (const bundledDir of getBundledSkillDirs()) {
+		if (!existsSync(bundledDir)) continue;
+		try {
+			const entries = readdirSync(bundledDir, { withFileTypes: true });
+			for (const entry of entries) {
+				if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+				const candidate = join(bundledDir, entry.name);
+				const skillMd = join(candidate, "SKILL.md");
+				if (!existsSync(skillMd)) continue;
+				const { frontmatter } = parseFrontmatter<SkillFrontmatter>(readFileSync(skillMd, "utf-8"));
+				const code = typeof frontmatter.code === "string" ? frontmatter.code : entry.name;
+				const name = typeof frontmatter.name === "string" ? frontmatter.name : entry.name;
+				if (code === skillCode || name === skillCode) {
+					return candidate;
+				}
+			}
+		} catch {
+			// Try the next bundled root.
+		}
+	}
+	return null;
+}
+
+function isSystemManagedSkillDir(skillDir: string): boolean {
+	const skillMd = join(skillDir, "SKILL.md");
+	if (!existsSync(skillMd)) return false;
+	const { frontmatter } = parseFrontmatter<SkillFrontmatter>(readFileSync(skillMd, "utf-8"));
+	return isSystemSkillFrontmatter(frontmatter);
+}
+
+export function materializeBundledSkill(skillCode: string): Skill | null {
+	const sourceDir = findBundledSkillDir(skillCode);
+	if (!sourceDir) return null;
+
+	const targetDir = join(getSkillsDataDir(), skillCode);
+	const targetSkillMd = join(targetDir, "SKILL.md");
+	if (existsSync(targetSkillMd) && !isSystemManagedSkillDir(targetDir)) {
+		return null;
+	}
+
+	mkdirSync(targetDir, { recursive: true });
+	cpSync(sourceDir, targetDir, {
+		recursive: true,
+		force: true,
+		dereference: true,
+		filter(source) {
+			const relativePath = relative(sourceDir, source).replace(/\\/g, "/");
+			return relativePath !== ".git" && !relativePath.startsWith(".git/");
+		},
+	});
+
+	const loaded = loadSkillFromFile(join(targetDir, "SKILL.md"), "bundled").skill;
+	return loaded;
+}
+
 /**
  * @deprecated Bundled template skills are loaded directly from templates/skills.
- * This function intentionally does not copy definitions into data/skills.
+ * This function intentionally does not eagerly copy definitions into data/skills.
+ * Use materializeBundledSkill() when a system skill is opened or launched.
  */
 export function syncBundledSkillsToUserDirectory(): void {
 	return;
@@ -537,7 +615,8 @@ export function loadSkills(options: LoadSkillsOptions = {}): LoadSkillsResult {
 	}
 
 	if (includeDefaults) {
-		// 用户数据目录下的技能。模板技能不会复制到这里，避免污染用户运行时目录。
+		// 用户数据目录下的技能。按需 materialized 的系统技能会带
+		// originos-system 标识，并被归类为 bundled source。
 		const dataSkillsDir = join(getDataRoot(), "skills");
 		if (existsSync(dataSkillsDir)) {
 			addSkills(loadSkillsFromDir({ dir: dataSkillsDir, source: "user" }));

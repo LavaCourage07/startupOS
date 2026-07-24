@@ -2,6 +2,7 @@
 name: 错题梳理与强化练习
 code: wrong-answer-review
 description: 根据学生上传的试卷照片，自动识别错题、按题型分类分析薄弱环节，并生成包含原错题和同类型变式题的 Word 练习卷。适用于考试后错题梳理、薄弱知识点巩固、针对性复习、家长帮孩子整理错题、老师为学生生成针对性练习等场景。当用户上传试卷图片、提到错题整理、考试复习、薄弱环节分析、错题卷、练习卷、试卷批改、错题本等关键词时，都应使用此技能。
+originos-system: true
 version: 1.0.0
 type: SIMPLE
 author: OriginOS

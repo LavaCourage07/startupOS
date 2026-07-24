@@ -1,6 +1,7 @@
 ---
 name: business-refinement
 description: 在领域发现的基础上，通过结构化追问深度挖掘业务对象的详细信息、关联关系、处理规则、状态流转和约束条件，完善业务模型。
+originos-system: true
 ---
 
 # Business Refinement Skill

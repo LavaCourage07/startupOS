@@ -12,6 +12,7 @@ import { handle as ontologyEditorHandler } from './bundled/ontology-editor/handl
 import {
   loadSkillContent,
   loadSkills,
+  materializeBundledSkill,
   parseFrontmatter,
   type Skill,
   type SkillDiagnostic,
@@ -255,6 +256,14 @@ function findSkill(name: string): Skill | undefined {
   return result.skills.find((skill) => skill.code === name || skill.name === name);
 }
 
+function findSkillForContent(name: string): Skill | undefined {
+  const skill = findSkill(name);
+  if (skill?.systemManaged) {
+    return materializeBundledSkill(skill.code ?? skill.name) ?? skill;
+  }
+  return skill ?? materializeBundledSkill(name) ?? undefined;
+}
+
 function generateExecutionId(skillName: string): string {
   const timestamp = Date.now().toString(36);
   const random = Math.random().toString(36).substring(2, 8);
@@ -467,7 +476,7 @@ export function refreshSkills(): SkillListResponse {
 }
 
 export function getSkillContent(request: SkillContentRequest): SkillContentResponse {
-  const skill = findSkill(request.name);
+  const skill = findSkillForContent(request.name);
 
   if (!skill) {
     throw new SkillServiceError('NOT_FOUND', `Skill "${request.name}" not found`, 404);

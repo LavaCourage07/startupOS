@@ -87,8 +87,7 @@ const ListSkillsTool: ToolRegistration = {
 			});
 			const { skills, diagnostics } = result;
 
-			// 全部为用户技能，不再按来源过滤
-			const filtered = skills;
+			const filtered = skills.filter(skill => !skill.systemManaged);
 
 			const skillsList = filtered.map(s => ({
 				name: s.name,
@@ -190,7 +189,7 @@ const SkillTool: ToolRegistration = {
 
 			// 查找技能（按 name 或 code 匹配）
 			const targetSkill = skills.find(
-				s => s.name === skillNameOrCode || s.code === skillNameOrCode
+				s => !s.systemManaged && (s.name === skillNameOrCode || s.code === skillNameOrCode)
 			);
 
 			if (!targetSkill) {

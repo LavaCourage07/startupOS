@@ -36,7 +36,7 @@ files:
       - "package.json"
       - "index.js"
       - "index.d.ts"
-  - from: ../../node_modules/@mariozechner/pi-agent-core
+  - from: node_modules/@mariozechner/pi-agent-core
     to: node_modules/@mariozechner/pi-agent-core
     filter:
       - "package.json"

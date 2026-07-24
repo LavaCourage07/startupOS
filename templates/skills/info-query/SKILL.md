@@ -1,6 +1,7 @@
 ---
 name: info-query
 description: 信息查询技能，帮助用户通过对话式界面查询项目相关信息
+originos-system: true
 version: 1.0.0
 type: SIMPLE
 author: OriginOS

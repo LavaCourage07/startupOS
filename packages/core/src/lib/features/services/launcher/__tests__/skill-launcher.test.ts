@@ -33,6 +33,7 @@ describe('SkillLauncher', () => {
         '---',
         'name: skill-creator-app',
         'description: Bundled fallback skill',
+        'originos-system: true',
         '---',
         '',
         'Create a skill.',
@@ -50,10 +51,13 @@ describe('SkillLauncher', () => {
         entryId: 'skill-creator-app',
         entryType: 'skill',
       });
+      const expectedWorkingDir = path.join(dataRoot, 'skills', 'skill-creator-app');
 
       expect(result.success).toBe(true);
-      expect(result.systemPrompt).toContain(`Skill source directory: ${bundledSkillDir}`);
+      expect(result.baseDir).toBe(expectedWorkingDir);
+      expect(result.systemPrompt).toContain(`Skill source directory: ${expectedWorkingDir}`);
       expect(result.systemPrompt).toContain('Create a skill.');
+      expect(existsSync(path.join(expectedWorkingDir, 'SKILL.md'))).toBe(true);
     } finally {
       setMonorepoRoot(originalRoot);
       if (originalDataRoot === undefined) {
@@ -69,7 +73,7 @@ describe('SkillLauncher', () => {
     }
   });
 
-  it('loads bundled template skills without copying definitions into data skills', async () => {
+  it('materializes bundled template skills into data skills before launch', async () => {
     const originalRoot = getMonorepoRoot();
     const originalDataRoot = process.env.DATA_ROOT;
     const tempRoot = mkdtempSync(path.join(tmpdir(), 'originos-skill-launcher-'));
@@ -83,6 +87,7 @@ describe('SkillLauncher', () => {
         '---',
         'name: windows-skill',
         'description: Windows path skill',
+        'originos-system: true',
         '---',
         '',
         'Write artifacts to ${OUTPUT_DIR}.',
@@ -103,11 +108,11 @@ describe('SkillLauncher', () => {
 
       expect(result.success).toBe(true);
       expect(result.baseDir).toBe(expectedWorkingDir);
-      expect(result.systemPrompt).toContain(`Skill source directory: ${bundledSkillDir}`);
+      expect(result.systemPrompt).toContain(`Skill source directory: ${expectedWorkingDir}`);
       expect(result.systemPrompt).toContain(`Write artifacts to ${expectedWorkingDir}.`);
       expect(result.systemPrompt).not.toContain('${OUTPUT_DIR}');
       expect(result.systemPrompt).not.toContain('/workspace');
-      expect(existsSync(path.join(expectedWorkingDir, 'SKILL.md'))).toBe(false);
+      expect(existsSync(path.join(expectedWorkingDir, 'SKILL.md'))).toBe(true);
     } finally {
       setMonorepoRoot(originalRoot);
       if (originalDataRoot === undefined) {
@@ -132,6 +137,7 @@ describe('SkillLauncher', () => {
         '---',
         'name: windows-skill',
         'description: Windows path skill',
+        'originos-system: true',
         'outputDir: data/',
         '---',
         '',

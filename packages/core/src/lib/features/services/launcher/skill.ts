@@ -1,7 +1,7 @@
 /**
  * Skill Launcher
  *
- * 启动流程（data/skills/{code}/ 或 templates/skills/{code}/）：
+ * 启动流程（data/skills/{code}/）：
  * 1. 读取 SKILL.md → 解析 frontmatter + body
  * 2. 提取依赖声明（dependencies / prerequisites），注入系统提示词
  * 3. 构建系统提示词（含依赖安装指引）
@@ -17,7 +17,7 @@ import { getToolRegistry } from '../../../../lib/integrations/pi-agent/tools/reg
 import { buildPromptMemorySections } from '../../../../lib/integrations/pi-agent/memory-consumption';
 import { appendGlobalUserPreferencesPrompt } from '../../../../lib/integrations/pi-agent/user-preferences';
 import { getDataRoot } from '../../../paths';
-import { getBundledSkillDirs } from '../../../../lib/integrations/pi-agent/core/skills';
+import { getBundledSkillDirs, materializeBundledSkill } from '../../../../lib/integrations/pi-agent/core/skills';
 
 const MAX_TOOL_DESC_CHARS = 120;
 
@@ -367,6 +367,8 @@ export class SkillLauncher extends Launcher {
 
   async launch(ctx: LaunchContext): Promise<LaunchResult> {
     try {
+      materializeBundledSkill(ctx.entryId);
+
       // 1. 查找并读取 SKILL.md
       const skillInfo = findSkillFile(ctx.entryId);
       if (!skillInfo) {
@@ -466,6 +468,8 @@ export class SkillLauncher extends Launcher {
   }
 
   async loadEntryContent(id: string): Promise<Record<string, string>> {
+    materializeBundledSkill(id);
+
     const skillInfo = findSkillFile(id);
     if (!skillInfo) return {};
 

@@ -1,6 +1,7 @@
 ---
 name: role-agent-creator
 description: 角色 Agent 创建助手，帮助用户基于专业角色模板或自定义角色创建 Agent，生成完整的 Agent 工程文件
+originos-system: true
 version: 1.0.0
 type: COMPOSITE
 author: OriginOS

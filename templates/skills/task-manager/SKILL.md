@@ -1,6 +1,7 @@
 ---
 name: task-manager
 description: 任务管理技能，帮助用户通过对话式界面管理项目中的任务
+originos-system: true
 version: 1.0.0
 type: COMPOSITE
 author: OriginOS

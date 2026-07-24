@@ -2,6 +2,7 @@
 name: 麻将计分器
 code: mahjong-scorer
 description: 三人麻将计分记录器。当用户提到麻将、打牌、胡牌、计分、算分、牌局记录等关键词时使用此技能。用户会告诉你谁胡牌、多少分，技能自动计算并记录三位玩家的分数变化。即使玩家只说"GJ胡了8分"这样的简短信息，也能自动识别并记录。
+originos-system: true
 version: 1.0.0
 type: SIMPLE
 author: OriginOS

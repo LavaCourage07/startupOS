@@ -2,13 +2,13 @@
 
 **Story:** Windows 内置模板技能加载修复
 **版本:** 1.0
-**最后更新:** 2026-07-23
+**最后更新:** 2026-07-25
 
 ---
 
 ## 设计目标
 
-这是运行时 bugfix，用户界面不新增新流程。目标是在用户点击首页内置模板技能时保持现有 SkillDialog 体验，但后台技能来源从 bundled/template 只读源解析，而不是依赖用户 `data/skills` 副本。
+这是运行时 bugfix，用户界面不新增新流程。目标是在用户点击首页内置模板技能时保持现有 SkillDialog 体验，但后台先从 bundled/template 只读源 materialize 到 `data/skills/{skill}`，再从该 data 目录加载、运行并打开工作空间。
 
 ---
 
@@ -20,7 +20,8 @@ flowchart TD
     Home --> Click[用户点击 skill-creator-app]
     Click --> Resolve[SkillService 多源解析]
     Resolve --> Bundled{bundled/template 存在}
-    Bundled -->|是| Content[返回技能内容]
+    Bundled -->|是| Materialize[同步到 data/skills/skill-creator-app]
+    Materialize --> Content[从 data 目录返回技能内容]
     Content --> Dialog[SkillDialog 打开并初始化 Pi Agent]
     Bundled -->|否| Error[显示可恢复错误]
 ```
@@ -33,6 +34,7 @@ flowchart TD
 
 - 首页仍显示 `skill-creator-app` 等内置应用入口。
 - 用户点击后 SkillDialog 正常打开。
+- 首次点击后工作空间入口打开 `data/skills/{skill}`，且能看到 materialized 的 `SKILL.md` 和后续运行产物。
 - 加载中的状态、输入框、Agent 初始化流程保持现状。
 
 ### 错误状态
@@ -43,8 +45,8 @@ flowchart TD
 
 ### 用户目录状态
 
-- `data/skills` 继续只承载用户技能运行时产物或用户安装技能。
-- 系统模板技能不显示为用户目录下的副本。
+- `data/skills` 承载用户技能，以及按需 materialized 的系统内置技能运行目录。
+- 系统内置技能目录通过 `SKILL.md` 的 `originos-system: true` 标识过滤，不显示在自定义技能区域。
 
 ---
 

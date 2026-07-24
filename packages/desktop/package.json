@@ -1,6 +1,6 @@
 {
   "name": "@originos/desktop",
-  "version": "0.1.19",
+  "version": "0.1.22",
   "private": true,
   "main": "dist-electron/desktop/src/main/main.js",
   "scripts": {
@@ -15,6 +15,7 @@
     "dist:mac:app": "pnpm build:app && electron-builder --config electron-builder.yml --mac dir --arm64 --x64 --publish never",
     "dist:mac": "pnpm dist:mac:app && NODE_OPTIONS= node scripts/create-mac-dmg.js",
     "dist:mac:publish": "pnpm build:app && electron-builder --config electron-builder.yml --mac --arm64 --x64 --publish always",
+    "verify:mac-package": "node scripts/verify-mac-package.js",
     "verify:mac-signing": "node scripts/verify-mac-signing.js",
     "bump-version": "node scripts/bump-release-version.js",
     "publish:qiniu": "node scripts/publish-qiniu-updates.js",
@@ -31,6 +32,7 @@
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "^0.0.51",
     "@mariozechner/agent": "workspace:*",
+    "@mariozechner/pi-agent-core": "0.55.3",
     "@mariozechner/pi-ai": "0.55.3",
     "@sinclair/typebox": "^0.34.0",
     "dotenv": "^16.6.1",

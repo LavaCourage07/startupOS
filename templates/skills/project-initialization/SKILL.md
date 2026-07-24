@@ -1,6 +1,7 @@
 ---
 name: project-initialization
 description: OriginOS 项目访谈 Skill - 通过对话式引导完成项目业务建模。采用"领域发现"和"业务精炼"两阶段模式，从模糊想法到严谨的业务模型。
+originos-system: true
 ---
 
 # OriginOS 项目访谈 Skill

@@ -1,6 +1,7 @@
 ---
 name: agent-creator
 description: 任务型 Agent 创建助手，通过对话式交互引导用户创建以事为维度的标准 Agent。Use when user says "创建 Agent", "新建任务型 Agent", or "create an agent".
+originos-system: true
 outputDir: data/
 ---
 

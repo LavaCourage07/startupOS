@@ -97,6 +97,7 @@ function verifyAsar() {
     'dist-electron/core/src/lib/integrations/pi-agent/tools/index.js',
     'dist-electron/core/src/lib/integrations/pi-agent/tools/loop-detector.js',
     'dist-electron/core/src/lib/integrations/pi-agent/tools/schedule-tools.js',
+    'dist-electron/core/src/lib/features/skills/service.js',
     'dist-electron/core/src/lib/features/services/launcher/skill.js',
     'dist-electron/desktop/src/main/main.js',
     'node_modules/@mariozechner/agent/index.js',
@@ -116,6 +117,7 @@ function verifyAsar() {
     'dist-electron/core/src/lib/integrations/pi-agent/core/agent.js',
     'dist-electron/core/src/lib/integrations/pi-agent/tools/loop-detector.js',
     'dist-electron/core/src/lib/integrations/pi-agent/tools/schedule-tools.js',
+    'dist-electron/core/src/lib/features/skills/service.js',
     'dist-electron/core/src/lib/features/services/launcher/skill.js',
   ];
 
@@ -137,6 +139,13 @@ function verifyAsar() {
   const launcherRuntime = fs.readFileSync(launcherRuntimePath, 'utf8');
   if (!launcherRuntime.includes('getBundledSkillDirs')) {
     fail('SkillLauncher runtime does not scan all bundled skill directories');
+  }
+  const skillServiceRuntime = fs.readFileSync(
+    path.join(smokeDir, 'dist-electron/core/src/lib/features/skills/service.js'),
+    'utf8',
+  );
+  if (!skillServiceRuntime.includes('materializeBundledSkill')) {
+    fail('SkillService runtime does not materialize bundled skills before content load');
   }
   verifyPiAiProviderImports(smokeDir);
 

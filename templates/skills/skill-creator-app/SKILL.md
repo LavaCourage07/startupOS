@@ -2,6 +2,7 @@
 name: skill-creator-app
 code: skill-creator-app
 description: 创建、迭代和优化 OriginOS 技能。当用户想要从零创建技能、改进现有技能、运行评测验证技能效果、或优化技能描述以提升触发准确率时触发。
+originos-system: true
 version: 1.0.0
 type: COMPOSITE
 author: OriginOS
