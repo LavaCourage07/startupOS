@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — fix：发布 macOS 更新元数据
+
+**类型**：fix
+**影响模块**：`packages/desktop/scripts/generate-update-metadata.js`, `packages/desktop/scripts/publish-qiniu-updates.js`, `packages/desktop/scripts/verify-update-metadata.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.36`。macOS 发布产物没有 zip 时会基于 x64/arm64 dmg 生成 `latest-mac.yml` / `stable-mac.yml`，发布脚本会上传并校验 mac metadata，避免 CDN mac 更新元数据停留在旧版本。
+
 ## 2026-07-25 — release：重新验证 Apple notarization secrets
 
 **类型**：release

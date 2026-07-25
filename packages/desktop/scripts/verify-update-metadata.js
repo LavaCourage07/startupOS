@@ -115,6 +115,14 @@ function main() {
     verifyMetadataFile('latest.yml', windowsExe);
     verifyMetadataFile('stable.yml', windowsExe);
   }
+
+  const macX64Zip = `OriginOS CE-${version}-x64.zip`;
+  const macX64Dmg = `OriginOS CE-${version}-x64.dmg`;
+  const macPrimary = fs.existsSync(path.join(releaseDir, macX64Zip)) ? macX64Zip : macX64Dmg;
+  if (fs.existsSync(path.join(releaseDir, macPrimary))) {
+    verifyMetadataFile('latest-mac.yml', macPrimary);
+    verifyMetadataFile('stable-mac.yml', macPrimary);
+  }
 }
 
 main();

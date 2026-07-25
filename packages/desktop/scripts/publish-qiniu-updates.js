@@ -359,11 +359,13 @@ async function main() {
   // 检测有哪些平台的构建产物
   const hasMacArm64 = hasReleasePackage(`OriginOS CE-${version}-arm64.dmg`);
   const hasMacX64 = hasReleasePackage(`OriginOS CE-${version}-x64.dmg`);
-  const hasMacUpdateZip =
+  const hasMacUpdateMetadata =
     hasMacArm64 &&
     hasMacX64 &&
-    hasReleasePackage(`OriginOS CE-${version}-arm64.zip`) &&
-    hasReleasePackage(`OriginOS CE-${version}-x64.zip`);
+    (hasReleasePackage(`OriginOS CE-${version}-arm64.zip`) &&
+      hasReleasePackage(`OriginOS CE-${version}-x64.zip`) ||
+      hasReleasePackage(`OriginOS CE-${version}-arm64.dmg`) &&
+        hasReleasePackage(`OriginOS CE-${version}-x64.dmg`));
   const hasWinExe = hasReleasePackage(`OriginOS CE-${version}-x64.exe`);
   const hasWinZip = hasReleasePackage(`OriginOS CE-${version}-x64.zip`);
 
@@ -371,7 +373,7 @@ async function main() {
   generateUpdateMetadataFiles();
 
   const metadataFiles = [
-    hasMacUpdateZip ? path.join(releaseDir, 'latest-mac.yml') : null,
+    hasMacUpdateMetadata ? path.join(releaseDir, 'latest-mac.yml') : null,
     hasWinExe || hasWinZip ? path.join(releaseDir, 'latest-win.yml') : null,
   ].filter(Boolean);
 
