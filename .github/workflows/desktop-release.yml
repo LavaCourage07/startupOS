@@ -121,6 +121,12 @@ jobs:
           echo "APPLE_API_KEY_ID=$APPLE_API_KEY_ID" >> "$GITHUB_ENV"
           echo "APPLE_API_ISSUER=$APPLE_API_ISSUER" >> "$GITHUB_ENV"
 
+      - name: Install rcodesign notarization fallback
+        run: |
+          if ! command -v rcodesign >/dev/null 2>&1; then
+            cargo install apple-codesign --version 0.29.0 --locked
+          fi
+
       - name: Build macOS arm64 package
         working-directory: packages/desktop
         env:
@@ -177,6 +183,12 @@ jobs:
           echo "APPLE_API_KEY=$APPLE_API_KEY_PATH" >> "$GITHUB_ENV"
           echo "APPLE_API_KEY_ID=$APPLE_API_KEY_ID" >> "$GITHUB_ENV"
           echo "APPLE_API_ISSUER=$APPLE_API_ISSUER" >> "$GITHUB_ENV"
+
+      - name: Install rcodesign notarization fallback
+        run: |
+          if ! command -v rcodesign >/dev/null 2>&1; then
+            cargo install apple-codesign --version 0.29.0 --locked
+          fi
 
       - name: Build macOS x64 package
         working-directory: packages/desktop

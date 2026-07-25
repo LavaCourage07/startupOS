@@ -77,7 +77,10 @@ async function submitForNotarization(zipPath, options = {}) {
   const output = result.output.trim();
   if (result.timedOut || result.signal || result.code !== 0) {
     const status = result.timedOut ? 'timeout' : result.signal ? `signal ${result.signal}` : `exit code ${result.code}`;
-    throw new Error(`notarytool submit failed with ${status}\n${output || '(empty output)'}`);
+    const error = new Error(`notarytool submit failed with ${status}\n${output || '(empty output)'}`);
+    error.notarySignal = result.signal || null;
+    error.notaryTimedOut = Boolean(result.timedOut);
+    throw error;
   }
   if (!output) {
     throw new Error('notarytool submit returned empty output');
@@ -161,6 +164,42 @@ async function notarize(zipPath) {
   return response;
 }
 
+async function writeRcodesignApiKeyFile(tempDir) {
+  const key = process.env.APPLE_API_KEY;
+  const keyId = process.env.APPLE_API_KEY_ID;
+  const issuer = process.env.APPLE_API_ISSUER;
+  if (!key || !keyId || !issuer) {
+    throw new Error('APPLE_API_KEY, APPLE_API_KEY_ID, and APPLE_API_ISSUER are required for rcodesign fallback');
+  }
+
+  const apiKeyPath = path.join(tempDir, 'app-store-connect-api-key.json');
+  const result = await run(
+    'rcodesign',
+    ['encode-app-store-connect-api-key', '-o', apiKeyPath, issuer, keyId, key],
+    { timeoutMs: 2 * 60 * 1000 },
+  );
+  if (result.timedOut || result.signal || result.code !== 0) {
+    const status = result.timedOut ? 'timeout' : result.signal ? `signal ${result.signal}` : `exit code ${result.code}`;
+    throw new Error(`rcodesign encode-app-store-connect-api-key failed with ${status}\n${result.output || '(empty output)'}`);
+  }
+  return apiKeyPath;
+}
+
+async function notarizeWithRcodesign(appPath, tempDir) {
+  const apiKeyPath = await writeRcodesignApiKeyFile(tempDir);
+  console.log('[notarize-mac-app] falling back to rcodesign notarization');
+  const result = await run(
+    'rcodesign',
+    ['notary-submit', '--api-key-file', apiKeyPath, '--staple', appPath],
+    { timeoutMs: Number(process.env.ORIGINOS_NOTARY_TIMEOUT_MS || 45 * 60 * 1000) },
+  );
+  if (result.timedOut || result.signal || result.code !== 0) {
+    const status = result.timedOut ? 'timeout' : result.signal ? `signal ${result.signal}` : `exit code ${result.code}`;
+    throw new Error(`rcodesign notary-submit failed with ${status}\n${result.output || '(empty output)'}`);
+  }
+  console.log('[notarize-mac-app] rcodesign notarization and stapling completed');
+}
+
 module.exports = async function notarizeMacApp(context) {
   if (process.platform !== 'darwin') {
     return;
@@ -187,13 +226,26 @@ module.exports = async function notarizeMacApp(context) {
     throw new Error(`ditto failed with ${status}\n${zipResult.output}`);
   }
 
-  const response = await notarize(zipPath);
-  console.log(`[notarize-mac-app] notarization accepted: ${response.id || 'unknown id'}`);
+  let usedRcodesignFallback = false;
+  try {
+    const response = await notarize(zipPath);
+    console.log(`[notarize-mac-app] notarization accepted: ${response.id || 'unknown id'}`);
+  } catch (error) {
+    const signal = error && error.notarySignal;
+    if (signal !== 'SIGTRAP' && signal !== 'SIGILL') {
+      throw error;
+    }
+    usedRcodesignFallback = true;
+    console.warn(`[notarize-mac-app] xcrun notarytool crashed with ${signal}; using rcodesign fallback`);
+    await notarizeWithRcodesign(appPath, tempDir);
+  }
 
-  const stapleResult = await run('xcrun', ['stapler', 'staple', appPath], { timeoutMs: 2 * 60 * 1000 });
-  if (stapleResult.timedOut || stapleResult.signal || stapleResult.code !== 0) {
-    const status = stapleResult.timedOut ? 'timeout' : stapleResult.signal ? `signal ${stapleResult.signal}` : `exit code ${stapleResult.code}`;
-    throw new Error(`stapler failed with ${status}\n${stapleResult.output}`);
+  if (!usedRcodesignFallback) {
+    const stapleResult = await run('xcrun', ['stapler', 'staple', appPath], { timeoutMs: 2 * 60 * 1000 });
+    if (stapleResult.timedOut || stapleResult.signal || stapleResult.code !== 0) {
+      const status = stapleResult.timedOut ? 'timeout' : stapleResult.signal ? `signal ${stapleResult.signal}` : `exit code ${stapleResult.code}`;
+      throw new Error(`stapler failed with ${status}\n${stapleResult.output}`);
+    }
   }
   console.log('[notarize-mac-app] stapled app successfully');
 };

@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — fix：为 macOS 公证加入 rcodesign fallback
+
+**类型**：fix
+**影响模块**：`.github/workflows/desktop-release.yml`, `packages/desktop/scripts/notarize-mac-app.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.32`。GitHub macOS runner 上 `xcrun notarytool submit` 会以 `SIGTRAP` / `SIGILL` 崩溃且无输出；CI 现在预装 `rcodesign`，当 notarytool 发生这类崩溃时自动使用 rcodesign 通过 App Store Connect API 完成 notarization 和 stapling。
+
 ## 2026-07-25 — fix：改为轮询 macOS 公证状态
 
 **类型**：fix
