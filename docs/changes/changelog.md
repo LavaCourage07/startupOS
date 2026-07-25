@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — fix：将 Apple API Key 规范化为 PKCS#8
+
+**类型**：fix
+**影响模块**：`packages/desktop/scripts/prepare-apple-api-key.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.25`。macOS notarization 前会把可解析的 EC private key 统一导出为 PKCS#8 PEM，避免 notarytool 对非 PKCS#8 ASN.1 私钥报 `invalidAsn1`。
+
 ## 2026-07-25 — fix：规范化 macOS 公证 Apple API Key
 
 **类型**：fix

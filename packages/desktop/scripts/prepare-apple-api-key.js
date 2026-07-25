@@ -40,9 +40,18 @@ function normalizePem(value) {
   return unescaped;
 }
 
-function validatePrivateKey(pem) {
+function normalizePrivateKeyToPkcs8(pem) {
   try {
-    crypto.createPrivateKey(pem);
+    const keyObject = crypto.createPrivateKey(pem);
+    if (keyObject.asymmetricKeyType !== 'ec') {
+      fail(
+        [
+          'APPLE_API_KEY must be an App Store Connect EC private key.',
+          `Detected key type: ${keyObject.asymmetricKeyType || 'unknown'}.`,
+        ].join(' '),
+      );
+    }
+    return keyObject.export({ type: 'pkcs8', format: 'pem' });
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
     fail(
@@ -64,10 +73,10 @@ function main() {
   if (!keyId) fail('APPLE_API_KEY_ID is required');
 
   const pem = normalizePem(rawKey).replace(/\r\n/g, '\n').trimEnd() + '\n';
-  validatePrivateKey(pem);
+  const pkcs8Pem = normalizePrivateKeyToPkcs8(pem);
 
   const outputPath = path.join(outputDir, `AuthKey_${keyId}.p8`);
-  fs.writeFileSync(outputPath, pem, { mode: 0o600 });
+  fs.writeFileSync(outputPath, pkcs8Pem, { mode: 0o600 });
   fs.chmodSync(outputPath, 0o600);
   console.log(outputPath);
 }
