@@ -1,6 +1,6 @@
 {
   "name": "originos",
-  "version": "0.1.28",
+  "version": "0.1.29",
   "private": true,
   "description": "An AI-native desktop OS prototype with Next.js, Electron, and multi-agent collaboration",
   "author": "Archersado <archersado@hotmail.com>",

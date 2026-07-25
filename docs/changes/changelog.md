@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — fix：拆出 macOS 手动公证流程
+
+**类型**：fix
+**影响模块**：`packages/desktop/electron-builder.yml`, `packages/desktop/scripts/notarize-mac-app.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.29`。关闭 electron-builder 内置 notarization，改由 afterSign hook 手动 zip `.app`、调用 `xcrun notarytool submit`、验收后 `stapler staple`，并在 API Key issuer 导致空输出时自动重试不带 issuer 的提交路径。
+
 ## 2026-07-25 — ci：暴露 macOS electron-builder 失败摘要
 
 **类型**：ci
