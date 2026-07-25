@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — fix：兼容 notarytool 空 JSON 输出
+
+**类型**：fix
+**影响模块**：`packages/desktop/scripts/notarize-mac-app.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.30`。macOS 手动公证保留 Apple API issuer；当 `notarytool submit --wait --output-format json` 以 exit code 0 返回空输出时，不再错误地去掉 issuer 重试，而是继续执行 `stapler staple`，由 stapler 验证 notarization 是否真实可用。
+
 ## 2026-07-25 — fix：拆出 macOS 手动公证流程
 
 **类型**：fix

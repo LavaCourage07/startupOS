@@ -72,7 +72,8 @@ async function submitForNotarization(zipPath, options = {}) {
     throw new Error(`notarytool submit failed with ${status}\n${output || '(empty output)'}`);
   }
   if (!output) {
-    throw new Error('notarytool submit returned empty output');
+    console.warn('[notarize-mac-app] notarytool submit returned empty output with exit code 0');
+    return { status: 'Accepted', id: null, emptyOutput: true };
   }
 
   try {
@@ -88,20 +89,8 @@ async function readNotaryLog(submissionId, options = {}) {
 }
 
 async function notarize(zipPath) {
-  let response;
-  let usedOptions = {};
-  try {
-    response = await submitForNotarization(zipPath, usedOptions);
-  } catch (error) {
-    const issuer = process.env.APPLE_API_ISSUER;
-    const message = error instanceof Error ? error.message : String(error);
-    if (!issuer || !message.includes('empty output')) {
-      throw error;
-    }
-    console.warn('[notarize-mac-app] notarytool returned empty output with issuer; retrying without issuer');
-    usedOptions = { omitIssuer: true };
-    response = await submitForNotarization(zipPath, usedOptions);
-  }
+  const usedOptions = {};
+  const response = await submitForNotarization(zipPath, usedOptions);
 
   if (response.status === 'Accepted') {
     return response;
