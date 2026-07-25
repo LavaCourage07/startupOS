@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — release：重新验证 Apple notarization secrets
+
+**类型**：release
+**影响模块**：`.gitignore`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.35`，用于在 GitHub Actions secrets 重新配置后触发完整桌面构建发布链路。保留 `*.p8` / `AuthKey_*.p8` ignore 规则，防止 Apple API 私钥误提交。
+
 ## 2026-07-25 — ci：公开 Apple notarization 预检失败原因
 
 **类型**：ci
