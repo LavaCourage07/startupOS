@@ -256,6 +256,8 @@ jobs:
           name: macos-x64-release
           path: release
 
+      - run: pnpm --filter @originos/desktop generate:update-metadata
+
       - run: pnpm --filter @originos/desktop verify:release-artifacts
 
       - name: Verify publish secrets

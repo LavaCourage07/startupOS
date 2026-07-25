@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — fix：发布前生成全平台更新元数据
+
+**类型**：fix
+**影响模块**：`.github/workflows/desktop-release.yml`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.38`。Qiniu publish job 在下载三平台 artifacts 后先运行 `generate:update-metadata`，再执行 `verify:release-artifacts`，确保 mac metadata 在发布前验证阶段已经生成。
+
 ## 2026-07-25 — fix：避免 Windows zip 误触发 mac 元数据校验
 
 **类型**：fix
