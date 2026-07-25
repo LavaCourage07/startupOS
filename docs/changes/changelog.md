@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — ci：公开 Apple notarization 预检失败原因
+
+**类型**：ci
+**影响模块**：`packages/desktop/scripts/verify-apple-notary-credentials.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.34`。Apple notarization 凭据预检失败时会写入 GitHub Actions error annotation，让公开检查结果直接显示 App Store Connect 认证失败原因，而不是只有 generic exit code。
+
 ## 2026-07-25 — ci：前移 Apple notarization 凭据预检
 
 **类型**：ci

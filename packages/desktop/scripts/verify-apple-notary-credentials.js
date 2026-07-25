@@ -7,6 +7,13 @@ const path = require('node:path');
 
 function fail(message) {
   console.error(`[verify-apple-notary-credentials] ${message}`);
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    const escaped = message
+      .replace(/%/g, '%25')
+      .replace(/\r/g, '%0D')
+      .replace(/\n/g, '%0A');
+    console.error(`::error title=Apple notarization credentials failed::${escaped}`);
+  }
   process.exit(1);
 }
 
