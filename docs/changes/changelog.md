@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — ci：增加 Apple Notary 凭据预检
+
+**类型**：ci
+**影响模块**：`.github/workflows/desktop-release.yml`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.26`。macOS Actions 在 electron-builder 前先执行 `xcrun notarytool history`，直接验证规范化后的 `.p8`、Key ID 和 Issuer，缩短 notarization 失败定位路径。
+
 ## 2026-07-25 — fix：将 Apple API Key 规范化为 PKCS#8
 
 **类型**：fix
