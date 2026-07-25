@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — release：发布桌面版本 0.1.23
+
+**类型**：release
+**影响模块**：`packages/core/src/lib/integrations/pi-agent/core/skills.ts`, `packages/core/src/lib/features/skills/service.ts`, `.github/workflows/desktop-release.yml`, `packages/desktop/scripts/verify-mac-signing.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.23`。修复 Windows CRLF `SKILL.md` 导致内置技能已存在但内容接口 404 的问题；恢复 macOS notarization，并在发布验证中加入 Gatekeeper 检查，防止下载后提示身份不明开发者。
+
 ## 2026-07-25 — docs：更新应用版本到 0.1.22
 
 **类型**：docs
