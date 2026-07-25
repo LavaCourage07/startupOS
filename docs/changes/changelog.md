@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — fix：改为轮询 macOS 公证状态
+
+**类型**：fix
+**影响模块**：`packages/desktop/scripts/notarize-mac-app.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.31`。macOS notarization 不再使用 `notarytool submit --wait`，改为 submit 后通过 submission id 轮询 `notarytool info`，并为 submit/info/log/stapler 加子进程超时和状态日志，避免 GitHub runner 在 Apple 公证等待阶段长时间无输出。
+
 ## 2026-07-25 — fix：兼容 notarytool 空 JSON 输出
 
 **类型**：fix

@@ -10,6 +10,13 @@ function run(command, args, options = {}) {
       env: process.env,
       shell: false,
     });
+    let timedOut = false;
+    const timeout = options.timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill('SIGTERM');
+        }, options.timeoutMs)
+      : null;
     const output = [];
     child.stdout.on('data', (chunk) => {
       output.push(chunk.toString());
@@ -21,9 +28,11 @@ function run(command, args, options = {}) {
     });
     child.on('error', reject);
     child.on('close', (code, signal) => {
+      if (timeout) clearTimeout(timeout);
       resolve({
-        code: code || 0,
+        code: code ?? 0,
         signal,
+        timedOut,
         output: output.join(''),
       });
     });
@@ -61,19 +70,17 @@ async function submitForNotarization(zipPath, options = {}) {
     'submit',
     zipPath,
     ...getAuthArgs(options),
-    '--wait',
     '--output-format',
     'json',
   ];
-  const result = await run('xcrun', args);
+  const result = await run('xcrun', args, { timeoutMs: 5 * 60 * 1000 });
   const output = result.output.trim();
-  if (result.signal || result.code !== 0) {
-    const status = result.signal ? `signal ${result.signal}` : `exit code ${result.code}`;
+  if (result.timedOut || result.signal || result.code !== 0) {
+    const status = result.timedOut ? 'timeout' : result.signal ? `signal ${result.signal}` : `exit code ${result.code}`;
     throw new Error(`notarytool submit failed with ${status}\n${output || '(empty output)'}`);
   }
   if (!output) {
-    console.warn('[notarize-mac-app] notarytool submit returned empty output with exit code 0');
-    return { status: 'Accepted', id: null, emptyOutput: true };
+    throw new Error('notarytool submit returned empty output');
   }
 
   try {
@@ -84,27 +91,74 @@ async function submitForNotarization(zipPath, options = {}) {
 }
 
 async function readNotaryLog(submissionId, options = {}) {
-  const result = await run('xcrun', ['notarytool', 'log', submissionId, ...getAuthArgs(options)]);
+  const result = await run('xcrun', ['notarytool', 'log', submissionId, ...getAuthArgs(options)], {
+    timeoutMs: 2 * 60 * 1000,
+  });
   return result.output.trim();
+}
+
+async function readNotaryInfo(submissionId, options = {}) {
+  const result = await run(
+    'xcrun',
+    ['notarytool', 'info', submissionId, ...getAuthArgs(options), '--output-format', 'json'],
+    { timeoutMs: 2 * 60 * 1000 },
+  );
+  const output = result.output.trim();
+  if (result.timedOut || result.signal || result.code !== 0) {
+    const status = result.timedOut ? 'timeout' : result.signal ? `signal ${result.signal}` : `exit code ${result.code}`;
+    throw new Error(`notarytool info failed with ${status}\n${output || '(empty output)'}`);
+  }
+  if (!output) {
+    throw new Error('notarytool info returned empty output');
+  }
+  try {
+    return JSON.parse(output);
+  } catch {
+    throw new Error(`notarytool info returned non-JSON output\n${output}`);
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForNotarization(submissionId, options = {}) {
+  const timeoutMs = Number(process.env.ORIGINOS_NOTARY_TIMEOUT_MS || 45 * 60 * 1000);
+  const pollMs = Number(process.env.ORIGINOS_NOTARY_POLL_MS || 30 * 1000);
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const info = await readNotaryInfo(submissionId, options);
+    const status = info.status || 'unknown';
+    console.log(`[notarize-mac-app] submission ${submissionId} status: ${status}`);
+    if (status === 'Accepted') {
+      return info;
+    }
+    if (status === 'Invalid' || status === 'Rejected') {
+      let diagnostics = '';
+      try {
+        diagnostics = await readNotaryLog(submissionId, options);
+      } catch (error) {
+        diagnostics = `failed to read notary log: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      throw new Error(`notarization status was ${status}\n${JSON.stringify(info, null, 2)}\n${diagnostics}`);
+    }
+    await sleep(pollMs);
+  }
+
+  throw new Error(`notarization timed out after ${Math.round(timeoutMs / 1000)}s for submission ${submissionId}`);
 }
 
 async function notarize(zipPath) {
   const usedOptions = {};
-  const response = await submitForNotarization(zipPath, usedOptions);
-
-  if (response.status === 'Accepted') {
-    return response;
+  const submitted = await submitForNotarization(zipPath, usedOptions);
+  if (!submitted.id) {
+    throw new Error(`notarytool submit did not return a submission id\n${JSON.stringify(submitted, null, 2)}`);
   }
+  console.log(`[notarize-mac-app] submission created: ${submitted.id}`);
+  const response = await waitForNotarization(submitted.id, usedOptions);
 
-  let diagnostics = '';
-  if (response.id) {
-    try {
-      diagnostics = await readNotaryLog(response.id, usedOptions);
-    } catch (error) {
-      diagnostics = `failed to read notary log: ${error instanceof Error ? error.message : String(error)}`;
-    }
-  }
-  throw new Error(`notarization status was ${response.status || 'unknown'}\n${JSON.stringify(response, null, 2)}\n${diagnostics}`);
+  return response;
 }
 
 module.exports = async function notarizeMacApp(context) {
@@ -136,9 +190,9 @@ module.exports = async function notarizeMacApp(context) {
   const response = await notarize(zipPath);
   console.log(`[notarize-mac-app] notarization accepted: ${response.id || 'unknown id'}`);
 
-  const stapleResult = await run('xcrun', ['stapler', 'staple', appPath]);
-  if (stapleResult.signal || stapleResult.code !== 0) {
-    const status = stapleResult.signal ? `signal ${stapleResult.signal}` : `exit code ${stapleResult.code}`;
+  const stapleResult = await run('xcrun', ['stapler', 'staple', appPath], { timeoutMs: 2 * 60 * 1000 });
+  if (stapleResult.timedOut || stapleResult.signal || stapleResult.code !== 0) {
+    const status = stapleResult.timedOut ? 'timeout' : stapleResult.signal ? `signal ${stapleResult.signal}` : `exit code ${stapleResult.code}`;
     throw new Error(`stapler failed with ${status}\n${stapleResult.output}`);
   }
   console.log('[notarize-mac-app] stapled app successfully');
