@@ -85,17 +85,10 @@ function main() {
 
   const hasMacArm64Zip = hasReleasePackage(`OriginOS CE-${version}-arm64.zip`);
   const hasMacX64Zip = hasReleasePackage(`OriginOS CE-${version}-x64.zip`);
-  const hasMacArm64Dmg = hasReleasePackage(`OriginOS CE-${version}-arm64.dmg`);
-  const hasMacX64Dmg = hasReleasePackage(`OriginOS CE-${version}-x64.dmg`);
   if (hasMacArm64Zip && hasMacX64Zip) {
     writeMetadata('mac', [
       `OriginOS CE-${version}-x64.zip`,
       `OriginOS CE-${version}-arm64.zip`,
-    ]);
-  } else if (hasMacArm64Dmg && hasMacX64Dmg) {
-    writeMetadata('mac', [
-      `OriginOS CE-${version}-x64.dmg`,
-      `OriginOS CE-${version}-arm64.dmg`,
     ]);
   }
 }

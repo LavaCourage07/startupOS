@@ -362,10 +362,8 @@ async function main() {
   const hasMacUpdateMetadata =
     hasMacArm64 &&
     hasMacX64 &&
-    (hasReleasePackage(`OriginOS CE-${version}-arm64.zip`) &&
-      hasReleasePackage(`OriginOS CE-${version}-x64.zip`) ||
-      hasReleasePackage(`OriginOS CE-${version}-arm64.dmg`) &&
-        hasReleasePackage(`OriginOS CE-${version}-x64.dmg`));
+    hasReleasePackage(`OriginOS CE-${version}-arm64.zip`) &&
+    hasReleasePackage(`OriginOS CE-${version}-x64.zip`);
   const hasWinExe = hasReleasePackage(`OriginOS CE-${version}-x64.exe`);
   const hasWinZip = hasReleasePackage(`OriginOS CE-${version}-x64.zip`);
 

@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — fix：mac 自动更新元数据使用 zip
+
+**类型**：fix
+**影响模块**：`.github/workflows/desktop-release.yml`, `packages/desktop/scripts/generate-update-metadata.js`, `packages/desktop/scripts/publish-qiniu-updates.js`, `packages/desktop/scripts/verify-update-metadata.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.39`。macOS Actions artifacts 重新上传 zip 和 zip.blockmap，mac 更新元数据只在 x64/arm64 zip 成对存在时生成，避免 electron-updater 报 `zip file not provided`。
+
 ## 2026-07-25 — fix：发布前生成全平台更新元数据
 
 **类型**：fix

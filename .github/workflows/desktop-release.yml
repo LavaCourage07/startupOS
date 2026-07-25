@@ -148,6 +148,8 @@ jobs:
           path: |
             release/OriginOS CE-*-arm64.dmg
             release/OriginOS CE-*-arm64.dmg.blockmap
+            release/OriginOS CE-*-arm64.zip
+            release/OriginOS CE-*-arm64.zip.blockmap
 
   macos-x64:
     name: Build macOS x64
@@ -214,6 +216,8 @@ jobs:
           path: |
             release/OriginOS CE-*-x64.dmg
             release/OriginOS CE-*-x64.dmg.blockmap
+            release/OriginOS CE-*-x64.zip
+            release/OriginOS CE-*-x64.zip.blockmap
 
   publish:
     name: Publish Qiniu
