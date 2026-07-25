@@ -117,9 +117,17 @@ function main() {
   }
 
   const macX64Zip = `OriginOS CE-${version}-x64.zip`;
+  const macArm64Zip = `OriginOS CE-${version}-arm64.zip`;
   const macX64Dmg = `OriginOS CE-${version}-x64.dmg`;
-  const macPrimary = fs.existsSync(path.join(releaseDir, macX64Zip)) ? macX64Zip : macX64Dmg;
-  if (fs.existsSync(path.join(releaseDir, macPrimary))) {
+  const macArm64Dmg = `OriginOS CE-${version}-arm64.dmg`;
+  const hasMacZip =
+    fs.existsSync(path.join(releaseDir, macX64Zip)) &&
+    fs.existsSync(path.join(releaseDir, macArm64Zip));
+  const hasMacDmg =
+    fs.existsSync(path.join(releaseDir, macX64Dmg)) &&
+    fs.existsSync(path.join(releaseDir, macArm64Dmg));
+  if (hasMacZip || hasMacDmg) {
+    const macPrimary = hasMacZip ? macX64Zip : macX64Dmg;
     verifyMetadataFile('latest-mac.yml', macPrimary);
     verifyMetadataFile('stable-mac.yml', macPrimary);
   }

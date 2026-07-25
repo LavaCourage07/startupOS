@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — fix：避免 Windows zip 误触发 mac 元数据校验
+
+**类型**：fix
+**影响模块**：`packages/desktop/scripts/verify-update-metadata.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.37`。`verify:update-metadata` 只有在同时存在 macOS x64/arm64 zip 或 x64/arm64 dmg 时才校验 mac metadata，避免 Windows job 里的 x64 zip 被误判为 mac zip 导致 `latest-mac.yml` 缺失失败。
+
 ## 2026-07-25 — fix：发布 macOS 更新元数据
 
 **类型**：fix
