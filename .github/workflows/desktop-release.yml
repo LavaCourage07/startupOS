@@ -126,7 +126,7 @@ jobs:
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-        run: pnpm exec electron-builder --config electron-builder.yml --mac --arm64 --publish never
+        run: node scripts/run-electron-builder-mac.js --config electron-builder.yml --mac --arm64 --publish never
 
       - run: pnpm --filter @originos/desktop verify:mac-package
 
@@ -183,7 +183,7 @@ jobs:
         env:
           CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-        run: pnpm exec electron-builder --config electron-builder.yml --mac --x64 --publish never
+        run: node scripts/run-electron-builder-mac.js --config electron-builder.yml --mac --x64 --publish never
 
       - run: pnpm --filter @originos/desktop verify:mac-package
 

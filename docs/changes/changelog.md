@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — ci：暴露 macOS electron-builder 失败摘要
+
+**类型**：ci
+**影响模块**：`.github/workflows/desktop-release.yml`, `packages/desktop/scripts/run-electron-builder-mac.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.28`。macOS Actions 通过包装脚本运行 electron-builder，失败时将尾部日志写入 GitHub annotation，避免公开 Actions API 无法读取完整 job log 时无法定位 notarization 真实错误。
+
 ## 2026-07-25 — ci：移除不可靠的 notarytool history 预检
 
 **类型**：ci
