@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — fix：规范化 macOS 公证 Apple API Key
+
+**类型**：fix
+**影响模块**：`.github/workflows/desktop-release.yml`, `packages/desktop/scripts/prepare-apple-api-key.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.24`。macOS Actions 在 notarization 前会把 `APPLE_API_KEY` secret 规范化为 `.p8` 文件，支持原始 PEM、带 `\n` 转义的 PEM 和 base64 PEM，并提前用 Node crypto 校验私钥格式，避免 electron-builder 阶段只返回 `invalidAsn1`。
+
 ## 2026-07-25 — release：发布桌面版本 0.1.23
 
 **类型**：release
