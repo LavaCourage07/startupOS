@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — ci：移除不可靠的 notarytool history 预检
+
+**类型**：ci
+**影响模块**：`.github/workflows/desktop-release.yml`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.27`。移除 macOS runner 上会以 exit code 133 崩溃的 `xcrun notarytool history` 预检，保留 Apple API key 的 PKCS#8 规范化，让 electron-builder 执行正式 notarization。
+
 ## 2026-07-25 — ci：增加 Apple Notary 凭据预检
 
 **类型**：ci
