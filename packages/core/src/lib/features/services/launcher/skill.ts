@@ -154,9 +154,9 @@ function buildSkillSystemPrompt(
   if (outputDir && outputDir !== agentWorkingDir) {
     lines.push(`Output directory for artifacts: ${outputDir}`);
     lines.push('');
-    lines.push('Use `${OUTPUT_DIR}` only when you explicitly want to create exported artifacts under that directory.');
-    lines.push('File tools remain relative to the working directory above unless you intentionally target an output subdirectory such as `solutions/...` or `output/...`.');
-    lines.push('Do NOT assume that file tools are implicitly rooted at `${OUTPUT_DIR}`. Do NOT use absolute paths.');
+    lines.push('Use `${OUTPUT_DIR}` in shell commands only when you need the native absolute artifact directory.');
+    lines.push('When calling file tools, do NOT pass absolute paths. Use runtime data-root paths instead: `data/agents/{agent-id}/...` for Agents and `data/skills/{skill-code}/...` for Skills.');
+    lines.push('Legacy short paths `agents/...` and `skills/...` are also mapped to the runtime data root when this skill runs from `data/skills/{skill}`.');
     lines.push('');
   }
 

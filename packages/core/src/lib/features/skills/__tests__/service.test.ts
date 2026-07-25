@@ -67,6 +67,7 @@ describe('Skill feature service', () => {
         'code: skill-creator-app',
         'description: Skill creator bundled from resources',
         'originos-system: true',
+        'outputDir: data/',
         '---',
         '',
         'Packaged skill content.',
@@ -89,6 +90,7 @@ describe('Skill feature service', () => {
       expect(result.content).toContain('Packaged skill content.');
       expect(result.baseDir).toBe(workingDir);
       expect(result.workingDir).toBe(workingDir);
+      expect(result.outputDir).toBe(dataRoot);
       expect(result.frontmatter?.description).toBe('Skill creator bundled from resources');
       expect(result.frontmatter?.['originos-system']).toBe('true');
       expect(existsSync(path.join(workingDir, 'SKILL.md'))).toBe(true);

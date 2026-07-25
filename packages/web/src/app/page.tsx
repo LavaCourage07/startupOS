@@ -1435,24 +1435,7 @@ export default function OSHomePage() {
                         skillName={app.skillName}
                         onClick={() => {
                           if (app.type === 'skill' && app.skillName) {
-                            if (app.skillName === 'role-agent-creator') {
-                              const windowManager = AppWindowManager.getInstance();
-                              windowManager.openComponentWindow(
-                                `skill-role-agent-creator`,
-                                app.name,
-                                SkillDialog,
-                                {
-                                  skillName: 'role-agent-creator',
-                                  initialMessage: '你好！我是 Persona，角色设计师。我来帮你创建一个专属的角色 Agent。',
-                                },
-                                {
-                                  position: { width: 1200, height: 800 },
-                                  constraints: { minWidth: 600, minHeight: 400 },
-                                }
-                              );
-                            } else {
-                              handleSkillLaunch(app.skillName, app.name);
-                            }
+                            handleSkillLaunch(app.skillName, app.name);
                           } else if (app.action === 'create-agent') {
                             handleCreateProject();
                           } else if (app.action === 'open-workspace') {

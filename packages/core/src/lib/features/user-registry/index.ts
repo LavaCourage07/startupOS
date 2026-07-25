@@ -7,6 +7,7 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { getDataRoot } from '../../paths';
+import { listBundledSkillIdentifiers } from '../../integrations/pi-agent/core/skills';
 
 // ============================================================================
 // Types
@@ -39,7 +40,7 @@ export interface UserSkill {
 // ============================================================================
 
 function parseFrontmatter(content: string): Record<string, string> {
-  const match = /^---\n([\s\S]*?)\n---/.exec(content);
+  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
   if (!match) return {};
 
   const result: Record<string, string> = {};
@@ -60,14 +61,29 @@ function parseFrontmatter(content: string): Record<string, string> {
 }
 
 function extractFirstParagraph(content: string): string {
-  const bodyMatch = /^---\n[\s\S]*?\n---\n([\s\S]*)$/.exec(content);
+  const bodyMatch = /^---\r?\n[\s\S]*?\r?\n---\r?\n([\s\S]*)$/.exec(content);
   if (!bodyMatch) return '';
   const body = (bodyMatch[1] || '').trim();
   return body.split('\n').find((line) => line.trim() && !line.startsWith('#')) || '';
 }
 
 function isTruthyFrontmatterValue(value: string | undefined): boolean {
-  return value === 'true' || value === 'yes' || value === '1';
+  const normalized = value?.trim().toLowerCase();
+  return normalized === 'true' || normalized === 'yes' || normalized === '1';
+}
+
+function findMarkdownFile(dirPath: string, expectedName: string): string | null {
+  const directPath = join(dirPath, expectedName);
+  if (existsSync(directPath)) return directPath;
+
+  try {
+    const expectedLower = expectedName.toLowerCase();
+    const entry = readdirSync(dirPath, { withFileTypes: true })
+      .find((candidate) => candidate.isFile() && candidate.name.toLowerCase() === expectedLower);
+    return entry ? join(dirPath, entry.name) : null;
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================================
@@ -86,10 +102,10 @@ export function listUserAgents(): UserAgent[] {
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
 
     const dirPath = join(agentsDir, entry.name);
-    const agentMdPath = join(dirPath, 'Agent.md');
-    const skillMdPath = join(dirPath, 'SKILL.md');
+    const agentMdPath = findMarkdownFile(dirPath, 'Agent.md');
+    const skillMdPath = findMarkdownFile(dirPath, 'SKILL.md');
 
-    if (!existsSync(agentMdPath)) continue;
+    if (!agentMdPath) continue;
 
     try {
       const content = readFileSync(agentMdPath, 'utf-8');
@@ -104,7 +120,7 @@ export function listUserAgents(): UserAgent[] {
         domain: frontmatter['domain'],
         version: frontmatter['version'],
         dirPath,
-        hasSkillMd: existsSync(skillMdPath),
+        hasSkillMd: Boolean(skillMdPath),
       });
     } catch (err) {
       console.error(`Failed to parse Agent.md in ${entry.name}:`, err);
@@ -133,6 +149,7 @@ export function deleteUserAgent(id: string): boolean {
 export function listUserSkills(): UserSkill[] {
   const skillsDir = join(getDataRoot(), 'skills');
   const skills: UserSkill[] = [];
+  const bundledSkillIdentifiers = listBundledSkillIdentifiers();
 
   if (!existsSync(skillsDir)) return skills;
 
@@ -142,22 +159,29 @@ export function listUserSkills(): UserSkill[] {
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
 
     const dirPath = join(skillsDir, entry.name);
-    const skillMdPath = join(dirPath, 'SKILL.md');
+    const skillMdPath = findMarkdownFile(dirPath, 'SKILL.md');
 
-    if (!existsSync(skillMdPath)) continue;
+    if (!skillMdPath) continue;
 
     try {
       const content = readFileSync(skillMdPath, 'utf-8');
       const frontmatter = parseFrontmatter(content);
-      if (isTruthyFrontmatterValue(frontmatter['originos-system'])) {
+      const skillCode = frontmatter['code'] || entry.name;
+      const skillName = frontmatter['name'] || entry.name;
+      if (
+        isTruthyFrontmatterValue(frontmatter['originos-system']) ||
+        bundledSkillIdentifiers.has(entry.name) ||
+        bundledSkillIdentifiers.has(skillCode) ||
+        bundledSkillIdentifiers.has(skillName)
+      ) {
         continue;
       }
       const tags = frontmatter['tags'];
 
       skills.push({
         id: entry.name,
-        name: frontmatter['name'] || entry.name,
-        code: frontmatter['code'] || entry.name,
+        name: skillName,
+        code: skillCode,
         description: frontmatter['description'] || `User-created skill: ${entry.name}`,
         type: frontmatter['type'],
         tags: tags ? tags.split(',').map((t) => t.trim()) : undefined,

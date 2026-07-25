@@ -510,7 +510,9 @@ Good luck!
 
 ## OriginOS 技能输出规范（skill-creator-app）
 
-当使用交互式对话创建技能时，必须在 `${OUTPUT_DIR}/skills/{skill-code}/` 目录下生成以下文件：
+当使用交互式对话创建技能时，必须在 `${OUTPUT_DIR}/skills/{skill-code}/` 目录下生成以下文件。
+
+使用文件工具时，路径必须写成运行时数据根路径，例如 `data/skills/{skill-code}/SKILL.md`，不要写绝对路径。依次调用 `write_file` 创建文件时，文件路径使用 `data/skills/{skill-code}/{FileName}`。
 
 ### 文件清单
 
@@ -689,7 +691,7 @@ evolution.json 是 Eval 自进化机制的数据文件，记录每次技能执�
 
 ### 保存路径
 
-所有产物创建到根目录下的用户自定义技能文件夹 `${OUTPUT_DIR}/skills/{skill-code}` 下
+所有产物创建到根目录下的用户自定义技能文件夹 `${OUTPUT_DIR}/skills/{skill-code}` 下。调用 `write_file` 时使用 `data/skills/{skill-code}/{FileName}`。
 
 ### 创建流程
 

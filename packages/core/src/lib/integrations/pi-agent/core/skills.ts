@@ -528,6 +528,36 @@ export function findBundledSkillDir(skillCode: string): string | null {
 	return null;
 }
 
+export function listBundledSkillIdentifiers(): Set<string> {
+	const identifiers = new Set<string>();
+
+	for (const bundledDir of getBundledSkillDirs()) {
+		if (!existsSync(bundledDir)) continue;
+		try {
+			const entries = readdirSync(bundledDir, { withFileTypes: true });
+			for (const entry of entries) {
+				if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+				const skillDir = join(bundledDir, entry.name);
+				const skillMd = findSkillMarkdownFile(skillDir);
+				if (!skillMd) continue;
+
+				identifiers.add(entry.name);
+				const { frontmatter } = parseFrontmatter<SkillFrontmatter>(readFileSync(skillMd, "utf-8"));
+				if (typeof frontmatter.code === "string" && frontmatter.code.trim()) {
+					identifiers.add(frontmatter.code.trim());
+				}
+				if (typeof frontmatter.name === "string" && frontmatter.name.trim()) {
+					identifiers.add(frontmatter.name.trim());
+				}
+			}
+		} catch {
+			// Try the next bundled root.
+		}
+	}
+
+	return identifiers;
+}
+
 function isSystemManagedSkillDir(skillDir: string): boolean {
 	const skillMd = findSkillMarkdownFile(skillDir);
 	if (!skillMd) return false;
