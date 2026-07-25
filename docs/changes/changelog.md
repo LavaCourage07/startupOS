@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-25 — ci：前移 Apple notarization 凭据预检
+
+**类型**：ci
+**影响模块**：`.github/workflows/desktop-release.yml`, `packages/desktop/scripts/verify-apple-notary-credentials.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.33`。macOS Actions 在 build:app 前安装 rcodesign 并调用 `notary-list` 验证 App Store Connect Notary API 凭据，避免错误的 `APPLE_API_ISSUER` / `APPLE_API_KEY_ID` / `APPLE_API_KEY` 组合在完整打包后才失败。
+
 ## 2026-07-25 — fix：为 macOS 公证加入 rcodesign fallback
 
 **类型**：fix

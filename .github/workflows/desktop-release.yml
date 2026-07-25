@@ -101,8 +101,6 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm --filter @originos/desktop build:app
-
       - name: Verify macOS signing secrets
         env:
           MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
@@ -126,6 +124,11 @@ jobs:
           if ! command -v rcodesign >/dev/null 2>&1; then
             cargo install apple-codesign --version 0.29.0 --locked
           fi
+
+      - name: Verify Apple notarization credentials
+        run: node packages/desktop/scripts/verify-apple-notary-credentials.js
+
+      - run: pnpm --filter @originos/desktop build:app
 
       - name: Build macOS arm64 package
         working-directory: packages/desktop
@@ -164,8 +167,6 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm --filter @originos/desktop build:app
-
       - name: Verify macOS signing secrets
         env:
           MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
@@ -189,6 +190,11 @@ jobs:
           if ! command -v rcodesign >/dev/null 2>&1; then
             cargo install apple-codesign --version 0.29.0 --locked
           fi
+
+      - name: Verify Apple notarization credentials
+        run: node packages/desktop/scripts/verify-apple-notary-credentials.js
+
+      - run: pnpm --filter @originos/desktop build:app
 
       - name: Build macOS x64 package
         working-directory: packages/desktop
