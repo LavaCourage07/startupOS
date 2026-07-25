@@ -6,6 +6,45 @@ import { getSkillContent } from '../service';
 import { getMonorepoRoot, setMonorepoRoot } from '../../../paths';
 
 describe('Skill feature service', () => {
+  it('loads existing data skill content by requested directory name on Windows-compatible paths', () => {
+    const originalDataRoot = process.env.DATA_ROOT;
+    const tempRoot = mkdtempSync(path.join(tmpdir(), 'originos-skill-service-data-'));
+    const dataRoot = path.join(tempRoot, 'data');
+    const skillDir = path.join(dataRoot, 'skills', 'role-agent-creator');
+
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      path.join(skillDir, 'skill.md'),
+      [
+        '---',
+        'name: role-agent-creator',
+        'description: Role agent creator already materialized in user data',
+        'originos-system: true',
+        '---',
+        '',
+        'Existing role agent creator content.',
+      ].join('\r\n'),
+      'utf8',
+    );
+
+    try {
+      process.env.DATA_ROOT = dataRoot;
+
+      const result = getSkillContent({ name: 'role-agent-creator', includeFrontmatter: true });
+
+      expect(result.content).toContain('Existing role agent creator content.');
+      expect(result.baseDir).toBe(skillDir);
+      expect(result.workingDir).toBe(skillDir);
+      expect(result.frontmatter?.name).toBe('role-agent-creator');
+    } finally {
+      if (originalDataRoot === undefined) {
+        delete process.env.DATA_ROOT;
+      } else {
+        process.env.DATA_ROOT = originalDataRoot;
+      }
+    }
+  });
+
   it('materializes bundled skill content from Electron resources before returning content', () => {
     const originalRoot = getMonorepoRoot();
     const originalDataRoot = process.env.DATA_ROOT;

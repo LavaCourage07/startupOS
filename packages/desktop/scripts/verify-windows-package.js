@@ -18,6 +18,11 @@ const zipPath = process.env.WINDOWS_ZIP_PATH
   ? path.resolve(process.env.WINDOWS_ZIP_PATH)
   : path.join(releaseDir, `OriginOS CE-${desktopPackage.version}-x64.zip`);
 const verifyAsarRequiresScript = path.join(desktopDir, 'scripts', 'verify-asar-relative-requires.js');
+const bundledSkillEntries = fs
+  .readdirSync(path.join(repoRoot, 'templates', 'skills'), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => `templates/skills/${entry.name}/SKILL.md`)
+  .filter((entry) => fs.existsSync(path.join(repoRoot, entry)));
 const piAiRuntimeDependencies = [
   '@aws-sdk/client-bedrock-runtime',
   '@google/genai',
@@ -147,6 +152,9 @@ function verifyAsar() {
   if (!skillServiceRuntime.includes('materializeBundledSkill')) {
     fail('SkillService runtime does not materialize bundled skills before content load');
   }
+  if (!skillServiceRuntime.includes('loadSkillFromDirectory')) {
+    fail('SkillService runtime does not load existing data skills by directory name');
+  }
   verifyPiAiProviderImports(smokeDir);
 
   run(process.execPath, [verifyAsarRequiresScript], {
@@ -165,7 +173,7 @@ function verifyResources() {
     'web/packages/web/server.js',
     'web/packages/web/node_modules/next/dist/server/next.js',
     'web/packages/web/node_modules/styled-jsx/package.json',
-    'templates/skills/skill-creator-app/SKILL.md',
+    ...bundledSkillEntries,
     'agent-worker/agent-worker.mjs',
     'agent-worker/core/lib/integrations/pi-agent/tools/loop-detector.js',
     'agent-worker/core/lib/integrations/pi-agent/tools/schedule-tools.js',
@@ -192,7 +200,7 @@ function verifyWindowsZip() {
     'resources/web/packages/web/server.js',
     'resources/web/packages/web/node_modules/next/dist/server/next.js',
     'resources/web/packages/web/node_modules/styled-jsx/package.json',
-    'resources/templates/skills/skill-creator-app/SKILL.md',
+    ...bundledSkillEntries.map((entry) => `resources/${entry}`),
     'resources/agent-worker/core/lib/integrations/pi-agent/tools/loop-detector.js',
     'resources/agent-worker/core/lib/integrations/pi-agent/tools/schedule-tools.js',
     'resources/app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/onnxruntime_binding.node',

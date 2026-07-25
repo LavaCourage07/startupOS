@@ -10,6 +10,11 @@ const desktopDir = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(desktopDir, '..', '..');
 const releaseDir = path.join(repoRoot, 'release');
 const productName = 'OriginOS CE.app';
+const bundledSkillEntries = fs
+  .readdirSync(path.join(repoRoot, 'templates', 'skills'), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory())
+  .map((entry) => `templates/skills/${entry.name}/SKILL.md`)
+  .filter((entry) => fs.existsSync(path.join(repoRoot, entry)));
 const candidateAppPaths = [
   path.join(releaseDir, 'mac-arm64', productName),
   path.join(releaseDir, 'mac', productName),
@@ -69,6 +74,15 @@ function verifyApp(appPath) {
     );
     if (!skillServiceRuntime.includes('materializeBundledSkill')) {
       fail('SkillService runtime does not materialize bundled skills before content load');
+    }
+    if (!skillServiceRuntime.includes('loadSkillFromDirectory')) {
+      fail('SkillService runtime does not load existing data skills by directory name');
+    }
+    for (const entry of bundledSkillEntries) {
+      const skillPath = path.join(resourcesDir, entry);
+      if (!fs.existsSync(skillPath)) {
+        fail(`bundled skill resource missing: ${path.relative(repoRoot, skillPath)}`);
+      }
     }
     console.log('[verify-mac-package] app.asar runtime ok', {
       appPath: path.relative(repoRoot, appPath),

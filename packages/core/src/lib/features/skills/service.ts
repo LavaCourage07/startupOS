@@ -1,6 +1,6 @@
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import path from 'path';
-import { getDataRoot } from '../../paths';
+import { getDataRoot, getSkillsDataDir } from '../../paths';
 import { agentSessionService } from '../agent/session-service';
 import { ontologyStorage } from '../ontology/storage';
 import type { AgentMessage, AgentSession, SessionListItem } from '../../../types/agent';
@@ -11,6 +11,7 @@ import { handle as infoQueryHandler } from './bundled/info-query/handler';
 import { handle as ontologyEditorHandler } from './bundled/ontology-editor/handler';
 import {
   loadSkillContent,
+  loadSkillFromDirectory,
   loadSkills,
   materializeBundledSkill,
   parseFrontmatter,
@@ -257,6 +258,11 @@ function findSkill(name: string): Skill | undefined {
 }
 
 function findSkillForContent(name: string): Skill | undefined {
+  const dataSkill = loadSkillFromDirectory(path.join(getSkillsDataDir(), name), 'user').skill;
+  if (dataSkill) {
+    return dataSkill;
+  }
+
   const skill = findSkill(name);
   if (skill?.systemManaged) {
     return materializeBundledSkill(skill.code ?? skill.name) ?? skill;

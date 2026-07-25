@@ -209,7 +209,7 @@ export function parseFrontmatter<T = SkillFrontmatter>(content: string): {
 	frontmatter: T;
 	body: string;
 } {
-	const frontmatterRegex = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/;
+	const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/;
 	const match = content.match(frontmatterRegex);
 
 	if (!match) {
@@ -220,7 +220,7 @@ export function parseFrontmatter<T = SkillFrontmatter>(content: string): {
 	const body = match[2] || "";
 
 	try {
-		const frontmatter: T = frontmatterText.split("\n").reduce((acc: Record<string, unknown>, line) => {
+		const frontmatter: T = frontmatterText.split(/\r?\n/).reduce((acc: Record<string, unknown>, line) => {
 			const colonIndex = line.indexOf(":");
 			if (colonIndex === -1) {
 				return acc;
@@ -370,7 +370,7 @@ function loadSkillsFromDirInternal(
 			}
 
 			const isRootMd = includeRootFiles && entry.name.endsWith(".md");
-			const isSkillMd = !includeRootFiles && entry.name === "SKILL.md";
+			const isSkillMd = !includeRootFiles && entry.name.toLowerCase() === "skill.md";
 			if (!isRootMd && !isSkillMd) {
 				continue;
 			}
@@ -500,7 +500,7 @@ export function getBundledSkillDir(): string {
 export function findBundledSkillDir(skillCode: string): string | null {
 	for (const bundledDir of getBundledSkillDirs()) {
 		const candidate = join(bundledDir, skillCode);
-		if (existsSync(join(candidate, "SKILL.md"))) {
+		if (findSkillMarkdownFile(candidate)) {
 			return candidate;
 		}
 	}
@@ -512,8 +512,8 @@ export function findBundledSkillDir(skillCode: string): string | null {
 			for (const entry of entries) {
 				if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
 				const candidate = join(bundledDir, entry.name);
-				const skillMd = join(candidate, "SKILL.md");
-				if (!existsSync(skillMd)) continue;
+				const skillMd = findSkillMarkdownFile(candidate);
+				if (!skillMd) continue;
 				const { frontmatter } = parseFrontmatter<SkillFrontmatter>(readFileSync(skillMd, "utf-8"));
 				const code = typeof frontmatter.code === "string" ? frontmatter.code : entry.name;
 				const name = typeof frontmatter.name === "string" ? frontmatter.name : entry.name;
@@ -529,10 +529,44 @@ export function findBundledSkillDir(skillCode: string): string | null {
 }
 
 function isSystemManagedSkillDir(skillDir: string): boolean {
-	const skillMd = join(skillDir, "SKILL.md");
-	if (!existsSync(skillMd)) return false;
+	const skillMd = findSkillMarkdownFile(skillDir);
+	if (!skillMd) return false;
 	const { frontmatter } = parseFrontmatter<SkillFrontmatter>(readFileSync(skillMd, "utf-8"));
 	return isSystemSkillFrontmatter(frontmatter);
+}
+
+export function findSkillMarkdownFile(skillDir: string): string | null {
+	const exactPath = join(skillDir, "SKILL.md");
+	if (existsSync(exactPath)) {
+		return exactPath;
+	}
+
+	if (!existsSync(skillDir)) {
+		return null;
+	}
+
+	try {
+		const entry = readdirSync(skillDir, { withFileTypes: true }).find((candidate) => {
+			return candidate.isFile() && candidate.name.toLowerCase() === "skill.md";
+		});
+		return entry ? join(skillDir, entry.name) : null;
+	} catch {
+		return null;
+	}
+}
+
+export function loadSkillFromDirectory(
+	skillDir: string,
+	source: Skill["source"],
+): { skill: Skill | null; diagnostics: SkillDiagnostic[] } {
+	const skillMd = findSkillMarkdownFile(skillDir);
+	if (!skillMd) {
+		return {
+			skill: null,
+			diagnostics: [{ type: "warning", message: "SKILL.md does not exist", path: skillDir }],
+		};
+	}
+	return loadSkillFromFile(skillMd, source);
 }
 
 export function materializeBundledSkill(skillCode: string): Skill | null {
@@ -556,7 +590,7 @@ export function materializeBundledSkill(skillCode: string): Skill | null {
 		},
 	});
 
-	const loaded = loadSkillFromFile(join(targetDir, "SKILL.md"), "bundled").skill;
+	const loaded = loadSkillFromDirectory(targetDir, "bundled").skill;
 	return loaded;
 }
 
