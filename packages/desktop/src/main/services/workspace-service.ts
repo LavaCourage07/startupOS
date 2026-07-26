@@ -10,6 +10,14 @@ import type {
 import { getDataRoot, getMonorepoRoot } from '../../../../core/src/lib/paths';
 import { loadSkills } from '../../../../core/src/lib/integrations/pi-agent/core/skills';
 import { recordUploads } from '../../../../core/src/lib/integrations/pi-agent/upload-tracker';
+import {
+  assertRealPathWithin,
+  assertSafeWorkspaceFileName,
+  assertWorkspacePathCanBeCreated,
+  isPathWithin,
+  resolveWorkspaceBasePath,
+  writeWorkspaceUploadFile,
+} from '../../../../core/src/lib/integrations/electron/workspace-paths';
 
 const ALLOWED_BASES = [
   getDataRoot(),
@@ -19,18 +27,11 @@ const ALLOWED_BASES = [
 ];
 
 function assertAllowed(p: string): void {
-  let resolved: string;
-  if (path.isAbsolute(p)) {
-    resolved = p;
-  } else if (p.startsWith('data' + path.sep) || p === 'data') {
-    // Resolve relative data/ paths against getDataRoot() (respects DATA_ROOT env)
-    const relativePart = p === 'data' ? '' : p.slice('data'.length + 1);
-    resolved = path.join(getDataRoot(), relativePart);
-  } else {
-    resolved = path.join(getMonorepoRoot(), p);
-  }
-  const normalized = path.normalize(resolved);
-  if (!ALLOWED_BASES.some(b => normalized.startsWith(b + path.sep) || normalized === b)) {
+  const normalized = resolveWorkspaceBasePath(p, {
+    dataRoot: getDataRoot(),
+    monorepoRoot: getMonorepoRoot(),
+  });
+  if (!ALLOWED_BASES.some((base) => isPathWithin(normalized, base))) {
     throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
   }
 }
@@ -350,9 +351,16 @@ export class WorkspaceService {
 
     ipcMain.handle(
       IPC_CHANNELS.WORKSPACE_FILE_UPLOAD,
-      async (_event, request: WorkspaceUploadRequest): Promise<IpcResponse<WorkspaceUploadResponse>> => {
+      async (_event, request?: WorkspaceUploadRequest | null): Promise<IpcResponse<WorkspaceUploadResponse>> => {
+        const basePath = request?.basePath;
+        const files = request?.files;
         try {
-          if (!request.basePath || !request.files?.length) {
+          console.log('[WorkspaceService] file upload request', {
+            basePath,
+            fileCount: files?.length ?? 0,
+            fileNames: files?.map((file) => file.name) ?? [],
+          });
+          if (!basePath || !files?.length) {
             return {
               success: false,
               error: { code: 'INVALID_REQUEST', message: 'basePath and files are required' },
@@ -360,11 +368,18 @@ export class WorkspaceService {
             };
           }
 
-          const resolvedBasePath = this.resolveAllowedBase(request.basePath);
+          const resolvedBasePath = this.resolveAllowedBase(basePath);
+          console.log('[WorkspaceService] file upload path resolved', {
+            basePath,
+            resolvedBasePath,
+            dataRoot: getDataRoot(),
+          });
+          await assertWorkspacePathCanBeCreated(resolvedBasePath, ALLOWED_BASES);
           await fs.mkdir(resolvedBasePath, { recursive: true });
+          await assertRealPathWithin(resolvedBasePath, ALLOWED_BASES);
 
           const uploadedFiles: WorkspaceUploadResponse['files'] = [];
-          for (const file of request.files) {
+          for (const file of files) {
             if (!file.name) {
               return {
                 success: false,
@@ -372,6 +387,7 @@ export class WorkspaceService {
                 timestamp: new Date().toISOString(),
               };
             }
+            assertSafeWorkspaceFileName(file.name);
 
             const buffer = decodeUploadContent(file);
             if (buffer.length > MAX_UPLOAD_FILE_SIZE) {
@@ -382,12 +398,14 @@ export class WorkspaceService {
               };
             }
 
-            const fullPath = this.resolveAndCheck(resolvedBasePath, [file.name]);
-            await fs.mkdir(path.dirname(fullPath), { recursive: true });
-            await fs.writeFile(fullPath, buffer);
+            const writtenFile = await writeWorkspaceUploadFile(
+              resolvedBasePath,
+              file.name,
+              buffer,
+            );
             uploadedFiles.push({
-              name: file.name,
-              path: path.relative(resolvedBasePath, fullPath),
+              name: writtenFile.fileName,
+              path: path.relative(resolvedBasePath, writtenFile.fullPath),
               size: buffer.length,
             });
           }
@@ -400,10 +418,23 @@ export class WorkspaceService {
             timestamp: new Date().toISOString(),
           };
         } catch (error) {
+          const uploadError = error as NodeJS.ErrnoException;
+          console.warn('[WorkspaceService] file upload rejected', {
+            basePath,
+            code: uploadError.code,
+            message: uploadError.message,
+          });
           if ((error as NodeJS.ErrnoException).code === 'FORBIDDEN') {
             return {
               success: false,
               error: { code: 'FORBIDDEN', message: 'Access denied' },
+              timestamp: new Date().toISOString(),
+            };
+          }
+          if (uploadError.code === 'INVALID_FILE_NAME') {
+            return {
+              success: false,
+              error: { code: 'INVALID_FILE_NAME', message: uploadError.message },
               timestamp: new Date().toISOString(),
             };
           }
@@ -416,24 +447,18 @@ export class WorkspaceService {
   private resolveAndCheck(basePath: string, segments: string[]): string {
     const norm = this.resolveAllowedBase(basePath);
     const full = path.join(norm, ...segments);
-    if (!path.normalize(full).startsWith(norm)) {
+    if (!isPathWithin(full, norm)) {
       throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
     }
     return full;
   }
 
   private resolveAllowedBase(basePath: string): string {
-    let resolved: string;
-    if (path.isAbsolute(basePath)) {
-      resolved = basePath;
-    } else if (basePath.startsWith('data' + path.sep) || basePath === 'data') {
-      const relativePart = basePath === 'data' ? '' : basePath.slice('data'.length + 1);
-      resolved = path.join(getDataRoot(), relativePart);
-    } else {
-      resolved = path.join(getMonorepoRoot(), basePath);
-    }
-    const norm = path.normalize(resolved);
-    if (!ALLOWED_BASES.some(b => norm.startsWith(b + path.sep) || norm === b)) {
+    const norm = resolveWorkspaceBasePath(basePath, {
+      dataRoot: getDataRoot(),
+      monorepoRoot: getMonorepoRoot(),
+    });
+    if (!ALLOWED_BASES.some((base) => isPathWithin(norm, base))) {
       throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
     }
     return norm;

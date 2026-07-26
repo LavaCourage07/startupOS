@@ -1,6 +1,6 @@
 {
   "name": "@originos/desktop",
-  "version": "0.1.40",
+  "version": "0.1.41",
   "private": true,
   "main": "dist-electron/desktop/src/main/main.js",
   "scripts": {
@@ -17,6 +17,7 @@
     "dist:mac:publish": "pnpm build:app && electron-builder --config electron-builder.yml --mac --arm64 --x64 --publish always",
     "verify:mac-package": "node scripts/verify-mac-package.js",
     "verify:mac-signing": "node scripts/verify-mac-signing.js",
+    "verify:workspace-upload": "node scripts/verify-workspace-upload-ipc.js",
     "bump-version": "node scripts/bump-release-version.js",
     "publish:qiniu": "node scripts/publish-qiniu-updates.js",
     "release:qiniu": "node scripts/release-qiniu.js",

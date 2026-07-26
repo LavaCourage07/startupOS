@@ -41,6 +41,7 @@ run('npx', [...pnpm, 'install', '--frozen-lockfile']);
 run('npx', [...pnpm, '--filter', '@originos/desktop', 'build:app'], {
   env: { ORIGINOS_WINDOWS_SHORT_ZIP: '1' },
 });
+run('npx', [...pnpm, '--filter', '@originos/desktop', 'verify:workspace-upload']);
 run('npx', [...pnpm, 'exec', 'electron-builder', '--config', 'electron-builder.yml', '--win', '--publish', 'never'], {
   cwd: desktopDir,
   env: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' },

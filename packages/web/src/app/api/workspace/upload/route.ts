@@ -2,12 +2,23 @@
  * POST /api/workspace/upload?basePath=...
  * Upload one or more files to a workspace directory
  */
-import { NextRequest, NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
-import type { ApiResponse } from '@originos/core/types';
+
+import { NextRequest, NextResponse } from 'next/server';
+
+import {
+  assertRealPathWithin,
+  assertSafeWorkspaceFileName,
+  assertWorkspacePathCanBeCreated,
+  isPathWithin,
+  resolveWorkspaceBasePath,
+  writeWorkspaceUploadFile,
+} from '@originos/core/lib/integrations/electron/workspace-paths';
 import { recordUploads } from '@originos/core/lib/integrations/pi-agent/upload-tracker';
 import { getDataRoot, getMonorepoRoot } from '@originos/core/lib/paths';
+
+import type { ApiResponse } from '@originos/core/types';
 
 const ALLOWED_BASES = [
   getDataRoot(),
@@ -70,8 +81,12 @@ function checkRateLimit(clientIp: string): boolean {
 }
 
 function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
@@ -85,28 +100,41 @@ function matchesMimeType(mimeType: string, patterns: string[]): boolean {
 }
 
 function resolveAndCheck(basePath: string): string {
-  const norm = path.normalize(basePath);
-  // Allow relative paths starting with data/, skills/, or tmp/
-  for (const prefix of ['data', 'skills', 'tmp']) {
-    if (norm === prefix || norm.startsWith(prefix + path.sep)) {
-      // If DATA_ROOT is configured, resolve relative to getDataRoot() instead of monorepo root
-      const dataRoot = getDataRoot();
-      const monorepoRoot = getMonorepoRoot();
-      if (dataRoot !== path.join(monorepoRoot, 'data') && prefix === 'data') {
-        // Replace the "data" prefix with the configured DATA_ROOT
-        const relativePart = norm === 'data' ? '' : norm.slice('data'.length + 1);
-        return path.join(dataRoot, relativePart);
-      }
-      return path.join(monorepoRoot, norm);
-    }
-  }
-  if (!ALLOWED_BASES.some(b => norm.startsWith(b + path.sep) || norm === b)) {
+  const norm = resolveWorkspaceBasePath(basePath, {
+    dataRoot: getDataRoot(),
+    monorepoRoot: getMonorepoRoot(),
+  });
+  if (!ALLOWED_BASES.some((base) => isPathWithin(norm, base))) {
     throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
   }
   return norm;
 }
 
-export async function POST(req: NextRequest) {
+function uploadErrorResponse(err: NodeJS.ErrnoException): NextResponse {
+  // eslint-disable-next-line no-console
+  console.warn('[workspace-upload] rejected', {
+    code: err.code,
+    message: err.message,
+  });
+  if (err.code === 'FORBIDDEN') {
+    return NextResponse.json(
+      { success: false, error: { code: 'FORBIDDEN', message: 'Access denied' }, timestamp: new Date().toISOString() },
+      { status: 403 }
+    );
+  }
+  if (err.code === 'INVALID_FILE_NAME') {
+    return NextResponse.json(
+      { success: false, error: { code: 'INVALID_FILE_NAME', message: err.message }, timestamp: new Date().toISOString() },
+      { status: 400 }
+    );
+  }
+  return NextResponse.json(
+    { success: false, error: { code: 'INTERNAL_ERROR', message: err.message }, timestamp: new Date().toISOString() },
+    { status: 500 }
+  );
+}
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const basePath = req.nextUrl.searchParams.get('basePath');
     if (!basePath) {
@@ -126,9 +154,17 @@ export async function POST(req: NextRequest) {
     }
 
     const resolvedBase = resolveAndCheck(basePath);
+    // eslint-disable-next-line no-console
+    console.log('[workspace-upload] path resolved', {
+      basePath,
+      resolvedBase,
+      dataRoot: getDataRoot(),
+    });
 
     // Ensure directory exists
+    await assertWorkspacePathCanBeCreated(resolvedBase, ALLOWED_BASES);
     await fs.mkdir(resolvedBase, { recursive: true });
+    await assertRealPathWithin(resolvedBase, ALLOWED_BASES);
 
     const formData = await req.formData();
     const files = formData.getAll('files') as File[];
@@ -143,16 +179,12 @@ export async function POST(req: NextRequest) {
     const uploadedFiles: Array<{ name: string; path: string; size: number }> = [];
 
     for (const file of files) {
-      if (!(file instanceof File)) continue;
-
-      const fileName = file.name;
-      const fullPath = path.join(resolvedBase, fileName);
-
-      // Check for path traversal
-      if (!path.normalize(fullPath).startsWith(resolvedBase)) {
-        throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
+      if (!(file instanceof File)) {
+        continue;
       }
 
+      const fileName = file.name;
+      assertSafeWorkspaceFileName(fileName);
       // File size validation
       if (file.size > MAX_FILE_SIZE) {
         return NextResponse.json(
@@ -171,11 +203,15 @@ export async function POST(req: NextRequest) {
       }
 
       const buffer = Buffer.from(await file.arrayBuffer());
-      await fs.writeFile(fullPath, buffer);
+      const writtenFile = await writeWorkspaceUploadFile(
+        resolvedBase,
+        fileName,
+        buffer,
+      );
 
       uploadedFiles.push({
-        name: fileName,
-        path: path.relative(resolvedBase, fullPath),
+        name: writtenFile.fileName,
+        path: path.relative(resolvedBase, writtenFile.fullPath),
         size: buffer.length,
       });
     }
@@ -189,16 +225,6 @@ export async function POST(req: NextRequest) {
       timestamp: new Date().toISOString(),
     });
   } catch (e) {
-    const err = e as NodeJS.ErrnoException;
-    if (err.code === 'FORBIDDEN') {
-      return NextResponse.json(
-        { success: false, error: { code: 'FORBIDDEN', message: 'Access denied' }, timestamp: new Date().toISOString() },
-        { status: 403 }
-      );
-    }
-    return NextResponse.json(
-      { success: false, error: { code: 'INTERNAL_ERROR', message: err.message }, timestamp: new Date().toISOString() },
-      { status: 500 }
-    );
+    return uploadErrorResponse(e as NodeJS.ErrnoException);
   }
 }

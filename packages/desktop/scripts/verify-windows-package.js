@@ -104,6 +104,8 @@ function verifyAsar() {
     'dist-electron/core/src/lib/integrations/pi-agent/tools/schedule-tools.js',
     'dist-electron/core/src/lib/features/skills/service.js',
     'dist-electron/core/src/lib/features/services/launcher/skill.js',
+    'dist-electron/core/src/lib/integrations/electron/workspace-paths.js',
+    'dist-electron/desktop/src/main/services/workspace-service.js',
     'dist-electron/desktop/src/main/main.js',
     'node_modules/@mariozechner/agent/index.js',
     'node_modules/@mariozechner/pi-agent-core/dist/index.js',
@@ -124,6 +126,8 @@ function verifyAsar() {
     'dist-electron/core/src/lib/integrations/pi-agent/tools/schedule-tools.js',
     'dist-electron/core/src/lib/features/skills/service.js',
     'dist-electron/core/src/lib/features/services/launcher/skill.js',
+    'dist-electron/core/src/lib/integrations/electron/workspace-paths.js',
+    'dist-electron/desktop/src/main/services/workspace-service.js',
   ];
 
   asar.extractAll(asarPath, smokeDir);
@@ -154,6 +158,24 @@ function verifyAsar() {
   }
   if (!skillServiceRuntime.includes('loadSkillFromDirectory')) {
     fail('SkillService runtime does not load existing data skills by directory name');
+  }
+  const workspacePathsRuntime = smokeRequire(
+    path.join(
+      smokeDir,
+      'dist-electron/core/src/lib/integrations/electron/workspace-paths.js',
+    ),
+  );
+  const windowsDataRoot = 'C:\\Users\\admin\\AppData\\Roaming\\@originos\\desktop\\data';
+  const resolvedAgentUploadDir = workspacePathsRuntime.resolveWorkspaceBasePath(
+    'data/agents/release-smoke',
+    {
+      dataRoot: windowsDataRoot,
+      monorepoRoot: 'K:\\originos\\OriginOS CE\\resources\\app.asar',
+      pathImplementation: path.win32,
+    },
+  );
+  if (resolvedAgentUploadDir !== `${windowsDataRoot}\\agents\\release-smoke`) {
+    fail(`Workspace upload runtime resolved an invalid Windows path: ${resolvedAgentUploadDir}`);
   }
   verifyPiAiProviderImports(smokeDir);
 
