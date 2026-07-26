@@ -322,7 +322,7 @@ async function verifyCdnArtifact(url, artifact, options = {}) {
       return;
     } catch (error) {
       lastError = error;
-      if (attempt >= attempts || isMetadataArtifact(artifact.fileName)) {
+      if (attempt >= attempts) {
         break;
       }
       console.warn(
@@ -450,11 +450,7 @@ async function main() {
     }
     if (url && !skipCdnVerify) {
       console.log(`[publish-qiniu-updates] verifying ${url}`);
-      if (isMetadata) {
-        await verifyCdnArtifact(url, artifact, { retries: 1 });
-      } else {
-        await verifyCdnArtifact(url, artifact);
-      }
+      await verifyCdnArtifact(url, artifact, isMetadata ? { retries: 12 } : undefined);
     }
   }
 
