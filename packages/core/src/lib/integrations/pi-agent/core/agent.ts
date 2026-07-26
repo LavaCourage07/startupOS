@@ -43,6 +43,12 @@ import {
 	DEFAULT_COMPLETION_RECOVERY_LIMIT,
 	type ToolFailureSummary,
 } from "./completion-guard";
+import {
+	buildCompletionJudgePrompt,
+	COMPLETION_JUDGE_SYSTEM_PROMPT,
+	parseCompletionJudgeDecision,
+	type SemanticCompletionDecision,
+} from "./completion-judge";
 import { getToolEventStatus } from "./tool-event-status";
 
 // ============================================================================
@@ -115,6 +121,53 @@ function previewText(text: string, max = 80): string {
 	return text.replace(/\s+/g, " ").slice(0, max);
 }
 
+function getMessageText(message: unknown): string {
+	if (typeof message === "string") {
+		return message;
+	}
+	if (!message || typeof message !== "object") {
+		return "";
+	}
+	const content = (message as { content?: unknown }).content;
+	if (typeof content === "string") {
+		return content;
+	}
+	if (!Array.isArray(content)) {
+		return "";
+	}
+	return content
+		.filter((block): block is { type: "text"; text: string } =>
+			typeof block === "object" &&
+			block !== null &&
+			(block as { type?: unknown }).type === "text" &&
+			typeof (block as { text?: unknown }).text === "string"
+		)
+		.map((block) => block.text)
+		.join("");
+}
+
+function getPromptText(message: string | AgentMessage | AgentMessage[]): string {
+	if (typeof message === "string") {
+		return message;
+	}
+	if (Array.isArray(message)) {
+		for (let index = message.length - 1; index >= 0; index -= 1) {
+			const candidate = message[index];
+			if (candidate?.role === "user") {
+				return getMessageText(candidate);
+			}
+		}
+		return "";
+	}
+	return getMessageText(message);
+}
+
+function redactErrorForLogging(message: string): string {
+	return message
+		.replace(/\bBearer\s+\S+/giu, "Bearer [REDACTED]")
+		.replace(/\b(?:sk|tp)-[A-Za-z0-9._-]{8,}\b/gu, "[REDACTED]");
+}
+
 function logInfo(...args: unknown[]): void {
 	if (process.env["ORIGINOS_WORKER_STDOUT_JSON_LINE"] === "1") {
 		return;
@@ -167,11 +220,19 @@ export class OriginOSAgent {
 		defaultShell: findSuitableShell() ?? undefined,
 	});
 	private runtimeEnvironmentPrompt = buildRuntimeEnvironmentPrompt(this.runtimeEnvironment);
-	private bufferedUiEvents: AgentEvent[] = [];
-	private isBufferingUiEvents = false;
 	private pendingPromiseStop = false;
 	private lastToolFailure: ToolFailureSummary | null = null;
 	private successfulToolAfterFailure = false;
+	private lastModelError: Error | null = null;
+	private activeUserRequest = "";
+	private completionToolTrace: string[] = [];
+	private pendingCompletionCandidate: {
+		message: object;
+		text: string;
+		stopReason?: string;
+		toolCallCount: number;
+	} | null = null;
+	private deferredAgentEndEvent: AgentEvent | null = null;
 	private hiddenMessages = new WeakSet<object>();
 
 	/**
@@ -422,10 +483,15 @@ export class OriginOSAgent {
 
 	private routeAgentEvent(event: AgentEvent): void {
 		const eventType = event.type;
-		const isAgentError = (event as any).type === "agent_error";
 
 		if (eventType === "tool_execution_end") {
 			const status = getToolEventStatus(event);
+			this.completionToolTrace.push(
+				`${event.toolName}: ${status.failed ? "failed" : "succeeded"}${status.reason ? ` (${status.reason.slice(0, 500)})` : ""}`,
+			);
+			if (this.completionToolTrace.length > 20) {
+				this.completionToolTrace.shift();
+			}
 			if (status.failed) {
 				this.lastToolFailure = {
 					toolName: event.toolName,
@@ -440,24 +506,14 @@ export class OriginOSAgent {
 		}
 
 		if (
-				eventType === "message_start" &&
-				event.message.role === "assistant" &&
-				this.lastToolFailure !== null &&
-				!this.isBufferingUiEvents
+			eventType === "agent_end" &&
+			(this.pendingPromiseStop || this.pendingCompletionCandidate)
 		) {
-			this.isBufferingUiEvents = true;
-			this.bufferedUiEvents = [];
+			this.deferredAgentEndEvent = event;
+			return;
 		}
 
-			if (eventType === "agent_end" && this.pendingPromiseStop) {
-				return;
-			}
-
-			if (this.isBufferingUiEvents && !isAgentError) {
-			this.bufferedUiEvents.push(event);
-		} else {
-			this.emitUiEvent(event);
-		}
+		this.emitUiEvent(event);
 
 		if (eventType !== "message_end" || event.message.role !== "assistant") {
 			return;
@@ -472,47 +528,26 @@ export class OriginOSAgent {
 		const toolCallCount = Array.isArray(event.message.content)
 			? event.message.content.filter((block: any) => block.type === "toolCall").length
 			: 0;
-		const assessment = assessCompletion({
-			role: event.message.role,
-			stopReason: (event.message as any).stopReason,
-			text,
-				toolCallCount,
-				hasUnresolvedToolFailure: this.lastToolFailure !== null,
-				hasSuccessfulToolAfterFailure: this.successfulToolAfterFailure,
-			});
-
-			this.pendingPromiseStop = assessment.shouldRecover;
-			if (assessment.shouldRecover) {
-				this.hiddenMessages.add(event.message);
-			} else if (this.isBufferingUiEvents) {
-				this.flushBufferedUiEvents();
+			if ((event.message as AssistantMessage).stopReason === "error") {
+				const errorMessage =
+					(event.message as AssistantMessage).errorMessage?.trim() ||
+					"Model stream ended with stopReason=error without an errorMessage";
+				this.lastModelError = new Error(errorMessage);
+				this.pendingPromiseStop = false;
+				return;
 			}
-	}
-
-	private flushBufferedUiEvents(): void {
-		const events = this.bufferedUiEvents;
-		this.bufferedUiEvents = [];
-		this.isBufferingUiEvents = false;
-		for (const event of events) {
-			this.emitUiEvent(event);
-		}
-	}
-
-	private discardBufferedUiEvents(): void {
-		for (const event of this.bufferedUiEvents) {
 			if (
-				(event.type === "message_start" ||
-					event.type === "message_end" ||
-					event.type === "turn_end") &&
-				typeof event.message === "object" &&
-				event.message !== null
+				(event.message as AssistantMessage).stopReason === "stop" &&
+				toolCallCount === 0
 			) {
-				this.hiddenMessages.add(event.message);
+				this.pendingCompletionCandidate = {
+					message: event.message,
+					text,
+					stopReason: (event.message as AssistantMessage).stopReason,
+					toolCallCount,
+				};
 			}
 		}
-		this.bufferedUiEvents = [];
-		this.isBufferingUiEvents = false;
-	}
 
 	private emitUiEvent(event: AgentEvent): void {
 		if (
@@ -547,11 +582,130 @@ export class OriginOSAgent {
 		this.eventEmitter.emit(event);
 	}
 
-	private resetCompletionGuard(): void {
-		this.discardBufferedUiEvents();
+	private resetCompletionGuard(userRequest = ""): void {
 		this.pendingPromiseStop = false;
 		this.lastToolFailure = null;
 		this.successfulToolAfterFailure = false;
+		this.lastModelError = null;
+		this.activeUserRequest = userRequest;
+		this.completionToolTrace = [];
+		this.pendingCompletionCandidate = null;
+		this.deferredAgentEndEvent = null;
+	}
+
+	private throwIfModelStreamFailed(): void {
+		if (this.lastModelError) {
+			throw this.lastModelError;
+		}
+	}
+
+	private async judgePendingCompletion(): Promise<void> {
+		const candidate = this.pendingCompletionCandidate;
+		if (!candidate || !this.agent) {
+			return;
+		}
+		this.pendingCompletionCandidate = null;
+
+		let decision: SemanticCompletionDecision;
+		try {
+			const runtimeModel = this.agent.state.model as Model<any> & {
+				apiKey?: string;
+				authToken?: string;
+				credentialAuthMode?: string;
+				headers?: Record<string, string>;
+			};
+			const options: Record<string, unknown> = {
+				temperature: 0,
+				maxTokens: 512,
+				reasoning: "minimal",
+				maxRetryDelayMs: 5_000,
+				signal: AbortSignal.timeout(15_000),
+			};
+			let judgeModel = runtimeModel;
+			if (
+				(runtimeModel.credentialAuthMode === "bearer" ||
+					runtimeModel.credentialAuthMode === "oauth") &&
+				runtimeModel.authToken
+			) {
+				options["apiKey"] = runtimeModel.authToken;
+				options["headers"] = {
+					...(runtimeModel.headers ?? {}),
+					authorization: `Bearer ${runtimeModel.authToken}`,
+				};
+				judgeModel = {
+					...runtimeModel,
+					provider: "github-copilot",
+					apiKey: undefined,
+					authToken: undefined,
+				};
+			} else if (runtimeModel.apiKey) {
+				options["apiKey"] = runtimeModel.apiKey;
+			}
+
+			const judgeMessage = await piAi.completeSimple(
+				judgeModel,
+				{
+					systemPrompt: COMPLETION_JUDGE_SYSTEM_PROMPT,
+					messages: [{
+						role: "user",
+						content: buildCompletionJudgePrompt({
+							userRequest: this.activeUserRequest,
+							assistantResponse: candidate.text,
+							toolTrace: this.completionToolTrace,
+						}),
+						timestamp: Date.now(),
+					}],
+				},
+				options,
+			);
+			if (judgeMessage.stopReason === "error") {
+				throw new Error(
+					judgeMessage.errorMessage || "Completion judge model failed",
+				);
+			}
+			const judgeText = getMessageText(judgeMessage);
+			try {
+				decision = parseCompletionJudgeDecision(judgeText);
+			} catch (parseError) {
+				throw new Error(
+					`${parseError instanceof Error ? parseError.message : String(parseError)}; stopReason=${judgeMessage.stopReason}; response="${previewText(judgeText, 300)}"`,
+				);
+			}
+			logInfo(
+				`[LLM CompletionJudge] status=${decision.status}, reason="${previewText(decision.reason, 160)}"`,
+			);
+		} catch (error) {
+			const fallback = assessCompletion({
+				role: "assistant",
+				stopReason: candidate.stopReason,
+				text: candidate.text,
+				toolCallCount: candidate.toolCallCount,
+				hasUnresolvedToolFailure: this.lastToolFailure !== null,
+				hasSuccessfulToolAfterFailure: this.successfulToolAfterFailure,
+			});
+			decision = {
+				status: fallback.shouldRecover ? "incomplete" : "complete",
+				reason: `fallback:${fallback.reason}`,
+			};
+			console.warn(
+				`[LLM CompletionJudge] failed, using fallback — ${redactErrorForLogging(
+					error instanceof Error ? error.message : String(error),
+				)}`,
+			);
+		}
+
+		this.pendingPromiseStop = decision.status === "incomplete";
+		if (this.pendingPromiseStop) {
+			this.hiddenMessages.add(candidate.message);
+			this.deferredAgentEndEvent = null;
+			return;
+		}
+
+		if (this.deferredAgentEndEvent) {
+			const deferred = this.deferredAgentEndEvent;
+			this.deferredAgentEndEvent = null;
+			this.emitUiEvent(deferred);
+		}
 	}
 
 	private async runWithCompletionGuard(
@@ -562,6 +716,8 @@ export class OriginOSAgent {
 		}
 
 		await start();
+		this.throwIfModelStreamFailed();
+		await this.judgePendingCompletion();
 		let recoveryAttempt = 0;
 
 		while (
@@ -569,7 +725,6 @@ export class OriginOSAgent {
 			recoveryAttempt < DEFAULT_COMPLETION_RECOVERY_LIMIT
 		) {
 			recoveryAttempt += 1;
-			this.discardBufferedUiEvents();
 			this.pendingPromiseStop = false;
 
 			const recoveryMessage: SyntheticUserMessage = {
@@ -584,12 +739,13 @@ export class OriginOSAgent {
 				}],
 			};
 			this.hiddenMessages.add(recoveryMessage);
-			this.isBufferingUiEvents = true;
 			logInfo(
-				`[LLM CompletionGuard] recovering promise-only stop — attempt=${recoveryAttempt}/${DEFAULT_COMPLETION_RECOVERY_LIMIT}`,
+				`[LLM CompletionGuard] recovering incomplete stop — attempt=${recoveryAttempt}/${DEFAULT_COMPLETION_RECOVERY_LIMIT}`,
 			);
 				try {
 					await this.agent.prompt(recoveryMessage as unknown as AgentMessage);
+					this.throwIfModelStreamFailed();
+					await this.judgePendingCompletion();
 				} catch (error) {
 					const recoveryError = error instanceof Error
 						? error
@@ -598,7 +754,6 @@ export class OriginOSAgent {
 						toolName: "agent-recovery",
 						reason: recoveryError.message,
 					};
-					this.discardBufferedUiEvents();
 					this.pendingPromiseStop = false;
 					this.emitCompletionFailureReport();
 					return;
@@ -606,11 +761,9 @@ export class OriginOSAgent {
 		}
 
 		if (!this.pendingPromiseStop) {
-			this.flushBufferedUiEvents();
 			return;
 		}
 
-		this.discardBufferedUiEvents();
 		this.pendingPromiseStop = false;
 		this.emitCompletionFailureReport();
 	}
@@ -640,7 +793,7 @@ export class OriginOSAgent {
 			this.eventEmitter.emit(event);
 		});
 		console.error(
-			`[LLM CompletionGuard] recovery exhausted — tool=${this.lastToolFailure?.toolName ?? "unknown"}, exitCode=${this.lastToolFailure?.exitCode ?? "unknown"}, reason=${this.lastToolFailure?.reason ?? "promise-only stop"}`,
+			`[LLM CompletionGuard] recovery exhausted — tool=${this.lastToolFailure?.toolName ?? "unknown"}, exitCode=${this.lastToolFailure?.exitCode ?? "unknown"}, reason=${this.lastToolFailure?.reason ?? "semantic completion check reported incomplete"}`,
 		);
 	}
 
@@ -866,9 +1019,17 @@ export class OriginOSAgent {
 					? msg.content.filter((b: any) => b.type === "text" && b.text != null).map((b: any) => b.text).join("")
 					: "";
 				const stopReason = msg?.stopReason || "";
-				logInfo(
-					`\n[LLM Event] message_end — role=${role}, turnSeq=${this.activeTurnSequence}${role === "assistant" ? `, assistantMsgSeq=${this.activeAssistantMessageSequence}` : ""}, stopReason=${stopReason}, toolCalls=${hasToolCalls}, textLen=${textContent.length}, textHash=${hashText(textContent)}, loopGuard=${role === "assistant" ? this.assistantLoopGuardTriggered : false}, preview="${previewText(textContent)}"`
-				);
+				const messageEndLog =
+					`\n[LLM Event] message_end — role=${role}, turnSeq=${this.activeTurnSequence}${role === "assistant" ? `, assistantMsgSeq=${this.activeAssistantMessageSequence}` : ""}, stopReason=${stopReason}, toolCalls=${hasToolCalls}, textLen=${textContent.length}, textHash=${hashText(textContent)}, loopGuard=${role === "assistant" ? this.assistantLoopGuardTriggered : false}, preview="${previewText(textContent)}"`;
+				if (stopReason === "error") {
+					const errorMessage =
+						typeof msg?.errorMessage === "string" && msg.errorMessage.trim()
+							? redactErrorForLogging(msg.errorMessage)
+							: "Model stream ended without an errorMessage";
+					console.error(`${messageEndLog}, errorMessage="${errorMessage}"`);
+				} else {
+					logInfo(messageEndLog);
+				}
 				if (role === "assistant") {
 					this.loggedStreamContent = "";
 				}
@@ -879,7 +1040,11 @@ export class OriginOSAgent {
 				this.healthMonitor.recordError(
 					(event as any).error?.message ?? "Unknown agent error"
 				);
-				console.error(`[LLM Event] agent_error:`, (event as any).error);
+				console.error(
+					`[LLM Event] agent_error: ${redactErrorForLogging(
+						(event as any).error?.message ?? String((event as any).error),
+					)}`,
+				);
 				break;
 		}
 	}
@@ -989,7 +1154,7 @@ export class OriginOSAgent {
 
 		const t0 = Date.now();
 		try {
-			this.resetCompletionGuard();
+			this.resetCompletionGuard(getPromptText(message));
 			await this.runWithCompletionGuard(
 				() => this.agent!.prompt(message as string, images),
 			);
@@ -1006,7 +1171,9 @@ export class OriginOSAgent {
 				type: "agent_error",
 				error: agentError,
 			} as unknown as AgentEvent);
-			console.error(`[LLM] <<< Prompt failed | Elapsed: ${elapsed}ms | ${agentError.message}`);
+			console.error(
+				`[LLM] <<< Prompt failed | Elapsed: ${elapsed}ms | ${redactErrorForLogging(agentError.message)}`,
+			);
 			throw agentError;
 		}
 	}
@@ -1022,7 +1189,10 @@ export class OriginOSAgent {
 			throw new Error("Agent 已销毁");
 		}
 
-		this.resetCompletionGuard();
+		const latestUserRequest = [...this.agent.state.messages]
+			.reverse()
+			.find((message) => message.role === "user");
+		this.resetCompletionGuard(getMessageText(latestUserRequest));
 		await this.runWithCompletionGuard(() => this.agent!.continue());
 	}
 

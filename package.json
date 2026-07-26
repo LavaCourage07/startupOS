@@ -73,6 +73,7 @@
     "@tanstack/react-table": "^8.21.3",
     "@types/d3-force": "^3.0.10",
     "@xyflow/react": "^12.10.2",
+    "archiver": "^8.0.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.0.0",
     "d3-force": "^3.0.0",
@@ -91,6 +92,8 @@
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^2.0.0",
     "undici": "^5.0.0",
+    "uuid": "^14.0.0",
+    "zod": "^3.25.76",
     "zustand": "^4.0.0"
   },
   "devDependencies": {

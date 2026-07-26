@@ -166,7 +166,7 @@ describe("OriginOSAgent", () => {
 			expect(prompt).toContain("Native path separator:");
 		});
 
-		it("automatically continues a promise-only stop and hides it from UI", async () => {
+		it("automatically continues an incomplete stop without hiding assistant text", async () => {
 			agent = new OriginOSAgent(basicConfig);
 			const internalAgent = (agent as any).agent;
 			const receivedEvents: any[] = [];
@@ -196,7 +196,7 @@ describe("OriginOSAgent", () => {
 				});
 				emitAssistantStop(
 					internalAgent,
-					"我现在继续处理：先改用 PowerShell 兼容命令读取文件。",
+					"好的，我会先读取岗位模型和候选人简历，提取关键信息，然后按 Job Model 评分标准生成完整评估报告。",
 				);
 			});
 				internalAgent.prompt.mockImplementationOnce(async (message: any) => {
@@ -217,11 +217,11 @@ describe("OriginOSAgent", () => {
 
 			await agent.prompt("读取上传文件");
 
-			expect(internalAgent.prompt).toHaveBeenCalledTimes(2);
-			expect(internalAgent.continue).not.toHaveBeenCalled();
-			const visible = JSON.stringify(receivedEvents);
-			expect(visible).not.toContain("我现在继续处理");
-			expect(visible).not.toContain("Internal Completion Recovery");
+				expect(internalAgent.prompt).toHaveBeenCalledTimes(2);
+				expect(internalAgent.continue).not.toHaveBeenCalled();
+				const visible = JSON.stringify(receivedEvents);
+				expect(visible).toContain("好的，我会先读取");
+				expect(visible).not.toContain("Internal Completion Recovery");
 			expect(visible).toContain("处理完成");
 			expect(receivedEvents.filter((event) => event.type === "agent_end")).toHaveLength(1);
 			const recoveryMessage = internalAgent.prompt.mock.calls[1]?.[0];
@@ -272,13 +272,47 @@ describe("OriginOSAgent", () => {
 			expect(internalAgent.prompt).toHaveBeenCalledTimes(3);
 			expect(internalAgent.continue).not.toHaveBeenCalled();
 			const visible = JSON.stringify(receivedEvents);
-			expect(visible).not.toContain(promiseText);
+			expect(visible).toContain(promiseText);
 			expect(visible).toContain("自动恢复次数已耗尽");
 			expect(visible).toContain("最后失败工具：execute_command");
 			expect(visible).toContain("退出码：1");
 			expect(visible).toContain("heredoc is not supported");
 			expect(visible).toContain("所需操作：");
 			expect(receivedEvents.filter((event) => event.type === "agent_end")).toHaveLength(1);
+		});
+
+		it("surfaces an assistant stream error instead of reporting prompt completion", async () => {
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+			agent = new OriginOSAgent(basicConfig);
+			const internalAgent = (agent as any).agent;
+			const receivedEvents: any[] = [];
+			agent.subscribe((event) => receivedEvents.push(event));
+			internalAgent.prompt.mockImplementationOnce(async () => {
+				const message = {
+					role: "assistant",
+					content: [],
+					stopReason: "error",
+					errorMessage: "HTTP 401: invalid API key sk-sensitive-value",
+				};
+				internalAgent.emit({ type: "message_start", message });
+				internalAgent.emit({ type: "message_end", message });
+				internalAgent.emit({ type: "turn_end", message, toolResults: [] });
+				internalAgent.emit({ type: "agent_end", messages: [message] });
+			});
+
+			await expect(agent.prompt("测试模型错误")).rejects.toThrow(
+				"HTTP 401: invalid API key sk-sensitive-value",
+			);
+
+			expect(receivedEvents.some((event) =>
+				event.type === "agent_error" &&
+				event.error?.message === "HTTP 401: invalid API key sk-sensitive-value"
+			)).toBe(true);
+			expect(errorSpy.mock.calls.some((call) =>
+				String(call[0]).includes("stopReason=error") &&
+				String(call[0]).includes("[REDACTED]") &&
+				!String(call[0]).includes("sk-sensitive-value")
+			)).toBe(true);
 		});
 
 			it("preserves failure details while recording a later tool success", () => {

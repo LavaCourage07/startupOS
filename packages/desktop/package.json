@@ -4,6 +4,7 @@
   "private": true,
   "main": "dist-electron/desktop/src/main/main.js",
   "scripts": {
+    "test": "vitest run",
     "dev": "concurrently \"pnpm --filter @originos/web dev\" \"tsc -p tsconfig.json --watch\" \"wait-on tcp:3000 ../../dist-electron/desktop/src/main/main.js && electron ../../dist-electron/desktop/src/main/main.js\"",
     "build": "tsc -p tsconfig.json",
     "build:app": "rm -rf ../web/.next ../../dist-electron && pnpm --filter @originos/web build && node scripts/prepare-web-standalone.js && node scripts/prepare-pi-ai-runtime-deps.js && pnpm build && node ../../scripts/check-root-build-artifacts.js && node scripts/verify-agent-worker-runtime.js && rm -rf dist-electron && mkdir -p dist-electron && cp -R ../../dist-electron/. dist-electron/ && node ../../scripts/check-root-build-artifacts.js",
@@ -36,6 +37,7 @@
     "@mariozechner/pi-agent-core": "0.55.3",
     "@mariozechner/pi-ai": "0.55.3",
     "@sinclair/typebox": "^0.34.0",
+    "archiver": "^8.0.0",
     "dotenv": "^16.6.1",
     "electron-log": "5.4.4",
     "electron-updater": "6.8.3",
@@ -48,12 +50,16 @@
   },
   "devDependencies": {
     "@electron/asar": "^3.4.1",
+    "@types/adm-zip": "^0.5.8",
+    "@types/archiver": "^8.0.0",
     "@types/node": "^20.0.0",
+    "adm-zip": "^0.6.0",
     "concurrently": "^9.2.1",
     "electron": "^42.3.2",
     "electron-builder": "^26.0.12",
     "tsx": "^4.22.0",
     "typescript": "^5.0.0",
+    "vitest": "^1.0.0",
     "wait-on": "^8.0.5"
   }
 }

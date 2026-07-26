@@ -93,6 +93,7 @@ describe('Skill feature service', () => {
       expect(result.outputDir).toBe(dataRoot);
       expect(result.frontmatter?.description).toBe('Skill creator bundled from resources');
       expect(result.frontmatter?.['originos-system']).toBe('true');
+      expect(result.systemManaged).toBe(true);
       expect(existsSync(path.join(workingDir, 'SKILL.md'))).toBe(true);
     } finally {
       setMonorepoRoot(originalRoot);

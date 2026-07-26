@@ -46,9 +46,11 @@ function verifyApp(appPath) {
     'dist-electron/core/src/lib/features/skills/service.js',
     'dist-electron/core/src/lib/features/services/launcher/skill.js',
     'dist-electron/desktop/src/main/main.js',
+    'dist-electron/desktop/src/main/services/entry-export-service.js',
     'node_modules/@mariozechner/agent/index.js',
     'node_modules/@mariozechner/pi-agent-core/dist/index.js',
     'node_modules/@mariozechner/pi-agent-core/package.json',
+    'node_modules/archiver/index.js',
   ];
 
   for (const entry of requiredEntries) {
@@ -64,6 +66,10 @@ function verifyApp(appPath) {
     const smokeRequire = createRequire(path.join(smokeDir, 'package.json'));
     smokeRequire.resolve('@mariozechner/agent');
     smokeRequire.resolve('@mariozechner/pi-agent-core');
+    const archiverRuntime = smokeRequire('archiver');
+    if (typeof archiverRuntime.ZipArchive !== 'function') {
+      fail('archiver runtime does not expose ZipArchive');
+    }
     smokeRequire.resolve(path.join(
       smokeDir,
       'dist-electron/core/src/lib/integrations/pi-agent/core/agent.js',

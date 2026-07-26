@@ -38,11 +38,11 @@ function checkAbort(signal?: AbortSignal): void {
 }
 
 function logToolStart(ctx: ToolExecutionContext, params: Record<string, unknown>): void {
-  console.error(`[Tool:${ctx.toolName}] START_CALL_ID=${ctx.toolCallId}`, JSON.stringify(params, null, 2));
+  console.info(`[Tool:${ctx.toolName}] START_CALL_ID=${ctx.toolCallId}`, JSON.stringify(params, null, 2));
 }
 
 function logToolEnd(ctx: ToolExecutionContext, result: Record<string, unknown>): void {
-  console.error(`[Tool:${ctx.toolName}] END_CALL_ID=${ctx.toolCallId}`, JSON.stringify(result, null, 2));
+  console.info(`[Tool:${ctx.toolName}] END_CALL_ID=${ctx.toolCallId}`, JSON.stringify(result, null, 2));
 }
 
 // ============================================================================
@@ -85,35 +85,36 @@ const GenerateFileUrlTool: ToolRegistration = {
 
       const toolContext = getToolContext();
       const cwd = getDataRoot();
+      const portableInputPath = params.filePath.replace(/\\/gu, '/');
 
       // 解析文件路径（统一用 path.resolve 确保得到绝对路径）
       let absolutePath: string;
       if (path.isAbsolute(params.filePath)) {
         absolutePath = params.filePath;
-      } else if (params.filePath.startsWith('data/') || params.filePath.startsWith('skills/') || params.filePath.startsWith('tmp/')) {
-        absolutePath = path.resolve(cwd, params.filePath);
+      } else if (portableInputPath.startsWith('data/')) {
+        absolutePath = path.resolve(cwd, portableInputPath.slice('data/'.length));
+      } else if (portableInputPath.startsWith('skills/') || portableInputPath.startsWith('tmp/')) {
+        absolutePath = path.resolve(cwd, portableInputPath);
       } else {
         const baseDir = toolContext.workingDirectory || cwd;
         absolutePath = path.resolve(baseDir, params.filePath);
       }
 
-      // 计算相对于项目根目录的路径
-      if (!absolutePath.startsWith(cwd)) {
+      // getDataRoot() 已经是 data/ 目录；所有其下文件都允许生成访问 URL。
+      const relativePath = path.relative(cwd, absolutePath);
+      if (
+        relativePath === '..' ||
+        relativePath.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relativePath)
+      ) {
         throw new Error(`File must be under project directory. Got: ${absolutePath}`);
       }
 
-      const relativePath = path.relative(cwd, absolutePath);
-
-      // 检查是否在允许的目录下
-      const allowedPrefixes = ['data/', 'skills/', 'tmp/'];
-      const isAllowed = allowedPrefixes.some(prefix => relativePath.startsWith(prefix));
-      if (!isAllowed) {
-        throw new Error(`File must be under data/, skills/, or tmp/ directory. Got: ${relativePath}`);
-      }
+      const urlRelativePath = relativePath.split(path.sep).join('/');
 
       // 构建静态资源 URL（使用 /api/files/ 直接返回二进制流）
       const baseUrl = params.baseUrl || "http://localhost:3000";
-      const apiUrl = `${baseUrl}/api/files/${relativePath}`;
+      const apiUrl = `${baseUrl}/api/files/${urlRelativePath}`;
 
       // 获取文件扩展名
       const ext = path.extname(params.filePath).toLowerCase();
@@ -123,7 +124,7 @@ const GenerateFileUrlTool: ToolRegistration = {
         success: true,
         url: apiUrl,
         filePath: absolutePath,
-        relativePath,
+        relativePath: urlRelativePath,
         fileType: isImage ? "image" : "file",
         extension: ext,
       };

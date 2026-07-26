@@ -106,9 +106,11 @@ function verifyAsar() {
     'dist-electron/core/src/lib/features/services/launcher/skill.js',
     'dist-electron/core/src/lib/integrations/electron/workspace-paths.js',
     'dist-electron/desktop/src/main/services/workspace-service.js',
+    'dist-electron/desktop/src/main/services/entry-export-service.js',
     'dist-electron/desktop/src/main/main.js',
     'node_modules/@mariozechner/agent/index.js',
     'node_modules/@mariozechner/pi-agent-core/dist/index.js',
+    'node_modules/archiver/index.js',
     ...piAiRuntimeDependencies.map((dependency) => `node_modules/${dependency}/package.json`),
   ];
 
@@ -128,6 +130,7 @@ function verifyAsar() {
     'dist-electron/core/src/lib/features/services/launcher/skill.js',
     'dist-electron/core/src/lib/integrations/electron/workspace-paths.js',
     'dist-electron/desktop/src/main/services/workspace-service.js',
+    'dist-electron/desktop/src/main/services/entry-export-service.js',
   ];
 
   asar.extractAll(asarPath, smokeDir);
@@ -138,6 +141,10 @@ function verifyAsar() {
   }
   smokeRequire.resolve('@mariozechner/agent');
   smokeRequire.resolve('@mariozechner/pi-agent-core');
+  const archiverRuntime = smokeRequire('archiver');
+  if (typeof archiverRuntime.ZipArchive !== 'function') {
+    fail('archiver runtime does not expose ZipArchive');
+  }
   for (const dependency of piAiRuntimeDependencies) {
     smokeRequire.resolve(dependency);
   }

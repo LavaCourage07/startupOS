@@ -16,6 +16,24 @@ describe("completion guard", () => {
 			shouldRecover: true,
 			reason: "promise-only-stop",
 		});
+		expect(assessCompletion({
+			role: "assistant",
+			stopReason: "stop",
+			text: "我会先读取岗位模型与候选人简历，提取评估标准和候选人经历，然后按 JD/Job Model 的维度生成结构化评估结论、面试建议和笔试建议。",
+			toolCallCount: 0,
+		})).toEqual({
+			shouldRecover: true,
+			reason: "promise-only-stop",
+		});
+		expect(assessCompletion({
+			role: "assistant",
+			stopReason: "stop",
+			text: "好的，我会先读取岗位模型和候选人简历，提取关键信息，然后按 Job Model 评分标准生成完整评估报告。",
+			toolCallCount: 0,
+		})).toEqual({
+			shouldRecover: true,
+			reason: "promise-only-stop",
+		});
 	});
 
 	it("does not recover a completed answer, tool turn, or explicit block", () => {
@@ -23,23 +41,43 @@ describe("completion guard", () => {
 			role: "assistant",
 			stopReason: "stop",
 			text: "处理完成，结果如下。",
-		}).shouldRecover).toBe(false);
+		})).toEqual({
+			shouldRecover: false,
+			reason: "completion-marker",
+		});
 		expect(assessCompletion({
 			role: "assistant",
 			stopReason: "toolUse",
 			text: "",
 			toolCallCount: 1,
-		}).shouldRecover).toBe(false);
+		})).toEqual({
+			shouldRecover: false,
+			reason: "non-terminal-turn",
+		});
 		expect(assessCompletion({
 			role: "assistant",
 			stopReason: "stop",
 			text: "无法继续，需要你提供文件路径。",
-		}).shouldRecover).toBe(false);
+		})).toEqual({
+			shouldRecover: false,
+			reason: "explicit-blocker",
+		});
 		expect(assessCompletion({
 			role: "assistant",
 			stopReason: "stop",
 			text: "接下来说明完整方案。\n1. 读取文件\n2. 生成技能\n3. 验证输出",
-		}).shouldRecover).toBe(false);
+		})).toEqual({
+			shouldRecover: false,
+			reason: "accepted-stop",
+		});
+		expect(assessCompletion({
+			role: "assistant",
+			stopReason: "stop",
+			text: "我会建议你优先核对岗位硬性要求，再结合面试表现做最终判断。",
+		})).toEqual({
+			shouldRecover: false,
+			reason: "accepted-stop",
+		});
 	});
 
 	it("recovers a stop while a tool failure remains unresolved", () => {
@@ -57,14 +95,19 @@ describe("completion guard", () => {
 			stopReason: "stop",
 			text: "无法继续，需要你提供正确的文件路径。",
 			hasUnresolvedToolFailure: true,
-		}).shouldRecover).toBe(false);
+		})).toEqual({
+			shouldRecover: false,
+			reason: "explicit-blocker",
+		});
 		expect(assessCompletion({
 			role: "assistant",
 			stopReason: "stop",
 			text: "处理完成。",
 			hasUnresolvedToolFailure: true,
-			hasSuccessfulToolAfterFailure: true,
-		}).shouldRecover).toBe(false);
+		})).toEqual({
+			shouldRecover: false,
+			reason: "completion-marker",
+		});
 	});
 
 	it("builds a recovery instruction with failure and runtime context", () => {

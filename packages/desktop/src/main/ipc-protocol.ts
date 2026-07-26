@@ -18,6 +18,7 @@ export const IPC_CHANNELS = {
   WORKSPACE_FILE_WRITE: 'workspace:file:write',
   WORKSPACE_FILE_DELETE: 'workspace:file:delete',
   WORKSPACE_FILE_UPLOAD: 'workspace:file:upload',
+  ENTRY_EXPORT: 'entry:export',
   AGENT_START: 'agent:start',
   AGENT_STOP: 'agent:stop',
   AGENT_MESSAGE: 'agent:message',

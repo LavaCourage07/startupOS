@@ -21,6 +21,7 @@ import { CollaborationService } from './services/collaboration-service';
 import { AgentSessionService } from './services/agent-session-service';
 import { AgentProjectService } from './services/agent-project-service';
 import { WorkspaceService } from './services/workspace-service';
+import { EntryExportService } from './services/entry-export-service';
 import { DesktopSchedulerService } from './services/desktop-scheduler-service';
 import { attachDevToolsContextMenu } from './devtools-context-menu';
 
@@ -61,6 +62,7 @@ const llmLogPrefixes = [
   '[AgentSessionService]',
   '[AgentManager]',
   '[WorkspaceService]',
+  '[EntryExportService]',
   '[MiscService]',
   '[SkillService]',
   '[SkillLauncher]',
@@ -421,6 +423,7 @@ app.whenReady().then(() => {
   ipcServices.push(new AgentSessionService());
   ipcServices.push(new AgentProjectService());
   ipcServices.push(new WorkspaceService());
+  ipcServices.push(new EntryExportService());
   mainWindow = createWindow();
   windowManager.setMainWindow(mainWindow);
   windowManager.createDockWindow();

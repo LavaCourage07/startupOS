@@ -18,12 +18,19 @@ export interface CompletionAssessmentInput {
 
 export interface CompletionAssessment {
 	shouldRecover: boolean;
-	reason?: "promise-only-stop" | "unresolved-tool-failure";
+	reason:
+		| "non-terminal-turn"
+		| "explicit-blocker"
+		| "promise-only-stop"
+		| "unresolved-tool-failure"
+		| "completion-marker"
+		| "accepted-stop";
 }
 
 const PROMISE_PHRASES = [
 	/^(?:抱歉[，,\s]*)?(?:我)?(?:现在|马上|接下来|随后)(?:会|将|继续|开始|先|去|改用|换一种)/u,
 	/(?:我现在|我接下来|下面我会|让我)(?:继续|开始|先|去|重新|改用|换一种)/u,
+	/^(?:(?:抱歉|好的|好|可以|明白|收到|没问题)[，,。.!！\s]*)*我(?:会|将|准备)(?:先|立即|马上)?(?:读取|检查|分析|提取|创建|生成|处理|执行|调用|打开|查找|评估|整理|修改|写入|测试|验证|继续|开始)/u,
 	/(?:I(?:'ll| will)|let me|next[, ]+I(?:'ll| will))\s+(?:continue|start|first|retry|read|check|use|try)/iu,
 ];
 
@@ -45,12 +52,12 @@ export function assessCompletion(
 		input.stopReason !== "stop" ||
 		(input.toolCallCount ?? 0) > 0
 	) {
-		return { shouldRecover: false };
+		return { shouldRecover: false, reason: "non-terminal-turn" };
 	}
 
 	const text = (input.text ?? "").trim();
 	if (BLOCKER_MARKERS.some((pattern) => pattern.test(text))) {
-		return { shouldRecover: false };
+		return { shouldRecover: false, reason: "explicit-blocker" };
 	}
 
 	const sentenceCount = text.split(/[。！？.!?]+/u).filter(Boolean).length;
@@ -63,20 +70,20 @@ export function assessCompletion(
 	if (promiseOnly) {
 		return { shouldRecover: true, reason: "promise-only-stop" };
 	}
+	if (COMPLETION_MARKERS.some((pattern) => pattern.test(text))) {
+		return { shouldRecover: false, reason: "completion-marker" };
+	}
 	if (
 		input.hasUnresolvedToolFailure &&
 		!input.hasSuccessfulToolAfterFailure
 	) {
 		return { shouldRecover: true, reason: "unresolved-tool-failure" };
 	}
-	if (COMPLETION_MARKERS.some((pattern) => pattern.test(text))) {
-		return { shouldRecover: false };
-	}
 	if (input.hasUnresolvedToolFailure) {
 		return { shouldRecover: true, reason: "unresolved-tool-failure" };
 	}
 
-	return { shouldRecover: false };
+	return { shouldRecover: false, reason: "accepted-stop" };
 }
 
 export function buildCompletionRecoveryMessage(
@@ -93,7 +100,7 @@ export function buildCompletionRecoveryMessage(
 					: [`Exit code: ${failure.exitCode}`]),
 				`Failure reason: ${failure.reason}`,
 			].join("\n")
-		: "No failed tool was recorded. The previous response stopped after only promising future work.";
+		: "No failed tool was recorded. Semantic review found that the previous response did not complete the user's request.";
 
 	return [
 		"[Internal Completion Recovery]",
@@ -142,7 +149,7 @@ export function buildCompletionFailureReport(
 		"",
 		`最后失败工具：${failure?.toolName ?? "未记录"}`,
 		`退出码：${failure?.exitCode ?? "未提供"}`,
-		`失败原因：${failure?.reason ?? "模型连续以承诺继续的文本结束，但没有执行后续操作。"}`,
+		`失败原因：${failure?.reason ?? "语义完成度检查连续判定任务尚未完成。"}`,
 		`所需操作：${requiredActionFor(failure)}`,
 	];
 	return lines.join("\n");

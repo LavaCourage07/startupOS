@@ -27,6 +27,7 @@ import { useFileUpload, type UploadedFile } from '@/lib/hooks/use-file-upload';
 import StatusIndicator from './StatusIndicator';
 import { AppWindowManager } from '@/services/AppWindowManager';
 import { WorkspaceWindow } from '@/components/os/workspace';
+import { EntryExportButton } from '@/components/os/EntryExportButton';
 
 interface SessionHistoryItem {
   sessionId: string;
@@ -51,6 +52,12 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
   // Resolve display name and type from props or registry
   const displayName = agentName || agent?.displayName || agent?.name || agentId;
   const resolvedAgentType = propAgentType || agent?.type || 'role-agent';
+  let exportEntryType: 'agent' | 'role-agent' | null = 'agent';
+  if (resolvedAgentType === 'role-agent') {
+    exportEntryType = 'role-agent';
+  } else if (resolvedAgentType === 'project' || resolvedAgentType === 'skill') {
+    exportEntryType = null;
+  }
 
   // Session history state
   const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>([]);
@@ -408,6 +415,9 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
               >
                 <FolderOpen className="w-3.5 h-3.5 text-gray-500" />
               </button>
+              {exportEntryType && (
+                <EntryExportButton entryType={exportEntryType} entryId={agentId} />
+              )}
 
               {/* Session history button */}
               <div className="native-no-drag relative">

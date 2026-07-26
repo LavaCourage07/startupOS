@@ -145,6 +145,26 @@ vi.mock("@mariozechner/pi-ai", () => {
 			};
 		}),
 
+		completeSimple: vi.fn(async (_model: any, context: any) => {
+			const prompt = context?.messages?.[0]?.content ?? "";
+			const responseMatch = String(prompt).match(
+				/## Assistant final response\n([\s\S]*?)\n\n## Tool execution trace/u,
+			);
+			const response = responseMatch?.[1] ?? "";
+			const incomplete = /(?:我会|接下来|马上|随后|让我|will|next)/iu.test(response);
+			return {
+				role: "assistant",
+				content: [{
+					type: "text",
+					text: JSON.stringify({
+						status: incomplete ? "incomplete" : "complete",
+						reason: incomplete ? "work is only promised" : "result was delivered",
+					}),
+				}],
+				stopReason: "stop",
+			};
+		}),
+
 		// Add mock for the Agent type
 		Agent: class MockPiAiAgent {
 			constructor(config?: unknown) {

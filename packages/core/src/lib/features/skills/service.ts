@@ -38,6 +38,7 @@ export interface SkillListItem {
   filePath?: string;
   baseDir?: string;
   disableModelInvocation?: boolean;
+  systemManaged?: boolean;
 }
 
 export interface SkillListResponse {
@@ -57,6 +58,8 @@ export interface SkillContentResponse {
   workingDir: string;
   /** 产物输出目录（用于创建 Agent 等产物） */
   outputDir: string;
+  /** 系统内置技能不允许作为用户技能导出 */
+  systemManaged: boolean;
   frontmatter?: SkillFrontmatter;
 }
 
@@ -249,6 +252,7 @@ function toListItem(skill: Skill): SkillListItem {
     filePath: skill.filePath,
     baseDir: skill.baseDir,
     disableModelInvocation: skill.disableModelInvocation,
+    systemManaged: skill.systemManaged,
   };
 }
 
@@ -496,6 +500,7 @@ export function getSkillContent(request: SkillContentRequest): SkillContentRespo
     baseDir: skill.baseDir,
     workingDir,
     outputDir,
+    systemManaged: skill.systemManaged === true,
   };
 
   if (request.includeFrontmatter) {

@@ -18,6 +18,7 @@ import {
   resolveWorkspaceBasePath,
   writeWorkspaceUploadFile,
 } from '../../../../core/src/lib/integrations/electron/workspace-paths';
+import { resolveExportableEntryDirectory } from './entry-paths';
 
 const ALLOWED_BASES = [
   getDataRoot(),
@@ -35,12 +36,6 @@ function assertAllowed(p: string): void {
     throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN' });
   }
 }
-
-const ENTRY_DIR_MAP: Record<string, (entryId: string) => string> = {
-  'agent': (id: string) => path.join(getDataRoot(), 'agents', id),
-  'role-agent': (id: string) => path.join(getDataRoot(), 'agents', id),
-  'project': (id: string) => path.join(getDataRoot(), 'projects', id),
-};
 
 async function resolveProjectDir(entryId: string): Promise<{ baseDir: string; entryId: string; ontologyId: string }> {
   const projectsRoot = path.join(getDataRoot(), 'projects');
@@ -124,7 +119,7 @@ export class WorkspaceService {
               };
             }
             // 技能工作区使用数据目录（可写），而不是 Resources 目录（只读）
-            const skillWorkspaceDir = path.join(getDataRoot(), 'skills', request.entryId);
+            const skillWorkspaceDir = resolveExportableEntryDirectory('skill', request.entryId);
             console.log('[WorkspaceService] resolve skill result', {
               entryId: request.entryId,
               baseDir: skillWorkspaceDir,
@@ -152,8 +147,7 @@ export class WorkspaceService {
             };
           }
 
-          const resolver = ENTRY_DIR_MAP[request.entryType];
-          if (!resolver) {
+          if (request.entryType !== 'agent' && request.entryType !== 'role-agent') {
             return {
               success: false,
               error: { code: 'INVALID_ENTRY_TYPE', message: `Unknown entryType: ${request.entryType}` },
@@ -163,7 +157,11 @@ export class WorkspaceService {
 
           return {
             success: true,
-            data: { baseDir: resolver(request.entryId), entryType: request.entryType, entryId: request.entryId },
+            data: {
+              baseDir: resolveExportableEntryDirectory(request.entryType, request.entryId),
+              entryType: request.entryType,
+              entryId: request.entryId,
+            },
             timestamp: new Date().toISOString(),
           };
         } catch (error) {
