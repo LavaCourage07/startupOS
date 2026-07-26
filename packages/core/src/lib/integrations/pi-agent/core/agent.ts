@@ -24,12 +24,26 @@ import type {
 import type { SystemPromptVariables } from "../system/prompt";
 import type { HealthMonitor, AgentHealthStatus } from "../health";
 import { createHealthMonitor } from "../health";
-import { createAnthropicModel, createGoogleModel, createAutoModel, createRuntimeModel, getConfigStatus } from "../server-config";
+import { createAnthropicModel, createGoogleModel, createAutoModel, createRuntimeModel, getConfigStatus, sanitizeBaseUrlForLogging } from "../server-config";
 import type { RuntimeLLMConfig } from "../llm-config";
 import { compressRecentTrace } from "../recent-trace-compression";
 import { getLoopDetector, removeLoopDetector } from "../tools/loop-detector";
+import { findSuitableShell } from "../tools/bash-tools";
 import { createWorkingSummaryMessage } from "../runtime-working-summary";
 import { getVisibleStreamDelta, trimRepeatingTail } from "../stream-dedupe";
+import {
+	appendRuntimeEnvironmentPrompt,
+	buildRuntimeEnvironmentPrompt,
+	getRuntimeEnvironment,
+} from "../system/runtime-environment";
+import {
+	assessCompletion,
+	buildCompletionFailureReport,
+	buildCompletionRecoveryMessage,
+	DEFAULT_COMPLETION_RECOVERY_LIMIT,
+	type ToolFailureSummary,
+} from "./completion-guard";
+import { getToolEventStatus } from "./tool-event-status";
 
 // ============================================================================
 // Event Emitter
@@ -101,8 +115,23 @@ function previewText(text: string, max = 80): string {
 	return text.replace(/\s+/g, " ").slice(0, max);
 }
 
+function logInfo(...args: unknown[]): void {
+	if (process.env["ORIGINOS_WORKER_STDOUT_JSON_LINE"] === "1") {
+		return;
+	}
+	console.info(...args);
+}
+
 type SyntheticSystemMessage = {
 	role: "system";
+	content: Array<{
+		type: "text";
+		text: string;
+	}>;
+};
+
+type SyntheticUserMessage = {
+	role: "user";
 	content: Array<{
 		type: "text";
 		text: string;
@@ -134,6 +163,16 @@ export class OriginOSAgent {
 	private activeAssistantMessageSequence = 0;
 	private previousAssistantTextHash = "";
 	private previousAssistantTurnSequence = 0;
+	private runtimeEnvironment = getRuntimeEnvironment({
+		defaultShell: findSuitableShell() ?? undefined,
+	});
+	private runtimeEnvironmentPrompt = buildRuntimeEnvironmentPrompt(this.runtimeEnvironment);
+	private bufferedUiEvents: AgentEvent[] = [];
+	private isBufferingUiEvents = false;
+	private pendingPromiseStop = false;
+	private lastToolFailure: ToolFailureSummary | null = null;
+	private successfulToolAfterFailure = false;
+	private hiddenMessages = new WeakSet<object>();
 
 	/**
 	 * Agent 状态
@@ -265,7 +304,7 @@ export class OriginOSAgent {
 
 			// 日志记录 token 使用情况
 			if (validMessages.length !== keptMessages.length) {
-				console.log(`[Agent] Context truncated: ${validMessages.length} → ${keptMessages.length} messages, ~${totalTokens}/${tokenBudget} tokens`);
+				logInfo(`[Agent] Context truncated: ${validMessages.length} → ${keptMessages.length} messages, ~${totalTokens}/${tokenBudget} tokens`);
 			}
 
 			return keptMessages;
@@ -286,20 +325,14 @@ export class OriginOSAgent {
 		const modelApi = initialModel?.api;
 		const modelBaseUrl = initialModel?.baseUrl;
 
-		// 调试日志
-		console.error('[OriginOSAgent] Initializing agent with:', {
+		logInfo('[OriginOSAgent] Initializing agent with:', {
 			modelId,
 			modelApi,
-			modelBaseUrl,
+			modelBaseUrl: sanitizeBaseUrlForLogging(modelBaseUrl),
 			hasApiKey: !!modelApiKey,
 			hasAuthToken: !!modelAuthToken,
 			credentialSource: modelCredentialSource || 'env/default',
 			credentialAuthMode: modelCredentialAuthMode || (modelApiKey?.includes?.('sk-ant-oat') ? 'oauth' : 'api-key'),
-			credentialPrefix: modelApiKey
-				? `${modelApiKey.substring(0, 10)}...`
-				: modelAuthToken
-					? `${modelAuthToken.substring(0, 10)}...`
-					: 'none',
 		});
 
 		// 包装 streamFn，注入 toolChoice 确保工具调用被启用
@@ -335,16 +368,15 @@ export class OriginOSAgent {
 			} else if (currentModelApiKey && !opts['apiKey']) {
 				opts['apiKey'] = currentModelApiKey;
 			}
-			// 调试：确认凭证传递
 			const finalCredential = opts['apiKey'] || (streamModel as any)?.apiKey || (streamModel as any)?.authToken;
-			console.error(`[streamFn] credential check: hasOptsApiKey=${!!opts['apiKey']}, modelApiKey=${currentModelApiKey ? 'set' : 'null'}, model.authToken=${(streamModel as any)?.authToken ? 'set' : 'null'}, bearer=${currentModelUsesBearerAuth}, final=${finalCredential ? finalCredential.toString().slice(0, 10) + '...' : 'NONE'}`);
-			console.error(`[streamFn] Calling pi-ai streamSimple with model:`, {
+			logInfo(`[streamFn] credential check: hasOptsApiKey=${!!opts['apiKey']}, modelApiKey=${currentModelApiKey ? 'set' : 'null'}, model.authToken=${(streamModel as any)?.authToken ? 'set' : 'null'}, bearer=${currentModelUsesBearerAuth}, hasFinalCredential=${!!finalCredential}`);
+			logInfo(`[streamFn] Calling pi-ai streamSimple with model:`, {
 				id: streamModel.id,
 				api: streamModel.api,
 				provider: streamModel.provider,
-				baseUrl: (streamModel as any).baseUrl,
+					baseUrl: sanitizeBaseUrlForLogging((streamModel as any).baseUrl),
 			});
-			console.error(`[streamFn] Context messages count:`, context.messages?.length);
+			logInfo(`[streamFn] Context messages count:`, context.messages?.length);
 
 			const stream = piAi.streamSimple(streamModel, context, opts);
 
@@ -357,7 +389,10 @@ export class OriginOSAgent {
 
 		this.agent = new Agent({
 			initialState: {
-				systemPrompt: this.config.systemPrompt,
+				systemPrompt: appendRuntimeEnvironmentPrompt(
+					this.config.systemPrompt,
+					this.runtimeEnvironment,
+				),
 				model: this.config.model,
 				thinkingLevel,
 				tools: this.config.tools ?? [],
@@ -376,13 +411,237 @@ export class OriginOSAgent {
 		// 订阅 Agent 事件并转发到我们的事件发射器
 		this.agent.subscribe((event) => {
 			this.handleAgentEvent(event);
-			this.eventEmitter.emit(event);
+			this.routeAgentEvent(event);
 		});
 
 		this.state.isInitialized = true;
 
 		// 标记为运行状态
 		this.healthMonitor.markAsRunning();
+	}
+
+	private routeAgentEvent(event: AgentEvent): void {
+		const eventType = event.type;
+		const isAgentError = (event as any).type === "agent_error";
+
+		if (eventType === "tool_execution_end") {
+			const status = getToolEventStatus(event);
+			if (status.failed) {
+				this.lastToolFailure = {
+					toolName: event.toolName,
+					toolCallId: event.toolCallId,
+					exitCode: status.exitCode,
+					reason: status.reason || "工具返回失败，但未提供具体原因。",
+				};
+				this.successfulToolAfterFailure = false;
+			} else if (this.lastToolFailure) {
+				this.successfulToolAfterFailure = true;
+			}
+		}
+
+		if (
+				eventType === "message_start" &&
+				event.message.role === "assistant" &&
+				this.lastToolFailure !== null &&
+				!this.isBufferingUiEvents
+		) {
+			this.isBufferingUiEvents = true;
+			this.bufferedUiEvents = [];
+		}
+
+			if (eventType === "agent_end" && this.pendingPromiseStop) {
+				return;
+			}
+
+			if (this.isBufferingUiEvents && !isAgentError) {
+			this.bufferedUiEvents.push(event);
+		} else {
+			this.emitUiEvent(event);
+		}
+
+		if (eventType !== "message_end" || event.message.role !== "assistant") {
+			return;
+		}
+
+		const text = Array.isArray(event.message.content)
+			? event.message.content
+					.filter((block: any) => block.type === "text" && block.text != null)
+					.map((block: any) => block.text)
+					.join("")
+			: "";
+		const toolCallCount = Array.isArray(event.message.content)
+			? event.message.content.filter((block: any) => block.type === "toolCall").length
+			: 0;
+		const assessment = assessCompletion({
+			role: event.message.role,
+			stopReason: (event.message as any).stopReason,
+			text,
+				toolCallCount,
+				hasUnresolvedToolFailure: this.lastToolFailure !== null,
+				hasSuccessfulToolAfterFailure: this.successfulToolAfterFailure,
+			});
+
+			this.pendingPromiseStop = assessment.shouldRecover;
+			if (assessment.shouldRecover) {
+				this.hiddenMessages.add(event.message);
+			} else if (this.isBufferingUiEvents) {
+				this.flushBufferedUiEvents();
+			}
+	}
+
+	private flushBufferedUiEvents(): void {
+		const events = this.bufferedUiEvents;
+		this.bufferedUiEvents = [];
+		this.isBufferingUiEvents = false;
+		for (const event of events) {
+			this.emitUiEvent(event);
+		}
+	}
+
+	private discardBufferedUiEvents(): void {
+		for (const event of this.bufferedUiEvents) {
+			if (
+				(event.type === "message_start" ||
+					event.type === "message_end" ||
+					event.type === "turn_end") &&
+				typeof event.message === "object" &&
+				event.message !== null
+			) {
+				this.hiddenMessages.add(event.message);
+			}
+		}
+		this.bufferedUiEvents = [];
+		this.isBufferingUiEvents = false;
+	}
+
+	private emitUiEvent(event: AgentEvent): void {
+		if (
+			(event.type === "message_start" ||
+				event.type === "message_end" ||
+				event.type === "turn_end") &&
+			typeof event.message === "object" &&
+			event.message !== null &&
+			this.hiddenMessages.has(event.message)
+		) {
+			return;
+		}
+
+		if (event.type === "agent_end") {
+			const stateMessages = this.agent?.state.messages ?? [];
+			const sourceMessages = stateMessages.length > 0
+				? stateMessages
+				: event.messages;
+			const visibleMessages = sourceMessages.filter(
+				(message) =>
+					typeof message !== "object" ||
+					message === null ||
+					!this.hiddenMessages.has(message),
+			);
+			this.eventEmitter.emit({
+				...event,
+				messages: visibleMessages,
+			});
+			return;
+		}
+
+		this.eventEmitter.emit(event);
+	}
+
+	private resetCompletionGuard(): void {
+		this.discardBufferedUiEvents();
+		this.pendingPromiseStop = false;
+		this.lastToolFailure = null;
+		this.successfulToolAfterFailure = false;
+	}
+
+	private async runWithCompletionGuard(
+		start: () => Promise<void>,
+	): Promise<void> {
+		if (!this.agent) {
+			throw new Error("Agent 未初始化");
+		}
+
+		await start();
+		let recoveryAttempt = 0;
+
+		while (
+			this.pendingPromiseStop &&
+			recoveryAttempt < DEFAULT_COMPLETION_RECOVERY_LIMIT
+		) {
+			recoveryAttempt += 1;
+			this.discardBufferedUiEvents();
+			this.pendingPromiseStop = false;
+
+			const recoveryMessage: SyntheticUserMessage = {
+				role: "user",
+				content: [{
+					type: "text",
+					text: buildCompletionRecoveryMessage(
+						this.runtimeEnvironmentPrompt,
+						this.lastToolFailure,
+						recoveryAttempt,
+					),
+				}],
+			};
+			this.hiddenMessages.add(recoveryMessage);
+			this.isBufferingUiEvents = true;
+			logInfo(
+				`[LLM CompletionGuard] recovering promise-only stop — attempt=${recoveryAttempt}/${DEFAULT_COMPLETION_RECOVERY_LIMIT}`,
+			);
+				try {
+					await this.agent.prompt(recoveryMessage as unknown as AgentMessage);
+				} catch (error) {
+					const recoveryError = error instanceof Error
+						? error
+						: new Error(String(error));
+					this.lastToolFailure = {
+						toolName: "agent-recovery",
+						reason: recoveryError.message,
+					};
+					this.discardBufferedUiEvents();
+					this.pendingPromiseStop = false;
+					this.emitCompletionFailureReport();
+					return;
+				}
+		}
+
+		if (!this.pendingPromiseStop) {
+			this.flushBufferedUiEvents();
+			return;
+		}
+
+		this.discardBufferedUiEvents();
+		this.pendingPromiseStop = false;
+		this.emitCompletionFailureReport();
+	}
+
+	private emitCompletionFailureReport(): void {
+		if (!this.agent) {
+			return;
+		}
+
+		const report = buildCompletionFailureReport(this.lastToolFailure);
+		const message = {
+			role: "assistant",
+			content: [{ type: "text", text: report }],
+			stopReason: "stop",
+		} as unknown as AgentMessage;
+		this.agent.appendMessage(message);
+
+			const visibleMessages = this.getVisibleMessages();
+			const events = [
+				{ type: "message_start", message },
+				{ type: "message_end", message },
+				{ type: "turn_end", message, toolResults: [] },
+				{ type: "agent_end", messages: visibleMessages },
+		] as unknown as AgentEvent[];
+		events.forEach((event) => {
+			this.handleAgentEvent(event);
+			this.eventEmitter.emit(event);
+		});
+		console.error(
+			`[LLM CompletionGuard] recovery exhausted — tool=${this.lastToolFailure?.toolName ?? "unknown"}, exitCode=${this.lastToolFailure?.exitCode ?? "unknown"}, reason=${this.lastToolFailure?.reason ?? "promise-only stop"}`,
+		);
 	}
 
 	/**
@@ -417,7 +676,7 @@ export class OriginOSAgent {
 			case "agent_start":
 				this.state.uiState.isThinking = true;
 				this.healthMonitor.markProcessingStart();
-				console.error(`[LLM Event] agent_start`);
+				logInfo(`[LLM Event] agent_start`);
 				break;
 
 			case "agent_end":
@@ -425,14 +684,14 @@ export class OriginOSAgent {
 				this.state.uiState.activeTools = [];
 				this.healthMonitor.markProcessingEnd();
 				this.healthMonitor.recordMessageHandled();
-				console.error(`[LLM Event] agent_end — messages=${(event as any).messages?.length ?? 0}`);
+				logInfo(`[LLM Event] agent_end — messages=${(event as any).messages?.length ?? 0}`);
 				break;
 
 			case "turn_start":
 				this.activeTurnSequence = ++this.turnSequence;
 				this.state.uiState.isThinking = true;
 				this.healthMonitor.markProcessingStart();
-				console.error(`[LLM Event] turn_start — turnSeq=${this.activeTurnSequence}`);
+				logInfo(`[LLM Event] turn_start — turnSeq=${this.activeTurnSequence}`);
 				break;
 
 			case "turn_end": {
@@ -445,7 +704,7 @@ export class OriginOSAgent {
 				this.healthMonitor.recordMessageHandled();
 
 				// 详细日志：打印 turn 结束时的完整消息结构
-				console.error(
+				logInfo(
 					`[LLM Event] turn_end — turnSeq=${this.activeTurnSequence}, toolCalls=${hasToolCalls}, toolResults=${toolCount}`
 				);
 				if (msg) {
@@ -461,26 +720,26 @@ export class OriginOSAgent {
 						msg.role === "assistant" &&
 						assistantText.length > 0 &&
 						assistantTextHash === this.previousAssistantTextHash;
-					console.error(
+					logInfo(
 						`[LLM Turn Detail] turnSeq=${this.activeTurnSequence}, model=${msg.model ?? 'unknown'}, provider=${msg.provider ?? 'unknown'}, api=${msg.api ?? 'unknown'}, stopReason=${msg.stopReason ?? 'unknown'}, assistantTextHash=${assistantTextHash}, sameAsPreviousAssistant=${sameAsPreviousAssistant}${sameAsPreviousAssistant ? `, previousTurnSeq=${this.previousAssistantTurnSequence}` : ""}`
 					);
 					if (msg.content && Array.isArray(msg.content)) {
 						msg.content.forEach((block: any, i: number) => {
 							if (block.type === "toolCall") {
-								console.error(`[LLM Turn Detail]   toolCall[${i}]: name=${block.name}, id=${block.id}, args=${JSON.stringify(block.arguments).slice(0, 300)}`);
+								logInfo(`[LLM Turn Detail]   toolCall[${i}]: name=${block.name}, id=${block.id}, args=${JSON.stringify(block.arguments).slice(0, 300)}`);
 							} else if (block.type === "text") {
-								console.error(`[LLM Turn Detail]   text[${i}]: len=${block.text?.length ?? 0}, preview="${(block.text ?? '').slice(0, 100)}"`);
+								logInfo(`[LLM Turn Detail]   text[${i}]: len=${block.text?.length ?? 0}, preview="${(block.text ?? '').slice(0, 100)}"`);
 							} else if (block.type === "thinking") {
-								console.error(`[LLM Turn Detail]   thinking[${i}]: len=${block.thinking?.length ?? 0}`);
+								logInfo(`[LLM Turn Detail]   thinking[${i}]: len=${block.thinking?.length ?? 0}`);
 							} else {
-								console.error(`[LLM Turn Detail]   block[${i}]: type=${block.type}`);
+								logInfo(`[LLM Turn Detail]   block[${i}]: type=${block.type}`);
 							}
 						});
 					}
 					if (toolCount > 0) {
 						turnEnd.toolResults.forEach((tr: any, i: number) => {
 							const content = tr.content?.map((c: any) => c.type === 'text' ? c.text : `[${c.type}]`).join('') ?? '';
-							console.error(`[LLM Turn Detail]   toolResult[${i}]: name=${tr.toolName ?? 'unknown'}, callId=${tr.toolCallId ?? 'unknown'}, content_preview="${content.slice(0, 200)}"`);
+							logInfo(`[LLM Turn Detail]   toolResult[${i}]: name=${tr.toolName ?? 'unknown'}, callId=${tr.toolCallId ?? 'unknown'}, content_preview="${content.slice(0, 200)}"`);
 						});
 					}
 					if (msg.role === "assistant" && assistantText.length > 0) {
@@ -497,7 +756,7 @@ export class OriginOSAgent {
 					toolName: (event as any).toolName,
 					startTime: Date.now(),
 				});
-				console.error(`[LLM Event] tool_start — ${(event as any).toolName}`);
+				logInfo(`[LLM Event] tool_start — ${(event as any).toolName}`);
 				break;
 
 			case "tool_execution_end": {
@@ -510,7 +769,16 @@ export class OriginOSAgent {
 				const resultText = Array.isArray(resultContent)
 					? resultContent.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('')
 					: typeof resultContent === 'string' ? resultContent : JSON.stringify(toolEndEvent.result ?? '');
-				console.error(`[LLM Event] tool_end — ${(event as any).toolName}${(event as any).isError ? ' (ERROR)' : ''}\n[ToolResult] ${resultText}`);
+				const status = getToolEventStatus(toolEndEvent);
+				const toolCallId = toolEndEvent.toolCallId ? `, callId=${toolEndEvent.toolCallId}` : "";
+				const exitCode = status.exitCode !== undefined ? `, exitCode=${status.exitCode}` : "";
+				const reason = status.reason ? `, reason=${status.reason}` : "";
+				const message = `[LLM Event] tool_end — ${toolEndEvent.toolName}${status.failed ? " (ERROR)" : ""}${toolCallId}${exitCode}${reason}\n[ToolResult] ${resultText}`;
+				if (status.failed) {
+					console.error(message);
+				} else {
+					logInfo(message);
+				}
 				break;
 			}
 
@@ -525,7 +793,7 @@ export class OriginOSAgent {
 				} else {
 					this.activeAssistantMessageSequence = 0;
 				}
-				console.error(
+				logInfo(
 					`[LLM Event] message_start — role=${role}, turnSeq=${this.activeTurnSequence}${role === "assistant" ? `, assistantMsgSeq=${this.activeAssistantMessageSequence}` : ""}`
 				);
 				break;
@@ -534,7 +802,6 @@ export class OriginOSAgent {
 			case "message_update": {
 				const update = event as any;
 				const eventType = update.assistantMessageEvent?.type || "unknown";
-				// Print text/thinking deltas (to stderr to avoid corrupting JSON Line stdout in worker mode)
 				if (eventType === "text_delta") {
 					let delta = update.assistantMessageEvent?.delta || "";
 					if (this.assistantLoopGuardTriggered) {
@@ -551,7 +818,7 @@ export class OriginOSAgent {
 							this.assistantStreamContent = trimmed.content;
 							this.loggedStreamContent = trimmed.content;
 							this.assistantLoopGuardTriggered = true;
-							console.error(
+							console.warn(
 								`\n[LLM LoopGuard] repeated assistant output detected — turnSeq=${this.activeTurnSequence}, assistantMsgSeq=${this.activeAssistantMessageSequence}, patternLen=${trimmed.pattern?.length ?? 0}, repetitions=${trimmed.repetitions ?? 0}, textHash=${hashText(trimmed.content)}, preview="${previewText(trimmed.content)}"`
 							);
 							this.agent?.abort();
@@ -561,13 +828,9 @@ export class OriginOSAgent {
 							this.assistantStreamContent = merged.content;
 							delta = merged.delta;
 						}
-
 						if (delta.length > 0) {
 							const logMerged = getVisibleStreamDelta(this.loggedStreamContent, delta);
 							this.loggedStreamContent = logMerged.content;
-							if (logMerged.delta.length > 0) {
-								process.stderr.write(logMerged.delta);
-							}
 						}
 					}
 				} else if (eventType === "thinking_delta") {
@@ -575,18 +838,15 @@ export class OriginOSAgent {
 					if (delta.length > 0) {
 						const merged = getVisibleStreamDelta(this.loggedStreamContent, delta);
 						this.loggedStreamContent = merged.content;
-						if (merged.delta.length > 0) {
-							process.stderr.write(merged.delta);
-						}
 					}
 				}
 				// 打印 tool call 相关事件
 				if (eventType === "toolcall_start" || eventType === "toolcall_end" || eventType === "toolcall_delta") {
 					const ae = update.assistantMessageEvent || {};
-					console.error(`\n[LLM Event] message_update — ${eventType}`);
+					logInfo(`\n[LLM Event] message_update — ${eventType}`);
 					if (ae.toolCall) {
 						const tc = ae.toolCall;
-						console.error(`  → name=${tc.name}, id=${tc.id}, args=${JSON.stringify(tc.arguments).slice(0, 200)}`);
+						logInfo(`  → name=${tc.name}, id=${tc.id}, args=${JSON.stringify(tc.arguments).slice(0, 200)}`);
 					}
 				}
 				break;
@@ -606,7 +866,7 @@ export class OriginOSAgent {
 					? msg.content.filter((b: any) => b.type === "text" && b.text != null).map((b: any) => b.text).join("")
 					: "";
 				const stopReason = msg?.stopReason || "";
-				console.error(
+				logInfo(
 					`\n[LLM Event] message_end — role=${role}, turnSeq=${this.activeTurnSequence}${role === "assistant" ? `, assistantMsgSeq=${this.activeAssistantMessageSequence}` : ""}, stopReason=${stopReason}, toolCalls=${hasToolCalls}, textLen=${textContent.length}, textHash=${hashText(textContent)}, loopGuard=${role === "assistant" ? this.assistantLoopGuardTriggered : false}, preview="${previewText(textContent)}"`
 				);
 				if (role === "assistant") {
@@ -654,7 +914,7 @@ export class OriginOSAgent {
 		};
 
 		this.agent.appendMessage(warningMessage as unknown as AgentMessage);
-		console.error(`[LLM LoopGuard] ${result.type} — ${result.toolName} x${result.count}`);
+		console.warn(`[LLM LoopGuard] ${result.type} — ${result.toolName} x${result.count}`);
 	}
 
 	/**
@@ -696,7 +956,7 @@ export class OriginOSAgent {
 		const compression = compressRecentTrace(this.agent.state.messages as AgentMessage[]);
 		if (compression.compressed) {
 			this.agent.replaceMessages(compression.messages);
-			console.error(
+			logInfo(
 				`[LLM] >>> Compressed message history: ${historyBeforeCompression} → ${compression.messages.length} | preservedTrace=${compression.preservedTraceCount}`
 			);
 		}
@@ -704,7 +964,7 @@ export class OriginOSAgent {
 		const workingSummary = createWorkingSummaryMessage(this.agent.state.messages as AgentMessage[]);
 		if (workingSummary) {
 			this.agent.appendMessage(workingSummary);
-			console.error(`[LLM] >>> Working summary injected before prompt`);
+			logInfo(`[LLM] >>> Working summary injected before prompt`);
 		}
 
 		// LLM 调用日志
@@ -721,17 +981,20 @@ export class OriginOSAgent {
 		const thinkingLevel = this.agent.state.thinkingLevel;
 		const toolCount = this.agent.state.tools?.length ?? 0;
 
-		console.error(`[LLM] >>> Prompt called | Model: ${modelInfo.provider}/${modelInfo.id} | Thinking: ${thinkingLevel} | History msgs: ${msgCount} | Tools: ${toolCount}`);
-		console.error(`[LLM] >>> Prompt preview: ${promptPreview}`);
+		logInfo(`[LLM] >>> Prompt called | Model: ${modelInfo.provider}/${modelInfo.id} | Thinking: ${thinkingLevel} | History msgs: ${msgCount} | Tools: ${toolCount}`);
+		logInfo(`[LLM] >>> Prompt preview: ${promptPreview}`);
 		if (images && images.length > 0) {
-			console.error(`[LLM] >>> Images: ${images.length} attached`);
+			logInfo(`[LLM] >>> Images: ${images.length} attached`);
 		}
 
 		const t0 = Date.now();
 		try {
-			await this.agent.prompt(message as string, images);
+			this.resetCompletionGuard();
+			await this.runWithCompletionGuard(
+				() => this.agent!.prompt(message as string, images),
+			);
 			const elapsed = Date.now() - t0;
-			console.error(`[LLM] <<< Prompt completed | Elapsed: ${elapsed}ms`);
+			logInfo(`[LLM] <<< Prompt completed | Elapsed: ${elapsed}ms`);
 		} catch (error) {
 			const elapsed = Date.now() - t0;
 			const agentError = error instanceof Error ? error : new Error(String(error));
@@ -759,7 +1022,8 @@ export class OriginOSAgent {
 			throw new Error("Agent 已销毁");
 		}
 
-		await this.agent.continue();
+		this.resetCompletionGuard();
+		await this.runWithCompletionGuard(() => this.agent!.continue());
 	}
 
 	/**
@@ -776,7 +1040,9 @@ export class OriginOSAgent {
 		if (!this.agent) {
 			throw new Error("Agent 未初始化");
 		}
-		this.agent.setSystemPrompt(prompt);
+		this.agent.setSystemPrompt(
+			appendRuntimeEnvironmentPrompt(prompt, this.runtimeEnvironment),
+		);
 	}
 
 	/**
@@ -891,7 +1157,7 @@ export class OriginOSAgent {
 
 		return {
 			sessionId: this.sessionId,
-			messages: this.agent.state.messages,
+				messages: this.getVisibleMessages(),
 			systemPrompt: this.agent.state.systemPrompt,
 			model: {
 				provider: this.agent.state.model.provider || "unknown",
@@ -901,6 +1167,18 @@ export class OriginOSAgent {
 			updatedAt: Date.now(),
 			projectContext: this.projectContext,
 		};
+	}
+
+	private getVisibleMessages(): AgentMessage[] {
+		if (!this.agent) {
+			return [];
+		}
+		return this.agent.state.messages.filter(
+			(message) =>
+				typeof message !== "object" ||
+				message === null ||
+				!this.hiddenMessages.has(message),
+		);
 	}
 
 	/**
@@ -1006,10 +1284,12 @@ export function createOriginOSAgent(
 	const configStatus = getConfigStatus();
 
 	// 调试日志
-	console.log('[createOriginOSAgent] Config status:', configStatus);
-	console.log('[createOriginOSAgent] Env ANTHROPIC_AUTH_TOKEN:', process.env['ANTHROPIC_AUTH_TOKEN']);
-	console.log('[createOriginOSAgent] Env ANTHROPIC_BASE_URL:', process.env['ANTHROPIC_BASE_URL']);
-	console.log('[createOriginOSAgent] Env ANTHROPIC_MODEL:', process.env['ANTHROPIC_MODEL']);
+	logInfo('[createOriginOSAgent] Config status:', configStatus);
+	logInfo('[createOriginOSAgent] Environment:', {
+		hasAnthropicAuthToken: !!process.env['ANTHROPIC_AUTH_TOKEN'],
+			anthropicBaseUrl: sanitizeBaseUrlForLogging(process.env['ANTHROPIC_BASE_URL']),
+		anthropicModel: process.env['ANTHROPIC_MODEL'],
+	});
 
 	// 根据 provider 和配置选择模型
 	let agentModel: Model<any>;
@@ -1045,20 +1325,19 @@ export function createOriginOSAgent(
 
 	// 调试：查看创建的模型配置
 	const debugCredential = (agentModel as any).apiKey || (agentModel as any).authToken;
-	console.log('[createOriginOSAgent] Created model:', {
+	logInfo('[createOriginOSAgent] Created model:', {
 		id: agentModel.id,
 		api: agentModel.api,
 		provider: agentModel.provider,
-		baseUrl: (agentModel as any).baseUrl,
+			baseUrl: sanitizeBaseUrlForLogging((agentModel as any).baseUrl),
 		hasCredential: !!debugCredential,
 		credentialSource: (agentModel as any).credentialSource || (llmConfig?.anthropicAuthToken || llmConfig?.authToken
 			? 'user.anthropicAuthToken'
 			: llmConfig?.anthropicApiKey || llmConfig?.apiKey
 				? 'user.anthropicApiKey'
 				: 'env/default'),
-		credentialAuthMode: (agentModel as any).credentialAuthMode || (debugCredential?.includes?.('sk-ant-oat') ? 'oauth' : 'api-key'),
-		credentialPrefix: debugCredential ? debugCredential.substring(0, 15) + '...' : 'none',
-	});
+			credentialAuthMode: (agentModel as any).credentialAuthMode || (debugCredential?.includes?.('sk-ant-oat') ? 'oauth' : 'api-key'),
+		});
 
 	const projectContext = variables
 		? {

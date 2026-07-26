@@ -166,7 +166,7 @@ function buildShellInvocation(shellPath: string, command: string): {
  * 1. 检查 SHELL 环境变量
  * 2. 按优先级搜索常见路径
  */
-function findSuitableShell(): string | null {
+export function findSuitableShell(): string | null {
   // Windows：优先原生 cmd/powershell，避免 MSYS 路径改写
   if (isWindowsPlatform()) {
     return findWindowsShell();
@@ -328,7 +328,10 @@ function logToolStart(
   ctx: ToolExecutionCtx,
   params: Record<string, unknown>,
 ): void {
-  console.error(
+  if (process.env["ORIGINOS_WORKER_STDOUT_JSON_LINE"] === "1") {
+    return;
+  }
+  console.info(
     `[Tool:${ctx.toolName}] START_CALL_ID=${ctx.toolCallId}`,
     JSON.stringify(params, null, 2),
   );
@@ -338,10 +341,14 @@ function logToolEnd(
   ctx: ToolExecutionCtx,
   result: Record<string, unknown>,
 ): void {
-  console.error(
-    `[Tool:${ctx.toolName}] END_CALL_ID=${ctx.toolCallId}`,
-    JSON.stringify(result, null, 2),
-  );
+  const exitCode = typeof result["exitCode"] === "number" ? result["exitCode"] : undefined;
+  const failed = result["success"] === false || (exitCode !== undefined && exitCode !== 0);
+  const message = `[Tool:${ctx.toolName}] ${failed ? "ERROR" : "END"}_CALL_ID=${ctx.toolCallId}${exitCode !== undefined ? ` exitCode=${exitCode}` : ""}`;
+  if (failed) {
+    console.error(message, JSON.stringify(result, null, 2));
+  } else if (process.env["ORIGINOS_WORKER_STDOUT_JSON_LINE"] !== "1") {
+    console.info(message, JSON.stringify(result, null, 2));
+  }
 }
 
 function logToolError(ctx: ToolExecutionCtx, error: unknown): void {

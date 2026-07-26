@@ -41,6 +41,21 @@ const basicConfig: OriginOSAgentConfig = {
 	thinkingLevel: "low",
 };
 
+function emitAssistantStop(
+	internalAgent: any,
+	text: string,
+): void {
+	const message = {
+		role: "assistant",
+		content: [{ type: "text", text }],
+		stopReason: "stop",
+	};
+	internalAgent.emit({ type: "message_start", message });
+	internalAgent.emit({ type: "message_end", message });
+	internalAgent.emit({ type: "turn_end", message, toolResults: [] });
+	internalAgent.emit({ type: "agent_end", messages: [message] });
+}
+
 // ============================================================================
 // Test Suite
 // ============================================================================
@@ -135,6 +150,333 @@ describe("OriginOSAgent", () => {
 			await expect(
 				agent.waitForIdle()
 			).resolves.not.toThrow();
+		});
+	});
+
+	describe("Runtime environment and completion guard", () => {
+		it("injects OS, architecture, shell, path, and syntax constraints", () => {
+			agent = new OriginOSAgent(basicConfig);
+			const internalAgent = (agent as any).agent;
+			const prompt = internalAgent.state.systemPrompt;
+
+			expect(prompt).toContain("You are a helpful assistant");
+			expect(prompt).toContain("## Runtime Environment");
+			expect(prompt).toContain(`Architecture: ${process.arch}`);
+			expect(prompt).toContain("Default command shell:");
+			expect(prompt).toContain("Native path separator:");
+		});
+
+		it("automatically continues a promise-only stop and hides it from UI", async () => {
+			agent = new OriginOSAgent(basicConfig);
+			const internalAgent = (agent as any).agent;
+			const receivedEvents: any[] = [];
+			agent.subscribe((event) => receivedEvents.push(event));
+
+			internalAgent.prompt.mockImplementationOnce(async () => {
+				internalAgent.emit({
+					type: "tool_execution_end",
+					toolName: "execute_command",
+					toolCallId: "call-pwsh",
+					isError: false,
+					result: {
+						content: [{
+							type: "text",
+							text: JSON.stringify({
+								success: false,
+								exitCode: 1,
+								stderr: "ParserError: Missing file specification after redirection operator.",
+							}),
+						}],
+						details: {
+							success: false,
+							exitCode: 1,
+							stderr: "ParserError: Missing file specification after redirection operator.",
+						},
+					},
+				});
+				emitAssistantStop(
+					internalAgent,
+					"我现在继续处理：先改用 PowerShell 兼容命令读取文件。",
+				);
+			});
+				internalAgent.prompt.mockImplementationOnce(async (message: any) => {
+					internalAgent.emit({ type: "message_start", message });
+					internalAgent.emit({ type: "message_end", message });
+					internalAgent.emit({
+						type: "tool_execution_end",
+						toolName: "execute_command",
+						toolCallId: "call-pwsh-retry",
+						isError: false,
+						result: {
+							content: [{ type: "text", text: '{"success":true,"exitCode":0}' }],
+							details: { success: true, exitCode: 0 },
+						},
+					});
+					emitAssistantStop(internalAgent, "处理完成，已使用 PowerShell 命令读取文件。");
+				});
+
+			await agent.prompt("读取上传文件");
+
+			expect(internalAgent.prompt).toHaveBeenCalledTimes(2);
+			expect(internalAgent.continue).not.toHaveBeenCalled();
+			const visible = JSON.stringify(receivedEvents);
+			expect(visible).not.toContain("我现在继续处理");
+			expect(visible).not.toContain("Internal Completion Recovery");
+			expect(visible).toContain("处理完成");
+			expect(receivedEvents.filter((event) => event.type === "agent_end")).toHaveLength(1);
+			const recoveryMessage = internalAgent.prompt.mock.calls[1]?.[0];
+			expect(recoveryMessage?.role).toBe("user");
+			expect(recoveryMessage?.content?.[0]?.text).toContain("Runtime Environment");
+			expect(recoveryMessage?.content?.[0]?.text).toContain("execute_command");
+		});
+
+		it("returns a deterministic failure report after recovery is exhausted", async () => {
+			agent = new OriginOSAgent(basicConfig);
+			const internalAgent = (agent as any).agent;
+			const receivedEvents: any[] = [];
+			agent.subscribe((event) => receivedEvents.push(event));
+			const promiseText = "接下来我会换一种方法继续处理。";
+
+			internalAgent.prompt.mockImplementationOnce(async () => {
+				internalAgent.emit({
+					type: "tool_execution_end",
+					toolName: "execute_command",
+					toolCallId: "call-failed",
+					isError: false,
+					result: {
+						content: [{
+							type: "text",
+							text: JSON.stringify({
+								success: false,
+								exitCode: 1,
+								stderr: "ParserError: heredoc is not supported",
+							}),
+						}],
+						details: {
+							success: false,
+							exitCode: 1,
+							stderr: "ParserError: heredoc is not supported",
+						},
+					},
+				});
+				emitAssistantStop(internalAgent, promiseText);
+			});
+			internalAgent.prompt.mockImplementation(async (message: any) => {
+				internalAgent.emit({ type: "message_start", message });
+				internalAgent.emit({ type: "message_end", message });
+				emitAssistantStop(internalAgent, promiseText);
+			});
+
+			await agent.prompt("完成任务");
+
+			expect(internalAgent.prompt).toHaveBeenCalledTimes(3);
+			expect(internalAgent.continue).not.toHaveBeenCalled();
+			const visible = JSON.stringify(receivedEvents);
+			expect(visible).not.toContain(promiseText);
+			expect(visible).toContain("自动恢复次数已耗尽");
+			expect(visible).toContain("最后失败工具：execute_command");
+			expect(visible).toContain("退出码：1");
+			expect(visible).toContain("heredoc is not supported");
+			expect(visible).toContain("所需操作：");
+			expect(receivedEvents.filter((event) => event.type === "agent_end")).toHaveLength(1);
+		});
+
+			it("preserves failure details while recording a later tool success", () => {
+			agent = new OriginOSAgent(basicConfig);
+			const internalAgent = (agent as any).agent;
+
+			internalAgent.emit({
+				type: "tool_execution_end",
+				toolName: "execute_command",
+				toolCallId: "call-failed",
+				isError: false,
+				result: {
+					content: [{ type: "text", text: '{"success":false,"exitCode":1}' }],
+					details: { success: false, exitCode: 1 },
+				},
+			});
+			expect((agent as any).lastToolFailure?.toolName).toBe("execute_command");
+
+			internalAgent.emit({
+				type: "tool_execution_end",
+				toolName: "list_files",
+				toolCallId: "call-success",
+				isError: false,
+				result: {
+					content: [{ type: "text", text: '{"success":true}' }],
+					details: { success: true },
+				},
+			});
+
+				expect((agent as any).lastToolFailure?.toolName).toBe("execute_command");
+				expect((agent as any).successfulToolAfterFailure).toBe(true);
+			});
+
+			it("streams ordinary assistant updates without waiting for message_end", () => {
+				agent = new OriginOSAgent(basicConfig);
+				const internalAgent = (agent as any).agent;
+				const receivedEvents: any[] = [];
+				agent.subscribe((event) => receivedEvents.push(event));
+				const message = {
+					role: "assistant",
+					content: [{ type: "text", text: "正在输出" }],
+					stopReason: "stop",
+				};
+
+				internalAgent.emit({ type: "message_start", message });
+				internalAgent.emit({
+					type: "message_update",
+					message,
+					assistantMessageEvent: {
+						type: "text_delta",
+						delta: "正在",
+					},
+				});
+
+				expect(receivedEvents.map((event) => event.type)).toEqual([
+					"message_start",
+					"message_update",
+				]);
+			});
+
+			it("filters internal recovery messages from session state", async () => {
+				agent = new OriginOSAgent(basicConfig);
+				const internalAgent = (agent as any).agent;
+				const hidden = {
+					role: "user",
+					content: [{ type: "text", text: "[Internal Completion Recovery]" }],
+				};
+				const visible = {
+					role: "assistant",
+					content: [{ type: "text", text: "处理完成" }],
+				};
+				internalAgent.state.messages = [hidden, visible];
+				(agent as any).hiddenMessages.add(hidden);
+
+				const state = await agent.getSessionState();
+
+				expect(state.messages).toEqual([visible]);
+			});
+	});
+
+	describe("Logging semantics", () => {
+		it("logs normal lifecycle events as info without error logs", () => {
+			const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+			agent = new OriginOSAgent(basicConfig);
+			const internalAgent = (agent as any).agent;
+			errorSpy.mockClear();
+
+			internalAgent.emit({ type: "agent_start" });
+			internalAgent.emit({ type: "turn_start" });
+			internalAgent.emit({
+				type: "message_start",
+				message: { role: "assistant" },
+			});
+			internalAgent.emit({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "done" }],
+					stopReason: "stop",
+				},
+			});
+			internalAgent.emit({
+				type: "turn_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "done" }],
+					stopReason: "stop",
+				},
+				toolResults: [],
+			});
+			internalAgent.emit({ type: "agent_end", messages: [] });
+
+			expect(infoSpy).toHaveBeenCalled();
+			expect(errorSpy).not.toHaveBeenCalled();
+		});
+
+		it("logs structured command failures as errors with tool name and exit code", () => {
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+			agent = new OriginOSAgent(basicConfig);
+			const internalAgent = (agent as any).agent;
+			errorSpy.mockClear();
+
+			internalAgent.emit({
+				type: "tool_execution_end",
+				toolName: "execute_command",
+				toolCallId: "call-1",
+				isError: false,
+				result: {
+					content: [{
+						type: "text",
+						text: JSON.stringify({
+							success: false,
+							exitCode: 1,
+							stderr: "PowerShell parser error",
+						}),
+					}],
+					details: {
+						success: false,
+						exitCode: 1,
+						stderr: "PowerShell parser error",
+					},
+				},
+			});
+
+			const output = errorSpy.mock.calls.flat().join(" ");
+			expect(output).toContain("tool_end — execute_command (ERROR)");
+			expect(output).toContain("callId=call-1");
+			expect(output).toContain("exitCode=1");
+			expect(output).toContain("PowerShell parser error");
+		});
+
+		it("does not log credential values or prefixes", async () => {
+			const credential = "sk-sensitive-credential-value";
+			const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+			agent = new OriginOSAgent({
+				...basicConfig,
+				model: {
+					...basicConfig.model,
+					apiKey: credential,
+				} as any,
+			});
+
+			await agent.prompt("test");
+
+			const output = JSON.stringify(infoSpy.mock.calls);
+			expect(output).not.toContain(credential);
+			expect(output).not.toContain(credential.slice(0, 10));
+			expect(output).toContain("hasFinalCredential=true");
+		});
+
+		it("keeps worker stdout free of lifecycle and stream logs", () => {
+			const previousWorkerMode = process.env["ORIGINOS_WORKER_STDOUT_JSON_LINE"];
+			process.env["ORIGINOS_WORKER_STDOUT_JSON_LINE"] = "1";
+			const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+			const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+			try {
+				agent = new OriginOSAgent(basicConfig);
+				const internalAgent = (agent as any).agent;
+				internalAgent.emit({ type: "agent_start" });
+				internalAgent.emit({
+					type: "message_update",
+					assistantMessageEvent: {
+						type: "text_delta",
+						delta: "stream content",
+					},
+				});
+
+				expect(stdoutSpy).not.toHaveBeenCalled();
+				expect(infoSpy).not.toHaveBeenCalled();
+			} finally {
+				if (previousWorkerMode === undefined) {
+					delete process.env["ORIGINOS_WORKER_STDOUT_JSON_LINE"];
+				} else {
+					process.env["ORIGINOS_WORKER_STDOUT_JSON_LINE"] = previousWorkerMode;
+				}
+			}
 		});
 	});
 

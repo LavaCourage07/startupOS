@@ -116,7 +116,7 @@ function initializeDesktopLogCapture(): void {
   mkdirSync(logsDir, { recursive: true });
   desktopLogPath = path.join(logsDir, 'desktop.log');
 
-  for (const methodName of ['log', 'warn', 'error'] as const) {
+  for (const methodName of ['log', 'info', 'warn', 'error'] as const) {
     const original = console[methodName].bind(console);
     console[methodName] = (...args: unknown[]) => {
       appendDesktopLog(`${methodName.toUpperCase()} ${serializeConsoleArgs(args)}`);
@@ -144,14 +144,14 @@ function initializeLlmLogCapture(): void {
   mkdirSync(logsDir, { recursive: true });
   const llmLogPath = path.join(logsDir, 'llm.log');
 
-  for (const methodName of ['log', 'warn', 'error'] as const) {
+  for (const methodName of ['log', 'info', 'warn', 'error'] as const) {
     const original = console[methodName].bind(console);
     console[methodName] = (...args: unknown[]) => {
       const line = serializeConsoleArgs(args);
       if (shouldWriteLlmLog(line)) {
         const timestamp = new Date().toISOString();
         try {
-          appendFileSync(llmLogPath, `[${timestamp}] ${line}\n`, 'utf8');
+          appendFileSync(llmLogPath, `[${timestamp}] ${methodName.toUpperCase()} ${line}\n`, 'utf8');
         } catch (error) {
           original('[llm-log] Failed to write log file', error);
         }

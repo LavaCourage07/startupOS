@@ -24,6 +24,12 @@ import process from "node:process";
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+// stdout is reserved exclusively for the WorkerMessage JSON Line protocol.
+process.env["ORIGINOS_WORKER_STDOUT_JSON_LINE"] = "1";
+const workerStderr = console.error.bind(console);
+console.log = (...args: unknown[]) => workerStderr("[INFO]", ...args);
+console.info = (...args: unknown[]) => workerStderr("[INFO]", ...args);
+
 // 动态导入路径，支持打包环境和开发环境
 const packagedAgentWorkerDir = process.env["ORIGINOS_AGENT_WORKER_DIR"];
 const packagedCoreSrcDir = process.env["ORIGINOS_CORE_SRC_DIR"];
@@ -178,8 +184,10 @@ async function createWorkerModel(modelConfig?: WorkerModelConfig): Promise<unkno
   console.error(`[createWorkerModel] modelConfig provided: ${!!modelConfig}`, modelConfig ? {
     provider: modelConfig.provider,
     baseUrl: modelConfig.anthropicBaseUrl ?? modelConfig.baseUrl,
-    apiKey: modelConfig.apiKey ? `${modelConfig.apiKey.slice(0, 8)}...` : undefined,
-    anthropicApiKey: modelConfig.anthropicApiKey ? `${modelConfig.anthropicApiKey.slice(0, 8)}...` : undefined,
+    hasApiKey: !!modelConfig.apiKey,
+    hasAnthropicApiKey: !!modelConfig.anthropicApiKey,
+    hasAuthToken: !!modelConfig.authToken,
+    hasAnthropicAuthToken: !!modelConfig.anthropicAuthToken,
     model: modelConfig.model ?? modelConfig.id,
     anthropicCredentialSource: modelConfig.anthropicCredentialSource,
     mapping: modelConfig.mapping,
