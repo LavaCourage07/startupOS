@@ -77,6 +77,56 @@ describe("execute_command shell resolution", () => {
   });
 });
 
+describe("execute_command output buffering", () => {
+  it("keeps small output unchanged", () => {
+    const buffer = new __test__.BoundedTextBuffer(64, 16);
+    buffer.append("hello");
+    buffer.append(" world");
+
+    expect(buffer.result()).toEqual({
+      text: "hello world",
+      originalLength: 11,
+      hash: expect.any(String),
+      truncated: false,
+    });
+  });
+
+  it("bounds large Unicode output while retaining its head and tail", () => {
+    const buffer = new __test__.BoundedTextBuffer(64, 16);
+    const source = `HEAD-${"中".repeat(100)}-TAIL`;
+    buffer.append(source.slice(0, 37));
+    buffer.append(source.slice(37));
+
+    const result = buffer.result();
+
+    expect(result.truncated).toBe(true);
+    expect(result.originalLength).toBe(source.length);
+    expect(result.text).toContain("HEAD-");
+    expect(result.text).toContain("-TAIL");
+    expect(result.text).toContain("output truncated");
+    expect(result.text.length).toBeLessThan(140);
+  });
+
+  it("summarizes large log values without returning the full value", () => {
+    const source = "secret-tail-marker-" + "x".repeat(10_000);
+    const summary = __test__.summarizeText(source, 40);
+
+    expect(summary).toContain("length=10019");
+    expect(summary).toContain("hash=");
+    expect(summary.length).toBeLessThan(130);
+    expect(summary).not.toContain("x".repeat(100));
+  });
+
+  it("redacts credentials from command previews", () => {
+    const summary = __test__.summarizeText(
+      "curl -H 'Authorization: Bearer sk-sensitive-credential-value' https://example.com",
+    );
+
+    expect(summary).toContain("[REDACTED]");
+    expect(summary).not.toContain("sk-sensitive-credential-value");
+  });
+});
+
 // ============================================================================
 // Windows 平台 shell 与工作目录解析（mock process.platform，不真实 spawn）
 // ============================================================================

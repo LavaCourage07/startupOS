@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '../ipc-protocol';
 import type { IpcResponse } from '../../../../core/src/lib/integrations/electron/ipc-protocol';
 import { agentSessionService } from '../../../../core/src/lib/features/agent';
@@ -11,6 +11,9 @@ import { MemoryConsolidator } from '../../../../core/src/modules/memory-core/cor
 import { getDataRoot, getClaudeDir } from '../../../../core/src/lib/paths';
 import path from 'path';
 import { existsSync, readFileSync } from 'fs';
+import { StreamEventBatcher } from './stream-event-batcher';
+import { applyAssistantMessageEnd } from './assistant-stream-state';
+import { processHealthMonitor } from './process-health-monitor';
 
 function extractTextContent(content: unknown): string {
   return extractDisplayContent(content, { allowThinkingFallback: true });
@@ -442,13 +445,28 @@ export class AgentSessionService {
 
           const unsubscribe = agent.subscribe((event: { type: string; [key: string]: unknown }) => {
             switch (event.type) {
+              case 'agent_start':
+              case 'turn_start':
+                processHealthMonitor.setAgentActivity(request.sessionId, 'model_wait');
+                break;
               case 'message_update': {
+                processHealthMonitor.setAgentActivity(request.sessionId, 'model_stream');
                 const asm = event['assistantMessageEvent'] as { type?: string; delta?: string } | undefined;
                 if (asm?.type === 'text_delta' && typeof asm.delta === 'string') {
                   assistantContent = getVisibleStreamDelta(assistantContent, asm.delta).content;
                 }
                 break;
               }
+              case 'tool_execution_start':
+                processHealthMonitor.setAgentActivity(
+                  request.sessionId,
+                  'tool_running',
+                  typeof event['toolName'] === 'string' ? event['toolName'] : undefined
+                );
+                break;
+              case 'tool_execution_end':
+                processHealthMonitor.setAgentActivity(request.sessionId, 'model_wait');
+                break;
               case 'message_end': {
                 const msg = event['message'] as { role?: string; content?: unknown } | undefined;
                 if (msg?.role === 'assistant' && msg.content) {
@@ -458,6 +476,7 @@ export class AgentSessionService {
                 break;
               }
               case 'agent_end': {
+                processHealthMonitor.setAgentActivity(request.sessionId, 'completion_check');
                 const msg = event['message'] as { role?: string; content?: unknown } | undefined;
                 if (msg?.role === 'assistant' && msg.content) {
                   const extracted = extractTextContent(msg.content);
@@ -473,6 +492,13 @@ export class AgentSessionService {
                 }
                 break;
               }
+              case 'completion_accepted': {
+                const content = event['content'];
+                if (typeof content === 'string' && content) {
+                  assistantContent = content;
+                }
+                break;
+              }
               case 'agent_error':
                 hasError = true;
                 errorMessage = (event['error'] as { message?: string })?.message || 'Unknown error';
@@ -480,11 +506,14 @@ export class AgentSessionService {
             }
           });
 
+          processHealthMonitor.setAgentActivity(request.sessionId, 'prompt_start');
           try {
             await agent.prompt(request.content);
           } catch (promptError) {
             hasError = true;
             errorMessage = promptError instanceof Error ? promptError.message : 'Failed to call LLM';
+          } finally {
+            processHealthMonitor.clearAgentActivity(request.sessionId);
           }
 
           unsubscribe();
@@ -525,7 +554,7 @@ export class AgentSessionService {
 
     ipcMain.handle(
       IPC_CHANNELS.AGENT_SESSION_MESSAGE_STREAM,
-      async (_event, request: {
+      async (event, request: {
         sessionId: string;
         content: string;
         role?: string;
@@ -573,46 +602,33 @@ export class AgentSessionService {
             }
           );
 
-          // 批量发送缓冲区，减少 IPC 调用频率
-          let eventBatch: Array<{ type: string; data: unknown }> = [];
-          let batchTimer: NodeJS.Timeout | null = null;
-          const BATCH_INTERVAL = 16; // ~60fps
-
-          const flushBatch = () => {
-            if (eventBatch.length === 0) return;
-            const batch = eventBatch;
-            eventBatch = [];
-            batchTimer = null;
-
-            const payload = JSON.stringify({
+          const sender = event.sender;
+          const sendPayload = (payload: Record<string, unknown>) => {
+            if (!sender.isDestroyed()) {
+              sender.send(IPC_CHANNELS.AGENT_EVENT, payload);
+            }
+          };
+          const batcher = new StreamEventBatcher({
+            onFlush: (events) => sendPayload({
               type: 'batch_events',
               sessionId: request.sessionId,
               streamId: request.streamId,
-              events: batch,
-            });
-            for (const win of BrowserWindow.getAllWindows()) {
-              if (!win.isDestroyed()) {
-                win.webContents.send(IPC_CHANNELS.AGENT_EVENT, payload);
-              }
-            }
-          };
+              events,
+            }),
+          });
 
           const sendToRenderer = (eventType: string, data: unknown) => {
-            // 立即发送关键事件，其他事件批量发送
-            if (eventType === 'done' || eventType === 'error' || eventType === 'assistant_message') {
-              flushBatch();
-              const payload = JSON.stringify({ type: eventType, sessionId: request.sessionId, streamId: request.streamId, data });
-              for (const win of BrowserWindow.getAllWindows()) {
-                if (!win.isDestroyed()) {
-                  win.webContents.send(IPC_CHANNELS.AGENT_EVENT, payload);
-                }
-              }
-            } else {
-              eventBatch.push({ type: eventType, data });
-              if (!batchTimer) {
-                batchTimer = setTimeout(flushBatch, BATCH_INTERVAL);
-              }
+            if (eventType === 'text_delta') {
+              batcher.push({ type: eventType, data });
+              return;
             }
+            batcher.flush();
+            sendPayload({
+              type: eventType,
+              sessionId: request.sessionId,
+              streamId: request.streamId,
+              data,
+            });
           };
 
           let assistantContent = '';
@@ -620,8 +636,13 @@ export class AgentSessionService {
 
           const unsubscribe = agent.subscribe((event: { type: string; [key: string]: unknown }) => {
             switch (event.type) {
+              case 'agent_start':
+              case 'turn_start':
+                processHealthMonitor.setAgentActivity(request.sessionId, 'model_wait');
+                break;
               // In-process mode: library emits message_update with nested assistantMessageEvent
               case 'message_update': {
+                processHealthMonitor.setAgentActivity(request.sessionId, 'model_stream');
                 const asm = event['assistantMessageEvent'] as { type?: string; delta?: string } | undefined;
                 if (asm?.type === 'text_delta' && typeof asm.delta === 'string') {
                   const merged = getVisibleStreamDelta(assistantContent, asm.delta);
@@ -633,9 +654,15 @@ export class AgentSessionService {
                 break;
               }
               case 'tool_execution_start':
+                processHealthMonitor.setAgentActivity(
+                  request.sessionId,
+                  'tool_running',
+                  typeof event['toolName'] === 'string' ? event['toolName'] : undefined
+                );
                 sendToRenderer('tool_start', { toolName: event['toolName'] });
                 break;
               case 'tool_execution_end':
+                processHealthMonitor.setAgentActivity(request.sessionId, 'model_wait');
                 sendToRenderer('tool_end', { toolName: event['toolName'] });
                 // 检测 write_file 写入解决方案文件，主动通知前端刷新
                 if (event['toolName'] === 'write_file') {
@@ -652,18 +679,36 @@ export class AgentSessionService {
                 }
                 break;
               case 'message_end': {
-                const msg = event['message'] as { role?: string; content?: unknown } | undefined;
+                const msg = event['message'] as {
+                  role?: string;
+                  content?: unknown;
+                  completionFailure?: boolean;
+                } | undefined;
                 if (msg?.role === 'assistant') {
                   const extracted = extractTextContent(msg.content);
-                  if (extracted) assistantContent = reconcileFinalStreamContent(assistantContent, extracted);
-                }
-                if (assistantContent && !assistantMessageSent) {
-                  sendToRenderer('assistant_message', { content: assistantContent });
-                  assistantMessageSent = true;
+                  if (extracted) {
+                    const transition = applyAssistantMessageEnd(
+                      { content: assistantContent, sent: assistantMessageSent },
+                      {
+                        content: extracted,
+                        completionFailure: msg.completionFailure,
+                      }
+                    );
+                    assistantContent = transition.content;
+                    assistantMessageSent = transition.sent;
+                    if (transition.shouldSend) {
+                      sendToRenderer('assistant_message', {
+                        content: assistantContent,
+                        isStreaming: false,
+                        completionFailure: msg.completionFailure === true,
+                      });
+                    }
+                  }
                 }
                 break;
               }
               case 'agent_end': {
+                processHealthMonitor.setAgentActivity(request.sessionId, 'completion_check');
                 if (assistantMessageSent) break;
                 const msg = event['message'] as { role?: string; content?: unknown } | undefined;
                 if (msg?.role === 'assistant' && msg.content) {
@@ -684,12 +729,26 @@ export class AgentSessionService {
                 }
                 break;
               }
+              case 'completion_accepted': {
+                const content = event['content'];
+                if (typeof content === 'string' && content) {
+                  assistantContent = content;
+                  assistantMessageSent = true;
+                  sendToRenderer('assistant_message', {
+                    content,
+                    isStreaming: false,
+                    completionAccepted: true,
+                  });
+                }
+                break;
+              }
               case 'agent_error':
                 sendToRenderer('error', { message: (event['error'] as { message?: string })?.message || 'Unknown error' });
                 break;
             }
           });
 
+          processHealthMonitor.setAgentActivity(request.sessionId, 'prompt_start');
           agent.prompt(request.content).then(async () => {
             unsubscribe();
             if (assistantContent) {
@@ -699,6 +758,7 @@ export class AgentSessionService {
               }, request.projectId);
             }
             sendToRenderer('done', {});
+            batcher.dispose();
           }).catch(async (err: unknown) => {
             unsubscribe();
             const visibleError = formatVisibleAgentError(err);
@@ -710,6 +770,9 @@ export class AgentSessionService {
             sendToRenderer('error', { message: visibleError });
             sendToRenderer('agent_error', { message: visibleError });
             sendToRenderer('done', {});
+            batcher.dispose();
+          }).finally(() => {
+            processHealthMonitor.clearAgentActivity(request.sessionId);
           });
 
           return {

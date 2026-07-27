@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -206,8 +206,22 @@ interface MarkdownContentProps {
   isStreaming?: boolean;
 }
 
-export function MarkdownContent({ content, isStreaming }: MarkdownContentProps) {
+export const STREAMING_PLAIN_TEXT_THRESHOLD = 4_000;
+
+export const MarkdownContent = memo(function MarkdownContent({ content, isStreaming }: MarkdownContentProps) {
   const safeContent = sanitizeAgentDisplayContent(content);
+  if (isStreaming && safeContent.length >= STREAMING_PLAIN_TEXT_THRESHOLD) {
+    return (
+      <div
+        className="min-w-0 whitespace-pre-wrap break-words text-inherit"
+        data-stream-renderer="plain-text"
+      >
+        {safeContent}
+        <span className="inline-block w-2 h-4 ml-1 bg-current animate-pulse opacity-70" />
+      </div>
+    );
+  }
+
   const normalizedContent = normalizeMarkdownTables(safeContent);
   return (
     <div className="min-w-0 overflow-hidden break-words text-inherit">
@@ -327,7 +341,7 @@ export function MarkdownContent({ content, isStreaming }: MarkdownContentProps) 
       )}
     </div>
   );
-}
+});
 
 interface ChatMessageProps {
   message: ChatMessageData;

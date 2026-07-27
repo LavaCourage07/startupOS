@@ -34,6 +34,7 @@ import {
   startSkillExecution,
   streamSkillExecutionMessage,
 } from '../../../../core/src/lib/features/skills/service';
+import { StreamEventBatcher } from './stream-event-batcher';
 
 export class SkillService {
   constructor() {
@@ -152,13 +153,34 @@ export class SkillService {
     ipcMain.handle(
       IPC_CHANNELS.SKILL_EXECUTION_MESSAGE_STREAM,
       async (event, request: SkillExecutionStreamRequest): Promise<IpcResponse<{ streamId?: string }>> => {
-        try {
-          await streamSkillExecutionMessage(request, (streamEvent: SkillExecutionStreamEvent) => {
-            event.sender.send(IPC_CHANNELS.SKILL_EXECUTION_EVENT, {
+        const sender = event.sender;
+        const sendEvent = (streamEvent: { type: string; data: unknown }) => {
+          if (!sender.isDestroyed()) {
+            sender.send(IPC_CHANNELS.SKILL_EXECUTION_EVENT, {
               ...streamEvent,
+              executionId: request.executionId,
               streamId: request.streamId,
             });
+          }
+        };
+        const batcher = new StreamEventBatcher({
+          onFlush: (events) => {
+            for (const streamEvent of events) {
+              sendEvent(streamEvent);
+            }
+          },
+        });
+        try {
+          await streamSkillExecutionMessage(request, (streamEvent: SkillExecutionStreamEvent) => {
+            const data = streamEvent.data as { isStreaming?: unknown } | null;
+            if (streamEvent.type === 'assistant_message' && data?.isStreaming === true) {
+              batcher.push({ type: streamEvent.type, data: streamEvent.data });
+              return;
+            }
+            batcher.flush();
+            sendEvent(streamEvent);
           });
+          batcher.dispose();
 
           return {
             success: true,
@@ -166,14 +188,14 @@ export class SkillService {
             timestamp: new Date().toISOString(),
           };
         } catch (error) {
-          event.sender.send(IPC_CHANNELS.SKILL_EXECUTION_EVENT, {
-            streamId: request.streamId,
-            executionId: request.executionId,
+          batcher.flush();
+          sendEvent({
             type: 'error',
             data: {
               message: error instanceof Error ? error.message : 'Unknown error',
             },
           });
+          batcher.dispose();
 
           return this.toErrorResponse(error, '[SkillService] Stream skill execution message failed');
         }

@@ -172,11 +172,8 @@ export function trimRepeatingTail(
 
   for (let length = maxLength; length >= minPatternLength; length -= 1) {
     const pattern = tail.slice(tail.length - length);
-    if (!hasEnoughSignal(pattern)) {
-      continue;
-    }
     const repetitions = countTailRepetitions(tail, pattern);
-    if (repetitions >= minRepetitions) {
+    if (repetitions >= minRepetitions && hasEnoughSignal(pattern)) {
       const removedChars = pattern.length * (repetitions - 1);
       return {
         content: content.slice(0, content.length - removedChars),

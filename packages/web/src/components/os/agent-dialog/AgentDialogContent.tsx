@@ -121,16 +121,13 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
   }, [subscribe]);
 
   const messages: Message[] = agentMessages
-    ?.map((msg: any, idx: number) => {
-      console.log('[AgentDialogContent] Mapping message:', idx, 'role:', msg.role, 'contentLen:', msg.content?.length, 'isStreaming:', msg.isStreaming);
-      return ({
+    ?.map((msg: any, idx: number) => ({
         id: msg.id || `msg-${idx}`,
         role: msg.role as Message['role'],
         content: msg.content,
         timestamp: msg.timestamp,
         isStreaming: msg.isStreaming,
-      });
-    })
+      }))
     // Hide only the user-side system trigger message
     .filter((msg: any) => {
       if (msg.role === 'user' && msg.content.startsWith('你好！请根据你的人设')) {

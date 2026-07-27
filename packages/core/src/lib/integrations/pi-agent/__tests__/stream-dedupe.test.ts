@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { appendStreamDelta, getVisibleStreamDelta, reconcileFinalStreamContent, trimRepeatingTail } from '../stream-dedupe';
+import {
+  appendStreamDelta,
+  getVisibleStreamDelta,
+  reconcileFinalStreamContent,
+  trimRepeatingTail,
+} from '../stream-dedupe';
 
 describe('stream-dedupe', () => {
   it('drops duplicate full-content deltas', () => {
@@ -72,4 +77,5 @@ describe('stream-dedupe', () => {
     expect(result.trimmed).toBe(false);
     expect(result.content).toBe(content);
   });
+
 });

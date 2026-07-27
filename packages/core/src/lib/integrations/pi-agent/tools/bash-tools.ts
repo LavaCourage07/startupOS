@@ -16,6 +16,7 @@ import type { ToolRegistration } from "../types";
 import { spawn } from "child_process";
 import { accessSync, constants } from "fs";
 import { delimiter, join, win32 as pathWin32 } from "path";
+import { StringDecoder } from "string_decoder";
 import { getToolContext } from "./context";
 import { getDataRoot } from '../../../paths';
 
@@ -309,6 +310,91 @@ interface ToolExecutionCtx {
   onUpdate?: AgentToolUpdateCallback<unknown>;
 }
 
+const MAX_CAPTURED_OUTPUT_CHARS = 64 * 1024;
+const OUTPUT_TAIL_CHARS = 16 * 1024;
+const LOG_PREVIEW_CHARS = 240;
+
+function updateHash(hash: number, value: string): number {
+  let next = hash;
+  for (let index = 0; index < value.length; index += 1) {
+    next ^= value.charCodeAt(index);
+    next = Math.imul(next, 16777619);
+  }
+  return next;
+}
+
+function formatHash(hash: number): string {
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function redactSensitiveText(value: string): string {
+  return value
+    .replace(/\bBearer\s+\S+/giu, "Bearer [REDACTED]")
+    .replace(/\b(?:sk|tp)-[A-Za-z0-9._-]{8,}\b/gu, "[REDACTED]")
+    .replace(
+      /\b(api[_-]?key|token|secret|password)(\s*[:=]\s*["']?)[^\s,"'}]+/giu,
+      "$1$2[REDACTED]",
+    );
+}
+
+class BoundedTextBuffer {
+  private readonly headLimit: number;
+  private readonly tailLimit: number;
+  private head = "";
+  private tail = "";
+  private totalLength = 0;
+  private hash = 2166136261;
+
+  constructor(
+    maxChars = MAX_CAPTURED_OUTPUT_CHARS,
+    tailChars = OUTPUT_TAIL_CHARS,
+  ) {
+    this.tailLimit = Math.min(Math.max(tailChars, 0), maxChars);
+    this.headLimit = Math.max(0, maxChars - this.tailLimit);
+  }
+
+  append(value: string): void {
+    if (!value) return;
+    this.totalLength += value.length;
+    this.hash = updateHash(this.hash, value);
+
+    let remaining = value;
+    if (this.head.length < this.headLimit) {
+      const available = this.headLimit - this.head.length;
+      this.head += remaining.slice(0, available);
+      remaining = remaining.slice(available);
+    }
+    if (remaining && this.tailLimit > 0) {
+      this.tail = (this.tail + remaining).slice(-this.tailLimit);
+    }
+  }
+
+  result(): {
+    text: string;
+    originalLength: number;
+    hash: string;
+    truncated: boolean;
+  } {
+    const retained = this.head.length + this.tail.length;
+    const truncated = this.totalLength > retained;
+    const marker = truncated
+      ? `\n...[output truncated, omittedChars=${this.totalLength - retained}]...\n`
+      : "";
+    return {
+      text: `${this.head}${marker}${this.tail}`,
+      originalLength: this.totalLength,
+      hash: formatHash(this.hash),
+      truncated,
+    };
+  }
+}
+
+function summarizeText(value: string, maxPreview = LOG_PREVIEW_CHARS): string {
+  const normalized = redactSensitiveText(value).replace(/\s+/g, " ").trim();
+  const preview = normalized.slice(0, maxPreview);
+  return `length=${value.length}, hash=${formatHash(updateHash(2166136261, value))}, preview=${JSON.stringify(preview)}`;
+}
+
 function createToolCtx(
   toolCallId: string,
   toolName: string,
@@ -331,9 +417,13 @@ function logToolStart(
   if (process.env["ORIGINOS_WORKER_STDOUT_JSON_LINE"] === "1") {
     return;
   }
+  const command = typeof params["command"] === "string" ? params["command"] : "";
+  const workingDirectory = typeof params["workingDirectory"] === "string"
+    ? params["workingDirectory"]
+    : "context-default";
+  const timeout = typeof params["timeout"] === "number" ? params["timeout"] : 30000;
   console.info(
-    `[Tool:${ctx.toolName}] START_CALL_ID=${ctx.toolCallId}`,
-    JSON.stringify(params, null, 2),
+    `[Tool:${ctx.toolName}] START_CALL_ID=${ctx.toolCallId} command(${summarizeText(command)}), workingDirectory=${JSON.stringify(workingDirectory)}, timeout=${timeout}`,
   );
 }
 
@@ -344,10 +434,13 @@ function logToolEnd(
   const exitCode = typeof result["exitCode"] === "number" ? result["exitCode"] : undefined;
   const failed = result["success"] === false || (exitCode !== undefined && exitCode !== 0);
   const message = `[Tool:${ctx.toolName}] ${failed ? "ERROR" : "END"}_CALL_ID=${ctx.toolCallId}${exitCode !== undefined ? ` exitCode=${exitCode}` : ""}`;
+  const stdout = typeof result["stdout"] === "string" ? result["stdout"] : "";
+  const stderr = typeof result["stderr"] === "string" ? result["stderr"] : "";
+  const summary = `${message} stdout(${summarizeText(stdout)}), stderr(${summarizeText(stderr)})`;
   if (failed) {
-    console.error(message, JSON.stringify(result, null, 2));
+    console.error(summary);
   } else if (process.env["ORIGINOS_WORKER_STDOUT_JSON_LINE"] !== "1") {
-    console.info(message, JSON.stringify(result, null, 2));
+    console.info(summary);
   }
 }
 
@@ -480,7 +573,7 @@ const ExecuteCommandTool: ToolRegistration = {
         throw new Error(`安全检查失败: ${safetyCheck.reason}`);
       }
 
-      sendProgress(ctx, `准备执行命令: ${params.command}`, 0.2);
+      sendProgress(ctx, `准备执行命令: ${params.command.slice(0, LOG_PREVIEW_CHARS)}`, 0.2);
 
       // 解析工作目录（支持 tool context 中的 skill base dir）
       const cwd = await resolveWorkingDirectory(params.workingDirectory);
@@ -519,15 +612,17 @@ const ExecuteCommandTool: ToolRegistration = {
         windowsHide: true,
       });
 
-      let stdout = "";
-      let stderr = "";
+      const stdoutBuffer = new BoundedTextBuffer();
+      const stderrBuffer = new BoundedTextBuffer();
+      const stdoutDecoder = new StringDecoder("utf8");
+      const stderrDecoder = new StringDecoder("utf8");
 
       child.stdout?.on("data", (data: Buffer | string) => {
-        stdout += typeof data === "string" ? data : data.toString();
+        stdoutBuffer.append(typeof data === "string" ? data : stdoutDecoder.write(data));
       });
 
       child.stderr?.on("data", (data: Buffer | string) => {
-        stderr += typeof data === "string" ? data : data.toString();
+        stderrBuffer.append(typeof data === "string" ? data : stderrDecoder.write(data));
       });
 
       // 等待子进程完成
@@ -540,14 +635,27 @@ const ExecuteCommandTool: ToolRegistration = {
       });
 
       checkAbort(ctx.signal);
+      stdoutBuffer.append(stdoutDecoder.end());
+      stderrBuffer.append(stderrDecoder.end());
       sendProgress(ctx, `命令执行完成`, 1);
 
+      const stdout = stdoutBuffer.result();
+      const stderr = stderrBuffer.result();
       const result = {
         success: exitCode === 0,
         exitCode,
-        command: params.command,
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
+        command: params.command.length <= 4096
+          ? params.command
+          : `${params.command.slice(0, 4096)}...[command truncated, originalLength=${params.command.length}]`,
+        commandLength: params.command.length,
+        stdout: stdout.text.trim(),
+        stdoutLength: stdout.originalLength,
+        stdoutHash: stdout.hash,
+        stdoutTruncated: stdout.truncated,
+        stderr: stderr.text.trim(),
+        stderrLength: stderr.originalLength,
+        stderrHash: stderr.hash,
+        stderrTruncated: stderr.truncated,
         workingDirectory: cwd,
         shell: shellPath,
       };
@@ -630,4 +738,6 @@ export const __test__ = {
   isPowerShell,
   isCmdShell,
   shellName,
+  BoundedTextBuffer,
+  summarizeText,
 };

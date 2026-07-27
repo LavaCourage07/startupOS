@@ -15,6 +15,7 @@ import {
   abortProjectAgent,
 } from '../electron/services/agent-project';
 import { appendStreamDelta, reconcileFinalStreamContent } from './stream-dedupe';
+import { StreamRenderScheduler } from './stream-render-scheduler';
 
 export interface AgentMessage {
   id?: string;
@@ -62,10 +63,56 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
   const abortingRef = useRef(false); // 正在中止，等待服务端确认
   const startedRef = useRef(false); // Prevent double-start from StrictMode
   const initTimestamp = useRef(0);  // Unique ID per hook instance
+  const streamSchedulersRef = useRef(new Map<string, {
+    content: string;
+    scheduler: StreamRenderScheduler;
+  }>());
+
+  const getStreamState = useCallback((assistantId: string) => {
+    const existing = streamSchedulersRef.current.get(assistantId);
+    if (existing) {
+      return existing;
+    }
+    const state = {
+      content: '',
+      scheduler: new StreamRenderScheduler({
+        onCommit: (nextContent, isStreaming) => {
+          setMessages(prev => prev.map(message =>
+            message.id === assistantId
+              ? { ...message, content: nextContent, isStreaming }
+              : message
+          ));
+        },
+      }),
+    };
+    streamSchedulersRef.current.set(assistantId, state);
+    return state;
+  }, []);
+
+  const finalizeStream = useCallback((assistantId: string, finalContent?: string) => {
+    const existing = streamSchedulersRef.current.get(assistantId);
+    if (!existing && !finalContent) {
+      return;
+    }
+    const state = existing ?? getStreamState(assistantId);
+    if (finalContent) {
+      state.content = reconcileFinalStreamContent(state.content, finalContent);
+    }
+    state.scheduler.flush(state.content, false);
+    state.scheduler.cancel();
+    streamSchedulersRef.current.delete(assistantId);
+  }, [getStreamState]);
+
+  const cancelStream = useCallback((assistantId: string) => {
+    const state = streamSchedulersRef.current.get(assistantId);
+    state?.scheduler.cancel();
+    streamSchedulersRef.current.delete(assistantId);
+  }, []);
 
   // 启动 Agent（仅执行一次）
   useEffect(() => {
     const instanceTs = Date.now();
+    const streamSchedulers = streamSchedulersRef.current;
     initTimestamp.current = instanceTs;
     if (startedRef.current) return;
     startedRef.current = true;
@@ -100,6 +147,10 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
     clearTimeout(timer);
 
     return () => {
+      for (const state of streamSchedulers.values()) {
+        state.scheduler.cancel();
+      }
+      streamSchedulers.clear();
       console.log('[usePersistentAgent] Cleanup scheduled for project:', projectId);
       timer = setTimeout(() => {
         if (initTimestamp.current !== instanceTs) {
@@ -118,18 +169,12 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
   ) => {
     if (event.type === 'text_delta') {
       const delta = (event.data as { delta?: string })?.delta || '';
-      setMessages(prev => prev.map(m =>
-        m.id === assistantId
-          ? { ...m, content: appendStreamDelta(m.content, delta), isStreaming: true }
-          : m
-      ));
+      const state = getStreamState(assistantId);
+      state.content = appendStreamDelta(state.content, delta);
+      state.scheduler.schedule(state.content);
     } else if (event.type === 'assistant_message') {
       const data = event.data as { content: string };
-      setMessages(prev => prev.map(m =>
-        m.id === assistantId
-          ? { ...m, content: reconcileFinalStreamContent(m.content, data.content), isStreaming: false }
-          : m
-      ));
+      finalizeStream(assistantId, data.content);
     } else if (event.type === 'tool_start') {
       const data = event.data as { toolCallId?: string; toolName: string; args?: unknown };
       setToolExecutions(prev => [...prev, {
@@ -149,7 +194,7 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
     } else if (event.type === 'artifact_changed') {
       setArtifactVersion(v => v + 1);
     }
-  }, []);
+  }, [finalizeStream, getStreamState]);
 
   const sendMessage = useCallback(async (content: string) => {
     if (!isReady || isThinking) return;
@@ -193,6 +238,7 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
       }, {
         onEvent: (event) => processStreamEvent(event, assistantId),
         onDone: () => {
+          finalizeStream(assistantId);
           setMessages(prev => prev.map(m =>
             m.id === assistantId && m.isStreaming
               ? { ...m, isStreaming: false }
@@ -202,6 +248,7 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
           abortRef.current = null;
         },
         onError: (error) => {
+          cancelStream(assistantId);
           setMessages(prev => prev.map(m =>
             m.id === assistantId
               ? { ...m, content: m.content || `[错误: ${error.message}]`, isStreaming: false }
@@ -213,6 +260,7 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
       });
 
       if (!res.success) {
+        cancelStream(assistantId);
         setMessages(prev => prev.map(m =>
           m.id === assistantId
             ? { ...m, content: `[错误: ${res.error?.message || 'Unknown error'}]`, isStreaming: false }
@@ -222,6 +270,7 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
         abortRef.current = null;
       }
     } catch (e: unknown) {
+      cancelStream(assistantId);
       if (e instanceof Error && e.name !== 'AbortError') {
         console.error('[usePersistentAgent] Error sending message:', e);
         setMessages(prev => prev.map(m =>
@@ -233,7 +282,7 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
       setIsThinking(false);
       abortRef.current = null;
     }
-  }, [projectId, isReady, isThinking, llmConfig, processStreamEvent]);
+  }, [projectId, isReady, isThinking, llmConfig, processStreamEvent, finalizeStream, cancelStream]);
 
   const triggerGreeting = useCallback(async () => {
     if (!isReady || isThinking) return;
@@ -262,6 +311,7 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
       }, {
         onEvent: (event) => processStreamEvent(event, assistantId),
         onDone: () => {
+          finalizeStream(assistantId);
           setMessages(prev => prev.map(m =>
             m.id === assistantId && m.isStreaming
               ? { ...m, isStreaming: false }
@@ -271,6 +321,7 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
           abortRef.current = null;
         },
         onError: (error) => {
+          cancelStream(assistantId);
           setMessages(prev => prev.map(m =>
             m.id === assistantId
               ? { ...m, content: m.content || `[错误: ${error.message}]`, isStreaming: false }
@@ -282,6 +333,7 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
       });
 
       if (!res.success) {
+        cancelStream(assistantId);
         setMessages(prev => prev.map(m =>
           m.id === assistantId
             ? { ...m, content: `[错误: ${res.error?.message || 'Unknown error'}]`, isStreaming: false }
@@ -291,6 +343,7 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
         abortRef.current = null;
       }
     } catch (e: unknown) {
+      cancelStream(assistantId);
       if (e instanceof Error && e.name !== 'AbortError') {
         console.error('[usePersistentAgent] Error triggering greeting:', e);
         setMessages(prev => prev.map(m =>
@@ -302,10 +355,14 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
       setIsThinking(false);
       abortRef.current = null;
     }
-  }, [projectId, isReady, isThinking, llmConfig, processStreamEvent]);
+  }, [projectId, isReady, isThinking, llmConfig, processStreamEvent, finalizeStream, cancelStream]);
 
   const abort = useCallback(async () => {
     abortRef.current?.abort();
+    for (const state of streamSchedulersRef.current.values()) {
+      state.scheduler.cancel();
+    }
+    streamSchedulersRef.current.clear();
     abortingRef.current = true;
     // 停止流式消息：有内容则保留，无内容则移除占位消息，让 loading 完全消失
     setMessages(prev => {

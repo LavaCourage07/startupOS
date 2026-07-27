@@ -979,7 +979,6 @@ export async function streamSkillExecutionMessage(
             type: 'assistant_message',
             data: {
               content: merged.delta,
-              fullContent: assistantContent,
               isStreaming: true,
             },
           });

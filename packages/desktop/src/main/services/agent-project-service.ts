@@ -13,7 +13,8 @@ import type {
 } from '../../../../core/src/lib/integrations/electron/ipc-protocol';
 import { persistentAgentManager } from '../../../../core/src/lib/integrations/pi-agent/persistent-agent-manager';
 import { extractDisplayContent } from '../../../../core/src/lib/integrations/pi-agent/display-content';
-import { getVisibleStreamDelta, reconcileFinalStreamContent } from '../../../../core/src/lib/integrations/pi-agent/stream-dedupe';
+import { getVisibleStreamDelta } from '../../../../core/src/lib/integrations/pi-agent/stream-dedupe';
+import { applyAssistantMessageEnd } from './assistant-stream-state';
 import { persistRuntimeLLMConfig } from '../../../../core/src/lib/features/user-config';
 
 const SYSTEM_TRIGGER_GREETING = '__SYSTEM_TRIGGER_GREETING__';
@@ -193,17 +194,50 @@ export class AgentProjectService {
                 }
                 break;
               case 'message_end': {
-                if (assistantMessageSent) break;
-                const msg = event['message'] as { role?: string; content?: unknown } | undefined;
+                const msg = event['message'] as {
+                  role?: string;
+                  content?: unknown;
+                  completionFailure?: boolean;
+                } | undefined;
+                if (assistantMessageSent && !msg?.completionFailure) break;
                 if (msg?.role === 'assistant') {
-                  const extracted = reconcileFinalStreamContent(assistantContent, extractTextContent(msg.content));
-                  if (extracted) {
-                    const stripped = stripToolCodeBlocks(extracted);
+                  const messageContent = extractTextContent(msg.content);
+                  if (messageContent) {
+                    const transition = applyAssistantMessageEnd(
+                      { content: assistantContent, sent: assistantMessageSent },
+                      {
+                        content: messageContent,
+                        completionFailure: msg.completionFailure,
+                      }
+                    );
+                    const stripped = stripToolCodeBlocks(transition.content);
                     if (stripped) {
                       assistantContent = stripped;
-                      sendToAllWindows(request.projectId, 'assistant_message', { content: stripped, isStreaming: false });
-                      assistantMessageSent = true;
+                      assistantMessageSent = transition.sent;
+                      if (transition.shouldSend) {
+                        sendToAllWindows(request.projectId, 'assistant_message', {
+                          content: stripped,
+                          isStreaming: false,
+                          completionFailure: msg.completionFailure === true,
+                        });
+                      }
                     }
+                  }
+                }
+                break;
+              }
+              case 'completion_accepted': {
+                const content = event['content'];
+                if (typeof content === 'string' && content) {
+                  const stripped = stripToolCodeBlocks(content);
+                  if (stripped) {
+                    assistantContent = stripped;
+                    assistantMessageSent = true;
+                    sendToAllWindows(request.projectId, 'assistant_message', {
+                      content: stripped,
+                      isStreaming: false,
+                      completionAccepted: true,
+                    });
                   }
                 }
                 break;

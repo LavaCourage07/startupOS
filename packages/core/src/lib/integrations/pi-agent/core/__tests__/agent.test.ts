@@ -223,6 +223,8 @@ describe("OriginOSAgent", () => {
 				expect(visible).toContain("好的，我会先读取");
 				expect(visible).not.toContain("Internal Completion Recovery");
 			expect(visible).toContain("处理完成");
+			const accepted = receivedEvents.find((event) => event.type === "completion_accepted");
+			expect(accepted?.content).toBe("处理完成，已使用 PowerShell 命令读取文件。");
 			expect(receivedEvents.filter((event) => event.type === "agent_end")).toHaveLength(1);
 			const recoveryMessage = internalAgent.prompt.mock.calls[1]?.[0];
 			expect(recoveryMessage?.role).toBe("user");
@@ -394,6 +396,137 @@ describe("OriginOSAgent", () => {
 	});
 
 	describe("Logging semantics", () => {
+		it("does not run the assistant loop guard on text deltas", () => {
+			agent = new OriginOSAgent(basicConfig);
+			const internalAgent = (agent as any).agent;
+			const receivedDeltas: string[] = [];
+			agent.subscribe((event: any) => {
+				if (event.type === "message_update" && event.assistantMessageEvent?.type === "text_delta") {
+					receivedDeltas.push(event.assistantMessageEvent.delta);
+				}
+			});
+
+			internalAgent.emit({
+				type: "message_start",
+				message: { role: "assistant" },
+			});
+			for (let index = 0; index < 5_000; index += 1) {
+				internalAgent.emit({
+					type: "message_update",
+					assistantMessageEvent: {
+						type: "text_delta",
+						delta: `chunk-${index};`,
+					},
+				});
+			}
+
+			expect((agent as any).assistantLoopGuardTriggered).toBe(false);
+			expect(receivedDeltas).toHaveLength(5_000);
+			expect(receivedDeltas[4_999]).toBe("chunk-4999;");
+		});
+
+		it("detects repeated completed responses only within the same user task", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+			agent = new OriginOSAgent(basicConfig);
+			const internalAgent = (agent as any).agent;
+			const completedMessage = {
+				role: "assistant",
+				stopReason: "stop",
+				content: [{ type: "text", text: "完整的最终响应" }],
+			};
+
+			(agent as any).resetCompletionGuard("执行任务");
+			internalAgent.emit({ type: "message_start", message: { role: "assistant" } });
+			internalAgent.emit({ type: "message_end", message: completedMessage });
+			expect((agent as any).pendingCompletionCandidate.repeatedResponse).toBe(false);
+
+			internalAgent.emit({ type: "message_start", message: { role: "assistant" } });
+			internalAgent.emit({
+				type: "message_end",
+				message: {
+					...completedMessage,
+					content: [{ type: "text", text: "完整的最终响应" }],
+				},
+			});
+			expect((agent as any).pendingCompletionCandidate.repeatedResponse).toBe(true);
+
+			await (agent as any).judgePendingCompletion();
+			expect((agent as any).pendingPromiseStop).toBe(true);
+			expect(warnSpy.mock.calls.flat().join("\n")).toContain(
+				"repeated completed assistant response",
+			);
+
+			(agent as any).resetCompletionGuard("新的用户任务");
+			internalAgent.emit({ type: "message_start", message: { role: "assistant" } });
+			internalAgent.emit({
+				type: "message_end",
+				message: {
+					...completedMessage,
+					content: [{ type: "text", text: "完整的最终响应" }],
+				},
+			});
+			expect((agent as any).pendingCompletionCandidate.repeatedResponse).toBe(false);
+		});
+
+		it("aggregates tool call deltas instead of logging every chunk", () => {
+			const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+			agent = new OriginOSAgent(basicConfig);
+			const internalAgent = (agent as any).agent;
+			infoSpy.mockClear();
+
+			internalAgent.emit({
+				type: "message_start",
+				message: { role: "assistant" },
+			});
+			internalAgent.emit({
+				type: "message_update",
+				assistantMessageEvent: { type: "toolcall_start" },
+			});
+			for (let index = 0; index < 10_000; index += 1) {
+				internalAgent.emit({
+					type: "message_update",
+					assistantMessageEvent: {
+						type: "toolcall_delta",
+						delta: "x",
+					},
+				});
+			}
+			internalAgent.emit({
+				type: "message_update",
+				assistantMessageEvent: {
+					type: "toolcall_end",
+					toolCall: {
+						name: "execute_command",
+						id: "call-1",
+						arguments: { command: "echo ok" },
+					},
+				},
+			});
+
+			const output = infoSpy.mock.calls.flat().join("\n");
+			expect(infoSpy.mock.calls.length).toBeLessThan(10);
+			expect(output).toContain("toolcall_start");
+			expect(output).toContain("toolcall_end, deltas=10000, deltaChars=10000");
+			expect(output).toContain("execute_command");
+		});
+
+		it("marks completion failure reports for transport layers", () => {
+			agent = new OriginOSAgent(basicConfig);
+			const receivedEvents: any[] = [];
+			agent.subscribe((event) => receivedEvents.push(event));
+			(agent as any).lastToolFailure = {
+				toolName: "execute_command",
+				exitCode: 1,
+				reason: "command missing",
+			};
+
+			(agent as any).emitCompletionFailureReport();
+
+			const messageEnd = receivedEvents.find((event) => event.type === "message_end");
+			expect(messageEnd?.message?.completionFailure).toBe(true);
+			expect(messageEnd?.message?.content?.[0]?.text).toContain("任务未能自动完成");
+		});
+
 		it("logs normal lifecycle events as info without error logs", () => {
 			const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
 			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -463,6 +596,39 @@ describe("OriginOSAgent", () => {
 			expect(output).toContain("callId=call-1");
 			expect(output).toContain("exitCode=1");
 			expect(output).toContain("PowerShell parser error");
+		});
+
+		it("logs large tool results as a bounded summary", () => {
+			const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+			agent = new OriginOSAgent(basicConfig);
+			const internalAgent = (agent as any).agent;
+			infoSpy.mockClear();
+			const stdout = `start-${"x".repeat(20_000)}-end`;
+
+			internalAgent.emit({
+				type: "tool_execution_end",
+				toolName: "execute_command",
+				toolCallId: "call-large",
+				isError: false,
+				result: {
+					content: [{
+						type: "text",
+						text: JSON.stringify({
+							success: true,
+							exitCode: 0,
+							stdout,
+						}),
+					}],
+				},
+			});
+
+			const output = infoSpy.mock.calls.flat().join(" ");
+			expect(output).toContain("tool_end — execute_command");
+			expect(output).toContain("length=");
+			expect(output).toContain("hash=");
+			expect(output).toContain("truncated=true");
+			expect(output.length).toBeLessThan(2_000);
+			expect(output).not.toContain("-end");
 		});
 
 		it("does not log credential values or prefixes", async () => {

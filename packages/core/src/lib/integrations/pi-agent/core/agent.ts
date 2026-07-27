@@ -30,7 +30,7 @@ import { compressRecentTrace } from "../recent-trace-compression";
 import { getLoopDetector, removeLoopDetector } from "../tools/loop-detector";
 import { findSuitableShell } from "../tools/bash-tools";
 import { createWorkingSummaryMessage } from "../runtime-working-summary";
-import { getVisibleStreamDelta, trimRepeatingTail } from "../stream-dedupe";
+import { getVisibleStreamDelta } from "../stream-dedupe";
 import {
 	appendRuntimeEnvironmentPrompt,
 	buildRuntimeEnvironmentPrompt,
@@ -119,6 +119,12 @@ function hashText(text: string): string {
 
 function previewText(text: string, max = 80): string {
 	return text.replace(/\s+/g, " ").slice(0, max);
+}
+
+function previewToolResult(text: string, max = 1_000): string {
+	const normalized = text.replace(/\s+/g, " ").trim();
+	const preview = normalized.slice(0, max);
+	return `length=${text.length}, hash=${hashText(text)}, preview=${JSON.stringify(preview)}${normalized.length > max ? ", truncated=true" : ""}`;
 }
 
 function getMessageText(message: unknown): string {
@@ -214,8 +220,11 @@ export class OriginOSAgent {
 	private activeTurnSequence = 0;
 	private assistantMessageSequence = 0;
 	private activeAssistantMessageSequence = 0;
+	private toolCallDeltaCount = 0;
+	private toolCallDeltaChars = 0;
 	private previousAssistantTextHash = "";
 	private previousAssistantTurnSequence = 0;
+	private previousTaskAssistantTextHash = "";
 	private runtimeEnvironment = getRuntimeEnvironment({
 		defaultShell: findSuitableShell() ?? undefined,
 	});
@@ -231,6 +240,7 @@ export class OriginOSAgent {
 		text: string;
 		stopReason?: string;
 		toolCallCount: number;
+		repeatedResponse: boolean;
 	} | null = null;
 	private deferredAgentEndEvent: AgentEvent | null = null;
 	private hiddenMessages = new WeakSet<object>();
@@ -545,6 +555,7 @@ export class OriginOSAgent {
 					text,
 					stopReason: (event.message as AssistantMessage).stopReason,
 					toolCallCount,
+					repeatedResponse: this.assistantLoopGuardTriggered,
 				};
 			}
 		}
@@ -591,6 +602,7 @@ export class OriginOSAgent {
 		this.completionToolTrace = [];
 		this.pendingCompletionCandidate = null;
 		this.deferredAgentEndEvent = null;
+		this.previousTaskAssistantTextHash = "";
 	}
 
 	private throwIfModelStreamFailed(): void {
@@ -605,6 +617,16 @@ export class OriginOSAgent {
 			return;
 		}
 		this.pendingCompletionCandidate = null;
+
+		if (candidate.repeatedResponse) {
+			this.pendingPromiseStop = true;
+			this.hiddenMessages.add(candidate.message);
+			this.deferredAgentEndEvent = null;
+			console.warn(
+				`[LLM CompletionGuard] repeated completed assistant response — textHash=${hashText(candidate.text)}`,
+			);
+			return;
+		}
 
 		let decision: SemanticCompletionDecision;
 		try {
@@ -701,6 +723,12 @@ export class OriginOSAgent {
 			return;
 		}
 
+		this.eventEmitter.emit({
+			type: "completion_accepted",
+			message: candidate.message,
+			content: candidate.text,
+		} as unknown as AgentEvent);
+
 		if (this.deferredAgentEndEvent) {
 			const deferred = this.deferredAgentEndEvent;
 			this.deferredAgentEndEvent = null;
@@ -778,6 +806,7 @@ export class OriginOSAgent {
 			role: "assistant",
 			content: [{ type: "text", text: report }],
 			stopReason: "stop",
+			completionFailure: true,
 		} as unknown as AgentMessage;
 		this.agent.appendMessage(message);
 
@@ -926,7 +955,7 @@ export class OriginOSAgent {
 				const toolCallId = toolEndEvent.toolCallId ? `, callId=${toolEndEvent.toolCallId}` : "";
 				const exitCode = status.exitCode !== undefined ? `, exitCode=${status.exitCode}` : "";
 				const reason = status.reason ? `, reason=${status.reason}` : "";
-				const message = `[LLM Event] tool_end — ${toolEndEvent.toolName}${status.failed ? " (ERROR)" : ""}${toolCallId}${exitCode}${reason}\n[ToolResult] ${resultText}`;
+				const message = `[LLM Event] tool_end — ${toolEndEvent.toolName}${status.failed ? " (ERROR)" : ""}${toolCallId}${exitCode}${reason}\n[ToolResult] ${previewToolResult(resultText)}`;
 				if (status.failed) {
 					console.error(message);
 				} else {
@@ -943,6 +972,8 @@ export class OriginOSAgent {
 					this.loggedStreamContent = "";
 					this.assistantStreamContent = "";
 					this.assistantLoopGuardTriggered = false;
+					this.toolCallDeltaCount = 0;
+					this.toolCallDeltaChars = 0;
 				} else {
 					this.activeAssistantMessageSequence = 0;
 				}
@@ -956,33 +987,13 @@ export class OriginOSAgent {
 				const update = event as any;
 				const eventType = update.assistantMessageEvent?.type || "unknown";
 				if (eventType === "text_delta") {
-					let delta = update.assistantMessageEvent?.delta || "";
-					if (this.assistantLoopGuardTriggered) {
-						update.assistantMessageEvent.delta = "";
-						break;
-					}
+					const delta = update.assistantMessageEvent?.delta || "";
 					if (delta.length > 0) {
 						const merged = getVisibleStreamDelta(this.assistantStreamContent, delta);
-						const trimmed = trimRepeatingTail(merged.content);
-						if (trimmed.trimmed) {
-							update.assistantMessageEvent.delta = trimmed.content.startsWith(this.assistantStreamContent)
-								? trimmed.content.slice(this.assistantStreamContent.length)
-								: "";
-							this.assistantStreamContent = trimmed.content;
-							this.loggedStreamContent = trimmed.content;
-							this.assistantLoopGuardTriggered = true;
-							console.warn(
-								`\n[LLM LoopGuard] repeated assistant output detected — turnSeq=${this.activeTurnSequence}, assistantMsgSeq=${this.activeAssistantMessageSequence}, patternLen=${trimmed.pattern?.length ?? 0}, repetitions=${trimmed.repetitions ?? 0}, textHash=${hashText(trimmed.content)}, preview="${previewText(trimmed.content)}"`
-							);
-							this.agent?.abort();
-							delta = update.assistantMessageEvent.delta;
-						} else {
-							update.assistantMessageEvent.delta = merged.delta;
-							this.assistantStreamContent = merged.content;
-							delta = merged.delta;
-						}
-						if (delta.length > 0) {
-							const logMerged = getVisibleStreamDelta(this.loggedStreamContent, delta);
+						update.assistantMessageEvent.delta = merged.delta;
+						this.assistantStreamContent = merged.content;
+						if (merged.delta.length > 0) {
+							const logMerged = getVisibleStreamDelta(this.loggedStreamContent, merged.delta);
 							this.loggedStreamContent = logMerged.content;
 						}
 					}
@@ -993,10 +1004,18 @@ export class OriginOSAgent {
 						this.loggedStreamContent = merged.content;
 					}
 				}
-				// 打印 tool call 相关事件
-				if (eventType === "toolcall_start" || eventType === "toolcall_end" || eventType === "toolcall_delta") {
+				if (eventType === "toolcall_delta") {
+					const delta = update.assistantMessageEvent?.delta;
+					this.toolCallDeltaCount += 1;
+					this.toolCallDeltaChars += typeof delta === "string"
+						? delta.length
+						: JSON.stringify(delta ?? "").length;
+				} else if (eventType === "toolcall_start" || eventType === "toolcall_end") {
 					const ae = update.assistantMessageEvent || {};
-					logInfo(`\n[LLM Event] message_update — ${eventType}`);
+					const deltaSummary = eventType === "toolcall_end"
+						? `, deltas=${this.toolCallDeltaCount}, deltaChars=${this.toolCallDeltaChars}`
+						: "";
+					logInfo(`\n[LLM Event] message_update — ${eventType}${deltaSummary}`);
 					if (ae.toolCall) {
 						const tc = ae.toolCall;
 						logInfo(`  → name=${tc.name}, id=${tc.id}, args=${JSON.stringify(tc.arguments).slice(0, 200)}`);
@@ -1008,16 +1027,22 @@ export class OriginOSAgent {
 			case "message_end": {
 				const msg = (event as any).message;
 				const role = msg?.role || "unknown";
-				if (role === "assistant" && this.assistantLoopGuardTriggered && Array.isArray(msg?.content)) {
-					const textBlock = msg.content.find((block: any) => block?.type === "text" && block.text != null);
-					if (textBlock) {
-						textBlock.text = this.assistantStreamContent;
-					}
-				}
 				const hasToolCalls = msg?.content?.filter?.((c: any) => c.type === "toolCall")?.length ?? 0;
 				const textContent = Array.isArray(msg?.content)
 					? msg.content.filter((b: any) => b.type === "text" && b.text != null).map((b: any) => b.text).join("")
 					: "";
+				if (role === "assistant" && textContent.length > 0) {
+					const completedHash = hashText(textContent);
+					this.assistantLoopGuardTriggered =
+						this.previousTaskAssistantTextHash.length > 0 &&
+						completedHash === this.previousTaskAssistantTextHash;
+					this.previousTaskAssistantTextHash = completedHash;
+					if (this.assistantLoopGuardTriggered) {
+						console.warn(
+							`[LLM LoopGuard] repeated completed assistant response — turnSeq=${this.activeTurnSequence}, assistantMsgSeq=${this.activeAssistantMessageSequence}, textHash=${completedHash}`,
+						);
+					}
+				}
 				const stopReason = msg?.stopReason || "";
 				const messageEndLog =
 					`\n[LLM Event] message_end — role=${role}, turnSeq=${this.activeTurnSequence}${role === "assistant" ? `, assistantMsgSeq=${this.activeAssistantMessageSequence}` : ""}, stopReason=${stopReason}, toolCalls=${hasToolCalls}, textLen=${textContent.length}, textHash=${hashText(textContent)}, loopGuard=${role === "assistant" ? this.assistantLoopGuardTriggered : false}, preview="${previewText(textContent)}"`;
