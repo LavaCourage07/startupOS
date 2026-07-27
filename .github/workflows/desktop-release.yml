@@ -227,6 +227,8 @@ jobs:
   publish:
     name: Publish Qiniu
     runs-on: macos-14
+    permissions:
+      contents: write
     needs:
       - windows
       - macos-arm64
@@ -300,3 +302,36 @@ jobs:
           ORIGINOS_RELEASE_API_URL: ${{ secrets.ORIGINOS_RELEASE_API_URL }}
           ORIGINOS_RELEASE_API_KEY: ${{ secrets.ORIGINOS_RELEASE_API_KEY }}
         run: pnpm publish:qiniu
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p "require('./packages/desktop/package.json').version")"
+          CHANGELOG="docs/changes/releases/v${VERSION}/changelog.md"
+          ASSETS=(
+            "release/OriginOS CE-${VERSION}-x64.exe"
+            "release/OriginOS CE-${VERSION}-arm64.dmg"
+            "release/OriginOS CE-${VERSION}-x64.dmg"
+          )
+
+          test -f "$CHANGELOG"
+          for asset in "${ASSETS[@]}"; do
+            test -s "$asset"
+          done
+
+          shasum -a 256 "${ASSETS[@]}" > release/SHA256SUMS.txt
+          ASSETS+=("release/SHA256SUMS.txt")
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "OriginOS CE v${VERSION}" \
+              --notes-file "$CHANGELOG"
+            gh release upload "$GITHUB_REF_NAME" "${ASSETS[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" \
+              --verify-tag \
+              --title "OriginOS CE v${VERSION}" \
+              --notes-file "$CHANGELOG"
+          fi
