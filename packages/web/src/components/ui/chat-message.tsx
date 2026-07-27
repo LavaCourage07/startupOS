@@ -7,6 +7,7 @@ import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/github-dark.css';
 import { cn } from '@originos/core/lib/utils';
 import { sanitizeAgentDisplayContent } from '@originos/core/lib/integrations/pi-agent/display-content';
+import { normalizeMarkdownTables } from '@/services/normalize-markdown-tables';
 import { MermaidDiagram } from './MermaidDiagram';
 
 // Register YAML language for syntax highlighting
@@ -207,6 +208,7 @@ interface MarkdownContentProps {
 
 export function MarkdownContent({ content, isStreaming }: MarkdownContentProps) {
   const safeContent = sanitizeAgentDisplayContent(content);
+  const normalizedContent = normalizeMarkdownTables(safeContent);
   return (
     <div className="min-w-0 overflow-hidden break-words text-inherit">
       <ReactMarkdown
@@ -318,7 +320,7 @@ export function MarkdownContent({ content, isStreaming }: MarkdownContentProps) 
           },
         }}
       >
-        {safeContent}
+        {normalizedContent}
       </ReactMarkdown>
       {isStreaming && (
         <span className="inline-block w-2 h-4 ml-1 bg-current animate-pulse opacity-70" />

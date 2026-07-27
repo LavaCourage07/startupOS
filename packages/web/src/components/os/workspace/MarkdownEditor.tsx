@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { FileContent } from '@originos/core/types';
+import { normalizeMarkdownTables } from '@/services/normalize-markdown-tables';
 
 interface MarkdownEditorProps {
   fileContent: FileContent | null;
@@ -193,7 +194,9 @@ export function MarkdownEditor({ fileContent, onSave }: MarkdownEditorProps) {
         {showPreview && (
           <div className="w-1/2 overflow-auto p-4 bg-gray-50 dark:bg-gray-900">
             <article className="prose prose-sm max-w-none text-gray-900 dark:text-white [&_h1]:text-gray-900 [&_h1]:dark:text-white [&_h2]:text-gray-900 [&_h2]:dark:text-white [&_h3]:text-gray-900 [&_h3]:dark:text-white [&_p]:text-gray-900 [&_p]:dark:text-white [&_li]:text-gray-900 [&_li]:dark:text-white [&_a]:text-blue-500 [&_a]:dark:text-blue-400">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {normalizeMarkdownTables(content)}
+              </ReactMarkdown>
             </article>
           </div>
         )}
