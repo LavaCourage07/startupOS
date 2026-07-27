@@ -7,6 +7,7 @@ const dotenv = require('dotenv');
 const qiniu = require('qiniu');
 const { execFileSync } = require('node:child_process');
 const { buildReleaseNotes } = require('./release-notes');
+const { planQiniuRetention } = require('./qiniu-retention');
 
 const repoRoot = path.resolve(__dirname, '../../..');
 const desktopRoot = path.resolve(__dirname, '..');
@@ -138,6 +139,99 @@ function statObject(bucketManager, bucket, key) {
       reject(new Error(`Qiniu stat failed: ${key} status=${info.statusCode} body=${JSON.stringify(body)}`));
     });
   });
+}
+
+function listObjects(bucketManager, bucket, prefix) {
+  return new Promise((resolve, reject) => {
+    const items = [];
+    let marker;
+
+    const nextPage = () => {
+      bucketManager.listPrefix(bucket, {
+        prefix: prefix ? `${prefix}/` : '',
+        marker,
+        limit: 1000,
+      }, (error, body, info) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        if (info.statusCode !== 200) {
+          reject(new Error(
+            `Qiniu list failed: prefix=${prefix} status=${info.statusCode} body=${JSON.stringify(body)}`,
+          ));
+          return;
+        }
+
+        items.push(...(Array.isArray(body.items) ? body.items : []));
+        if (!body.marker) {
+          resolve(items);
+          return;
+        }
+        if (body.marker === marker) {
+          reject(new Error(`Qiniu list returned a repeated marker for prefix: ${prefix}`));
+          return;
+        }
+        marker = body.marker;
+        nextPage();
+      });
+    };
+
+    nextPage();
+  });
+}
+
+function deleteObject(bucketManager, bucket, key) {
+  return new Promise((resolve, reject) => {
+    bucketManager.delete(bucket, key, (error, body, info) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      if (info.statusCode === 200 || info.statusCode === 612) {
+        resolve();
+        return;
+      }
+      reject(new Error(
+        `Qiniu delete failed: key=${key} status=${info.statusCode} body=${JSON.stringify(body)}`,
+      ));
+    });
+  });
+}
+
+async function cleanupOldReleases(bucketManager, bucket, prefix) {
+  const retainCount = Number.parseInt(process.env.QINIU_RETAIN_VERSIONS || '10', 10);
+  const dryRun = process.env.QINIU_RETENTION_DRY_RUN === '1';
+  const items = await listObjects(bucketManager, bucket, prefix);
+  const plan = planQiniuRetention(items, { prefix, retainCount });
+
+  console.log('[publish-qiniu-updates] retention plan', {
+    retainCount,
+    dryRun,
+    recognizedArtifactCount: plan.recognizedArtifactCount,
+    retainedVersions: plan.retainedVersions,
+    deletedVersions: plan.deletedVersions,
+    deletedObjectCount: plan.deletedKeys.length,
+  });
+
+  if (dryRun || plan.deletedKeys.length === 0) {
+    return plan;
+  }
+
+  const concurrency = 10;
+  for (let index = 0; index < plan.deletedKeys.length; index += concurrency) {
+    const keys = plan.deletedKeys.slice(index, index + concurrency);
+    await Promise.all(keys.map(async (key) => {
+      console.log(`[publish-qiniu-updates] deleting old release artifact ${key}`);
+      await deleteObject(bucketManager, bucket, key);
+    }));
+  }
+
+  console.log('[publish-qiniu-updates] retention cleanup completed', {
+    deletedVersions: plan.deletedVersions,
+    deletedObjectCount: plan.deletedKeys.length,
+  });
+  return plan;
 }
 
 function uploadFile({ mac, config, bucket, key, filePath, overwrite, cacheControl }) {
@@ -349,12 +443,18 @@ async function main() {
   const force = process.env.QINIU_FORCE === '1';
   const resumeExisting = process.env.QINIU_RESUME_EXISTING === '1';
   const skipLocalPackageVerify = process.env.QINIU_SKIP_LOCAL_PACKAGE_VERIFY === '1';
+  const retentionOnly = process.argv.includes('--retention-only');
 
   const config = new qiniu.conf.Config();
   config.regionsProvider = qiniu.httpc.Region.fromRegionId(region);
   const mac = new qiniu.auth.digest.Mac(accessKey, secretKey);
   const bucketManager = new qiniu.rs.BucketManager(mac, config);
   const cdnManager = new qiniu.cdn.CdnManager(mac);
+
+  if (retentionOnly) {
+    await cleanupOldReleases(bucketManager, bucket, prefix);
+    return;
+  }
 
   // 检测有哪些平台的构建产物
   const hasMacArm64 = hasReleasePackage(`OriginOS CE-${version}-arm64.dmg`);
@@ -456,6 +556,10 @@ async function main() {
 
   // Notify the official website release service only after package URLs are reachable.
   await notifyReleaseService(version, baseUrl, prefix, { skipCdnVerify });
+
+  if (!metadataOnly && process.env.QINIU_SKIP_RETENTION_CLEANUP !== '1') {
+    await cleanupOldReleases(bucketManager, bucket, prefix);
+  }
 
   console.log('[publish-qiniu-updates] published successfully');
 }

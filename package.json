@@ -50,6 +50,7 @@
     "desktop:dist:qiniu": "pnpm --filter @originos/desktop dist:qiniu",
     "desktop:release:qiniu": "pnpm --filter @originos/desktop release:qiniu",
     "desktop:publish:qiniu": "pnpm --filter @originos/desktop publish:qiniu",
+    "desktop:cleanup:qiniu": "pnpm --filter @originos/desktop cleanup:qiniu",
     "agents:check": "node scripts/check-agents-compliance.js",
     "build:check-root-artifacts": "node scripts/check-root-build-artifacts.js",
     "docs:init-story": "node scripts/init-story-spec.js",

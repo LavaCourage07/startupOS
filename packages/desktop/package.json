@@ -21,6 +21,7 @@
     "verify:workspace-upload": "node scripts/verify-workspace-upload-ipc.js",
     "bump-version": "node scripts/bump-release-version.js",
     "publish:qiniu": "node scripts/publish-qiniu-updates.js",
+    "cleanup:qiniu": "node scripts/publish-qiniu-updates.js --retention-only",
     "release:qiniu": "node scripts/release-qiniu.js",
     "dist:qiniu": "pnpm release:qiniu",
     "dist:win": "ORIGINOS_WINDOWS_SHORT_ZIP=1 pnpm build:app && electron-builder --config electron-builder.yml --win --publish never",
