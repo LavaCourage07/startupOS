@@ -31,7 +31,7 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 ### Pull Requests
 
-1. Fork the repo and create your branch from `main`
+1. Fork the repo and create your branch from `dev`
 2. If you've added code that should be tested, add tests
 3. If you've changed APIs, update the documentation
 4. Ensure the test suite passes
@@ -42,8 +42,9 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 ### Prerequisites
 
-- Node.js 22.12+ (required by Electron 42)
-- pnpm 9.x+ (see [CLAUDE.md](CLAUDE.md) for monorepo conventions)
+- Node.js 22.19+ (required by the current Pi Agent and Electron toolchain)
+- pnpm 9.x+
+- Read [AGENTS.md](AGENTS.md) before implementation
 
 ### Getting Started
 
@@ -64,9 +65,10 @@ pnpm desktop:dev
 
 ### Project Structure
 
-Please refer to [CLAUDE.md](CLAUDE.md) for the complete architecture specification and directory structure.
+Please refer to [AGENTS.md](AGENTS.md) for the mandatory architecture specification and directory structure.
 
 Key directories:
+
 - `packages/web/` - Next.js Web UI
 - `packages/desktop/` - Electron main/preload
 - `packages/core/` - Shared business logic, Pi Agent, collaboration runtime
@@ -85,7 +87,7 @@ Key directories:
 
 - Use functional components with hooks
 - Prefer composition over inheritance
-- Use Zustand for state management (see CLAUDE.md for details)
+- Use Zustand for state management (see AGENTS.md for details)
 
 ### Styling
 
@@ -108,13 +110,14 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
 
 Examples:
+
 - `feat(web): add skill dialog component`
 - `fix(core): resolve zod dependency issue`
 - `docs: update CONTRIBUTING.md`
 
 ## Architecture Constraints
 
-**Important:** All contributions must follow the architecture rules defined in [CLAUDE.md](CLAUDE.md), including:
+**Important:** All contributions must follow the architecture rules defined in [AGENTS.md](AGENTS.md), including:
 
 - Monorepo package dependencies (unidirectional: web/desktop → core)
 - Layer-based module dependencies (app → components → services → features → storage)
@@ -127,6 +130,19 @@ Examples:
 - Type checking: `pnpm type-check`
 - Linting: `pnpm lint`
 - E2E tests: See `scripts/test-*.mjs` and `scripts/test-*.sh`
+
+Changes associated with an Epic/Story must include the acceptance and regression
+cases defined in `docs/specs/`. Desktop packaging changes must also run the
+relevant verification script under `packages/desktop/scripts/`.
+
+## Pull Request Checklist
+
+- Keep the change focused on one problem.
+- Add or update tests for success, failure, and boundary cases.
+- Update user-facing documentation when behavior changes.
+- Confirm that generated build output and local runtime data are not committed.
+- Include the commands used for verification and any remaining manual checks.
+- Target the `dev` branch.
 
 ## Questions?
 
