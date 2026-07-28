@@ -623,6 +623,18 @@ export class AgentSessionService {
               return;
             }
             batcher.flush();
+            if (eventType === 'assistant_message' || eventType === 'done') {
+              const content = data && typeof data === 'object'
+                ? (data as { content?: unknown }).content
+                : undefined;
+              console.info('[AgentStream] main-send', {
+                sessionId: request.sessionId,
+                streamId: request.streamId,
+                eventType,
+                contentLength: typeof content === 'string' ? content.length : 0,
+                accumulatedLength: assistantContent.length,
+              });
+            }
             sendPayload({
               type: eventType,
               sessionId: request.sessionId,
@@ -686,6 +698,14 @@ export class AgentSessionService {
                 } | undefined;
                 if (msg?.role === 'assistant') {
                   const extracted = extractTextContent(msg.content);
+                  console.info('[AgentStream] message-end', {
+                    sessionId: request.sessionId,
+                    streamId: request.streamId,
+                    extractedLength: extracted.length,
+                    accumulatedLength: assistantContent.length,
+                    assistantMessageSent,
+                    completionFailure: msg.completionFailure === true,
+                  });
                   if (extracted) {
                     const transition = applyAssistantMessageEnd(
                       { content: assistantContent, sent: assistantMessageSent },
@@ -757,7 +777,7 @@ export class AgentSessionService {
                 content: assistantContent,
               }, request.projectId);
             }
-            sendToRenderer('done', {});
+            sendToRenderer('done', { content: assistantContent });
             batcher.dispose();
           }).catch(async (err: unknown) => {
             unsubscribe();
@@ -769,7 +789,7 @@ export class AgentSessionService {
             sendToRenderer('assistant_message', { content: visibleError, isStreaming: false });
             sendToRenderer('error', { message: visibleError });
             sendToRenderer('agent_error', { message: visibleError });
-            sendToRenderer('done', {});
+            sendToRenderer('done', { content: visibleError });
             batcher.dispose();
           }).finally(() => {
             processHealthMonitor.clearAgentActivity(request.sessionId);

@@ -54,6 +54,16 @@ function stripToolCodeBlocks(content: string): string {
 }
 
 function sendToAllWindows(projectId: string, type: string, data: unknown): void {
+  if (type === 'assistant_message' || type === 'done') {
+    const content = data && typeof data === 'object'
+      ? (data as { content?: unknown }).content
+      : undefined;
+    console.info('[AgentStream] project-main-send', {
+      projectId,
+      eventType: type,
+      contentLength: typeof content === 'string' ? content.length : 0,
+    });
+  }
   const payload = JSON.stringify({ projectId, type, data });
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) {
@@ -259,7 +269,7 @@ export class AgentProjectService {
                 sendToAllWindows(request.projectId, 'assistant_message', { content: stripped, isStreaming: false });
               }
             }
-            sendToAllWindows(request.projectId, 'done', null);
+            sendToAllWindows(request.projectId, 'done', { content: assistantContent });
           }).catch((err: unknown) => {
             unsubscribe();
             sendToAllWindows(request.projectId, 'error', {

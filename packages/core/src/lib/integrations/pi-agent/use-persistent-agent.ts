@@ -83,13 +83,20 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
               : message
           ));
         },
+        onDebug: (debugEvent) => {
+          console.info('[StreamRender] persistent-scheduler', {
+            projectId,
+            assistantId,
+            ...debugEvent,
+          });
+        },
       }),
     };
     streamSchedulersRef.current.set(assistantId, state);
     return state;
-  }, []);
+  }, [projectId]);
 
-  const finalizeStream = useCallback((assistantId: string, finalContent?: string) => {
+  const finalizeStream = useCallback(async (assistantId: string, finalContent?: string) => {
     const existing = streamSchedulersRef.current.get(assistantId);
     if (!existing && !finalContent) {
       return;
@@ -98,7 +105,7 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
     if (finalContent) {
       state.content = reconcileFinalStreamContent(state.content, finalContent);
     }
-    state.scheduler.flush(state.content, false);
+    await state.scheduler.finish(state.content);
     state.scheduler.cancel();
     streamSchedulersRef.current.delete(assistantId);
   }, [getStreamState]);
@@ -174,7 +181,17 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
       state.scheduler.schedule(state.content);
     } else if (event.type === 'assistant_message') {
       const data = event.data as { content: string };
-      finalizeStream(assistantId, data.content);
+      const state = getStreamState(assistantId);
+      state.content = reconcileFinalStreamContent(state.content, data.content);
+      void state.scheduler.finish(state.content);
+    } else if (event.type === 'done') {
+      const data = event.data as { content?: string } | null;
+      if (data?.content) {
+        const state = streamSchedulersRef.current.get(assistantId);
+        if (state) {
+          state.content = reconcileFinalStreamContent(state.content, data.content);
+        }
+      }
     } else if (event.type === 'tool_start') {
       const data = event.data as { toolCallId?: string; toolName: string; args?: unknown };
       setToolExecutions(prev => [...prev, {
@@ -238,14 +255,15 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
       }, {
         onEvent: (event) => processStreamEvent(event, assistantId),
         onDone: () => {
-          finalizeStream(assistantId);
-          setMessages(prev => prev.map(m =>
-            m.id === assistantId && m.isStreaming
-              ? { ...m, isStreaming: false }
-              : m
-          ));
-          setIsThinking(false);
-          abortRef.current = null;
+          void finalizeStream(assistantId).then(() => {
+            setMessages(prev => prev.map(m =>
+              m.id === assistantId && m.isStreaming
+                ? { ...m, isStreaming: false }
+                : m
+            ));
+            setIsThinking(false);
+            abortRef.current = null;
+          });
         },
         onError: (error) => {
           cancelStream(assistantId);
@@ -311,14 +329,15 @@ export function usePersistentAgent(projectId: string, llmConfig?: LlmConfig): Us
       }, {
         onEvent: (event) => processStreamEvent(event, assistantId),
         onDone: () => {
-          finalizeStream(assistantId);
-          setMessages(prev => prev.map(m =>
-            m.id === assistantId && m.isStreaming
-              ? { ...m, isStreaming: false }
-              : m
-          ));
-          setIsThinking(false);
-          abortRef.current = null;
+          void finalizeStream(assistantId).then(() => {
+            setMessages(prev => prev.map(m =>
+              m.id === assistantId && m.isStreaming
+                ? { ...m, isStreaming: false }
+                : m
+            ));
+            setIsThinking(false);
+            abortRef.current = null;
+          });
         },
         onError: (error) => {
           cancelStream(assistantId);
