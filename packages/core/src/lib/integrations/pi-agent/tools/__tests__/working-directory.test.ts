@@ -378,6 +378,54 @@ describe('End-to-end working directory routing', () => {
 		expect(existsSync(join(skillWorkingDirectory, 'data', 'agents', 'product-manager', 'Agent.md'))).toBe(false);
 	});
 
+	it('file tools route runtime agents paths to DATA_ROOT when called from a skill workspace', async () => {
+		const sessionId = 'session-runtime-agent-routing';
+		const dataRoot = join(testDir, 'data');
+		const skillWorkingDirectory = join(dataRoot, 'skills', 'role-agent-creator');
+		mkdirSync(skillWorkingDirectory, { recursive: true });
+		vi.stubEnv('DATA_ROOT', dataRoot);
+
+		setToolContext(sessionId, { sessionId, workingDirectory: skillWorkingDirectory });
+		getToolContextManager().setDefaultContext({ sessionId, workingDirectory: skillWorkingDirectory });
+
+		const writeFileTool = fileTools.find(tool => tool.name === 'write_file');
+		expect(writeFileTool).toBeDefined();
+
+		const result = await writeFileTool!.execute('call-write-runtime-agent', {
+			filePath: 'agents/atlas-architect/Agent.md',
+			content: '# Atlas Architect\n',
+		});
+
+		expect((result.details as { success?: boolean }).success).toBe(true);
+		expect((result.details as { filePath?: string }).filePath).toBe('data/agents/atlas-architect/Agent.md');
+		expect(readFileSync(join(dataRoot, 'agents', 'atlas-architect', 'Agent.md'), 'utf-8')).toBe('# Atlas Architect\n');
+		expect(existsSync(join(skillWorkingDirectory, 'agents', 'atlas-architect', 'Agent.md'))).toBe(false);
+	});
+
+	it('file tools route runtime skills paths to DATA_ROOT when called from a skill workspace', async () => {
+		const sessionId = 'session-runtime-skill-routing';
+		const dataRoot = join(testDir, 'data');
+		const skillWorkingDirectory = join(dataRoot, 'skills', 'skill-creator-app');
+		mkdirSync(skillWorkingDirectory, { recursive: true });
+		vi.stubEnv('DATA_ROOT', dataRoot);
+
+		setToolContext(sessionId, { sessionId, workingDirectory: skillWorkingDirectory });
+		getToolContextManager().setDefaultContext({ sessionId, workingDirectory: skillWorkingDirectory });
+
+		const writeFileTool = fileTools.find(tool => tool.name === 'write_file');
+		expect(writeFileTool).toBeDefined();
+
+		const result = await writeFileTool!.execute('call-write-runtime-skill', {
+			filePath: 'skills/new-user-skill/SKILL.md',
+			content: '# New User Skill\n',
+		});
+
+		expect((result.details as { success?: boolean }).success).toBe(true);
+		expect((result.details as { filePath?: string }).filePath).toBe('data/skills/new-user-skill/SKILL.md');
+		expect(readFileSync(join(dataRoot, 'skills', 'new-user-skill', 'SKILL.md'), 'utf-8')).toBe('# New User Skill\n');
+		expect(existsSync(join(skillWorkingDirectory, 'skills', 'new-user-skill', 'SKILL.md'))).toBe(false);
+	});
+
 	it('file tools normalize Windows-style separators in returned paths', async () => {
 		const sessionId = 'session-windows-separators';
 		const dataRoot = join(testDir, 'data');

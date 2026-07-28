@@ -96,6 +96,27 @@ const DEFAULT_DOCK_APPS: DockApp[] = [
   },
 ];
 
+function getDockAppIdentity(app: DockApp): string {
+  return app.skillName ? `skill:${app.skillName}` : `id:${app.id}`;
+}
+
+export function dedupeDockApps(apps: DockApp[]): DockApp[] {
+  const seenIds = new Set<string>();
+  const seenSkillNames = new Set<string>();
+  const deduped: DockApp[] = [];
+
+  for (const app of apps) {
+    if (seenIds.has(app.id)) continue;
+    if (app.skillName && seenSkillNames.has(app.skillName)) continue;
+
+    seenIds.add(app.id);
+    if (app.skillName) seenSkillNames.add(app.skillName);
+    deduped.push({ ...app, index: deduped.length });
+  }
+
+  return deduped;
+}
+
 // Dock Store
 const useDockStore = create<DockState>()(
   persist(
@@ -116,12 +137,19 @@ const useDockStore = create<DockState>()(
       },
 
       // Actions
-      setApps: (apps) => set({ apps }),
+      setApps: (apps) => set({ apps: dedupeDockApps(apps) }),
 
       addApp: (app) =>
-        set((state) => ({
-          apps: [...state.apps, { ...app, index: state.apps.length }],
-        })),
+        set((state) => {
+          const appKey = getDockAppIdentity(app);
+          const exists = state.apps.some((existing) =>
+            existing.id === app.id || getDockAppIdentity(existing) === appKey
+          );
+          if (exists) return state;
+          return {
+            apps: dedupeDockApps([...state.apps, { ...app, index: state.apps.length }]),
+          };
+        }),
 
       removeApp: (appId) =>
         set((state) => ({
@@ -207,24 +235,17 @@ const useDockStore = create<DockState>()(
       merge: (persistedState, currentState) => {
         const persisted = persistedState as Partial<DockState>;
 
-        // Deduplicate persisted apps by skillName (keep first occurrence)
-        const seenSkillNames = new Set<string>();
-        const dedupedApps = (persisted.apps ?? []).filter((a) => {
-          if (!a.skillName) return true;
-          if (seenSkillNames.has(a.skillName)) return false;
-          seenSkillNames.add(a.skillName);
-          return true;
-        });
-
+        const dedupedApps = dedupeDockApps(persisted.apps ?? []);
         const persistedIds = new Set(dedupedApps.map((a) => a.id));
+        const persistedKeys = new Set(dedupedApps.map(getDockAppIdentity));
         const missingDefaults = DEFAULT_DOCK_APPS.filter(
-          (a) => a.isPinned && !persistedIds.has(a.id) && !(a.skillName && seenSkillNames.has(a.skillName))
+          (a) => a.isPinned && !persistedIds.has(a.id) && !persistedKeys.has(getDockAppIdentity(a))
         );
         return {
           ...currentState,
           ...persisted,
           dockSide: isDockSide(persisted.dockSide) ? persisted.dockSide : currentState.dockSide,
-          apps: [...dedupedApps, ...missingDefaults],
+          apps: dedupeDockApps([...dedupedApps, ...missingDefaults]),
         };
       },
     }

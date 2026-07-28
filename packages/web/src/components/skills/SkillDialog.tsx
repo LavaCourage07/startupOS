@@ -9,6 +9,7 @@ import { ChatMessageList } from '@/components/ui/chat';
 import { v4 as uuidv4 } from 'uuid';
 import { AppWindowManager } from '@/services/AppWindowManager';
 import { WorkspaceWindow } from '@/components/os/workspace';
+import { EntryExportButton } from '@/components/os/EntryExportButton';
 import { useFileUpload, type UploadedFile } from '@/lib/hooks/use-file-upload';
 import { ChatInputBar } from '@/components/ui/chat-input-bar';
 import {
@@ -18,6 +19,7 @@ import {
   runSkillEvolution,
 } from '@originos/core/lib/integrations/electron/services/skill';
 import { getAgentContent } from '@originos/core/lib/integrations/electron/services/agent-session';
+import { isSkillExportAllowed } from './skill-export-policy';
 
 export interface SkillMessage {
   role: 'user' | 'assistant' | 'system';
@@ -34,6 +36,7 @@ export interface SkillDefinition {
   disableModelInvocation?: boolean;
   filePath?: string;
   baseDir?: string;
+  systemManaged?: boolean;
 }
 
 interface SkillDialogProps {
@@ -54,6 +57,7 @@ async function loadSkillContent(skillName: string): Promise<{
   baseDir?: string;
   workingDir?: string;
   outputDir?: string;
+  systemManaged: boolean;
 }> {
   try {
     const data = await getAvailableSkillContent({ name: skillName });
@@ -63,6 +67,7 @@ async function loadSkillContent(skillName: string): Promise<{
         baseDir: data.data.baseDir,
         workingDir: data.data.workingDir,
         outputDir: data.data.outputDir,
+        systemManaged: data.data.systemManaged,
       };
     }
   } catch (error) {
@@ -78,13 +83,14 @@ async function loadSkillContent(skillName: string): Promise<{
         baseDir: data.data.baseDir,
         workingDir: data.data.workingDir,
         outputDir: data.data.outputDir,
+        systemManaged: true,
       };
     }
   } catch (error) {
     console.error(`[loadSkillContent] Failed to load agent content for ${skillName}:`, error);
   }
 
-  return { content: '' };
+  return { content: '', systemManaged: true };
 }
 
 /**
@@ -105,9 +111,9 @@ function buildSkillSystemPrompt(skillName: string, skillContent: string, skillDi
   if (outputDir && outputDir !== workDir) {
     lines.push(`Output directory for artifacts: ${outputDir}`);
     lines.push('');
-    lines.push('Use ${OUTPUT_DIR} only when you explicitly want to create exported artifacts under the output directory.');
-    lines.push('File tools are still relative to the working directory above unless you intentionally target an output subdirectory such as `solutions/...` or `output/...`.');
-    lines.push('Do NOT assume that file tools are implicitly rooted at ${OUTPUT_DIR}. Do NOT use absolute paths.');
+    lines.push('Use `${OUTPUT_DIR}` in shell commands only when you need the native absolute artifact directory.');
+    lines.push('When calling file tools, do NOT pass absolute paths. Use runtime data-root paths instead: `data/agents/{agent-id}/...` for Agents and `data/skills/{skill-code}/...` for Skills.');
+    lines.push('Legacy short paths `agents/...` and `skills/...` are also mapped to the runtime data root when this skill runs from `data/skills/{skill}`.');
     lines.push('');
   } else if (outputDir && outputDir === workDir) {
     // 兜底：outputDir 与 workDir 相同时仍注入路径行，确保 Agent 即使
@@ -226,8 +232,15 @@ export function SkillDialog({
   const [currentSkill, setCurrentSkill] = useState<string | undefined>(initialSkillName);
   const [showSkillList, setShowSkillList] = useState(false);
   const [skills, setSkills] = useState<SkillDefinition[]>([]);
-  const skillContentCacheRef = useRef<Map<string, { content: string; baseDir?: string; workingDir?: string; outputDir?: string }>>(new Map());
+  const skillContentCacheRef = useRef<Map<string, {
+    content: string;
+    baseDir?: string;
+    workingDir?: string;
+    outputDir?: string;
+    systemManaged: boolean;
+  }>>(new Map());
   const currentSkillDirRef = useRef<string | undefined>(undefined);
+  const [currentSkillSystemManaged, setCurrentSkillSystemManaged] = useState<boolean | null>(null);
   const [isLoadingSkillsList, setIsLoadingSkillsList] = useState(false);
   const [answeredQuestions, setAnsweredQuestions] = useState<Set<number | string>>(new Set());
   const hasAutoStartedRef = useRef(false); // 防止重复发送初始消息
@@ -288,6 +301,7 @@ export function SkillDialog({
           disableModelInvocation: s.disableModelInvocation,
           filePath: s.filePath,
           baseDir: s.baseDir,
+          systemManaged: s.systemManaged,
         }));
         setSkills(skillsList);
       }
@@ -366,20 +380,28 @@ export function SkillDialog({
       }
 
       // 尝试获取技能内容：优先使用外部传入的内容，否则从 ref 缓存获取
-      let skillData = externalSkillContent
-        ? { content: externalSkillContent, baseDir: undefined, workingDir: undefined, outputDir: undefined }
-        : skillContentCacheRef.current.get(currentSkill);
+      let skillData = skillContentCacheRef.current.get(currentSkill);
 
-      if (!skillData && !externalSkillContent) {
+      if (!skillData) {
         try {
           skillData = await loadSkillContent(currentSkill);
+          if (externalSkillContent) {
+            skillData = { ...skillData, content: externalSkillContent };
+          }
           skillContentCacheRef.current.set(currentSkill, skillData);
         } catch (error) {
           console.error(`[SkillDialog] Failed to load skill content for: ${currentSkill}`, error);
-          skillData = { content: '', baseDir: undefined, workingDir: undefined, outputDir: undefined };
+          skillData = {
+            content: externalSkillContent ?? '',
+            baseDir: undefined,
+            workingDir: undefined,
+            outputDir: undefined,
+            systemManaged: true,
+          };
           skillContentCacheRef.current.set(currentSkill, skillData);
         }
       }
+      setCurrentSkillSystemManaged(skillData.systemManaged);
 
       const content = skillData?.content ?? '';
       // skillDir：技能源目录（只读参考，用于 CLAUDE_SKILL_DIR）
@@ -514,6 +536,7 @@ export function SkillDialog({
   }, [handleSendMessage]);
 
   const handleSkillSelect = (skillName: string) => {
+    setCurrentSkillSystemManaged(null);
     setCurrentSkill(skillName);
     setShowSkillList(false);
     onSkillChange?.(skillName);
@@ -746,6 +769,9 @@ export function SkillDialog({
         </div>
 
         <div className="native-no-drag flex items-center gap-2">
+          {currentSkill && isSkillExportAllowed(currentSkillSystemManaged) && (
+            <EntryExportButton entryType="skill" entryId={currentSkill} />
+          )}
           <button
             onClick={handleOpenDirectory}
             className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"

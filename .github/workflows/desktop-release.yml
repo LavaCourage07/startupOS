@@ -1,0 +1,337 @@
+name: Desktop Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Upload artifacts to Qiniu and update the website release metadata
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      resume_existing:
+        description: Skip immutable artifacts that already exist on Qiniu
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+  push:
+    tags:
+      - "desktop-v*"
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24"
+  PNPM_VERSION: "9.15.9"
+
+jobs:
+  windows:
+    name: Build Windows
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify Windows workspace upload paths
+        run: pnpm --filter @originos/core exec vitest run src/lib/integrations/electron/__tests__/workspace-paths.test.ts
+
+      - run: pnpm --filter @originos/desktop build:app
+        env:
+          ORIGINOS_WINDOWS_SHORT_ZIP: "1"
+
+      - run: pnpm --filter @originos/desktop verify:workspace-upload
+
+      - name: Build Windows packages
+        working-directory: packages/desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: pnpm exec electron-builder --config electron-builder.yml --win --publish never
+
+      - run: pnpm --filter @originos/desktop generate:update-metadata
+
+      - run: pnpm --filter @originos/desktop verify:win-package
+
+      - run: pnpm --filter @originos/desktop verify:update-metadata
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          if-no-files-found: error
+          path: |
+            release/OriginOS CE-*-x64.exe
+            release/OriginOS CE-*-x64.zip
+            release/OriginOS CE-*-x64.exe.blockmap
+            release/OriginOS CE-*-x64.zip.blockmap
+            release/latest-win.yml
+            release/stable-win.yml
+            release/latest.yml
+            release/stable.yml
+
+  macos-arm64:
+    name: Build macOS arm64
+    runs-on: macos-14
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify macOS signing secrets
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          test -n "$MAC_CSC_LINK"
+          test -n "$MAC_CSC_KEY_PASSWORD"
+          test -n "$APPLE_API_KEY"
+          test -n "$APPLE_API_KEY_ID"
+          test -n "$APPLE_API_ISSUER"
+          APPLE_API_KEY_PATH="$(node packages/desktop/scripts/prepare-apple-api-key.js)"
+          echo "APPLE_API_KEY=$APPLE_API_KEY_PATH" >> "$GITHUB_ENV"
+          echo "APPLE_API_KEY_ID=$APPLE_API_KEY_ID" >> "$GITHUB_ENV"
+          echo "APPLE_API_ISSUER=$APPLE_API_ISSUER" >> "$GITHUB_ENV"
+
+      - name: Install rcodesign notarization fallback
+        run: |
+          if ! command -v rcodesign >/dev/null 2>&1; then
+            cargo install apple-codesign --version 0.29.0 --locked
+          fi
+
+      - name: Verify Apple notarization credentials
+        run: node packages/desktop/scripts/verify-apple-notary-credentials.js
+
+      - run: pnpm --filter @originos/desktop build:app
+
+      - name: Build macOS arm64 package
+        working-directory: packages/desktop
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+        run: node scripts/run-electron-builder-mac.js --config electron-builder.yml --mac --arm64 --publish never
+
+      - run: pnpm --filter @originos/desktop verify:mac-package
+
+      - run: pnpm --filter @originos/desktop verify:mac-signing
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-release
+          if-no-files-found: error
+          path: |
+            release/OriginOS CE-*-arm64.dmg
+            release/OriginOS CE-*-arm64.dmg.blockmap
+            release/OriginOS CE-*-arm64.zip
+            release/OriginOS CE-*-arm64.zip.blockmap
+
+  macos-x64:
+    name: Build macOS x64
+    runs-on: macos-15-intel
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Verify macOS signing secrets
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          test -n "$MAC_CSC_LINK"
+          test -n "$MAC_CSC_KEY_PASSWORD"
+          test -n "$APPLE_API_KEY"
+          test -n "$APPLE_API_KEY_ID"
+          test -n "$APPLE_API_ISSUER"
+          APPLE_API_KEY_PATH="$(node packages/desktop/scripts/prepare-apple-api-key.js)"
+          echo "APPLE_API_KEY=$APPLE_API_KEY_PATH" >> "$GITHUB_ENV"
+          echo "APPLE_API_KEY_ID=$APPLE_API_KEY_ID" >> "$GITHUB_ENV"
+          echo "APPLE_API_ISSUER=$APPLE_API_ISSUER" >> "$GITHUB_ENV"
+
+      - name: Install rcodesign notarization fallback
+        run: |
+          if ! command -v rcodesign >/dev/null 2>&1; then
+            cargo install apple-codesign --version 0.29.0 --locked
+          fi
+
+      - name: Verify Apple notarization credentials
+        run: node packages/desktop/scripts/verify-apple-notary-credentials.js
+
+      - run: pnpm --filter @originos/desktop build:app
+
+      - name: Build macOS x64 package
+        working-directory: packages/desktop
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+        run: node scripts/run-electron-builder-mac.js --config electron-builder.yml --mac --x64 --publish never
+
+      - run: pnpm --filter @originos/desktop verify:mac-package
+
+      - run: pnpm --filter @originos/desktop verify:mac-signing
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-x64-release
+          if-no-files-found: error
+          path: |
+            release/OriginOS CE-*-x64.dmg
+            release/OriginOS CE-*-x64.dmg.blockmap
+            release/OriginOS CE-*-x64.zip
+            release/OriginOS CE-*-x64.zip.blockmap
+
+  publish:
+    name: Publish Qiniu
+    runs-on: macos-14
+    permissions:
+      contents: write
+    needs:
+      - windows
+      - macos-arm64
+      - macos-x64
+    timeout-minutes: 60
+    if: github.event_name == 'push' || inputs.publish == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+          npm_config_onnxruntime_node_install: skip
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: release
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-arm64-release
+          path: release
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-x64-release
+          path: release
+
+      - run: pnpm --filter @originos/desktop generate:update-metadata
+
+      - run: pnpm --filter @originos/desktop verify:release-artifacts
+
+      - name: Verify publish secrets
+        env:
+          QINIU_AK: ${{ secrets.QINIU_AK }}
+          QINIU_AS: ${{ secrets.QINIU_AS }}
+          QINIU_BUCKET: ${{ secrets.QINIU_BUCKET }}
+          ORIGINOS_UPDATE_BASE_URL: ${{ secrets.ORIGINOS_UPDATE_BASE_URL }}
+          ORIGINOS_RELEASE_API_URL: ${{ secrets.ORIGINOS_RELEASE_API_URL }}
+          ORIGINOS_RELEASE_API_KEY: ${{ secrets.ORIGINOS_RELEASE_API_KEY }}
+        run: |
+          test -n "$QINIU_AK"
+          test -n "$QINIU_AS"
+          test -n "$QINIU_BUCKET"
+          test -n "$ORIGINOS_UPDATE_BASE_URL"
+          test -n "$ORIGINOS_RELEASE_API_URL"
+          test -n "$ORIGINOS_RELEASE_API_KEY"
+
+      - name: Publish to Qiniu and website
+        working-directory: packages/desktop
+        env:
+          QINIU_AK: ${{ secrets.QINIU_AK }}
+          QINIU_AS: ${{ secrets.QINIU_AS }}
+          QINIU_BUCKET: ${{ secrets.QINIU_BUCKET }}
+          QINIU_PREFIX: ${{ secrets.QINIU_PREFIX }}
+          QINIU_REGION: ${{ secrets.QINIU_REGION }}
+          QINIU_FORCE: "1"
+          QINIU_RESUME_EXISTING: ${{ inputs.resume_existing == 'true' && '1' || '0' }}
+          QINIU_SKIP_LOCAL_PACKAGE_VERIFY: "1"
+          ORIGINOS_UPDATE_BASE_URL: ${{ secrets.ORIGINOS_UPDATE_BASE_URL }}
+          ORIGINOS_RELEASE_API_URL: ${{ secrets.ORIGINOS_RELEASE_API_URL }}
+          ORIGINOS_RELEASE_API_KEY: ${{ secrets.ORIGINOS_RELEASE_API_KEY }}
+        run: pnpm publish:qiniu
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p "require('./packages/desktop/package.json').version")"
+          CHANGELOG="docs/changes/releases/v${VERSION}/changelog.md"
+          ASSETS=(
+            "release/OriginOS CE-${VERSION}-x64.exe"
+            "release/OriginOS CE-${VERSION}-arm64.dmg"
+            "release/OriginOS CE-${VERSION}-x64.dmg"
+          )
+
+          test -f "$CHANGELOG"
+          for asset in "${ASSETS[@]}"; do
+            test -s "$asset"
+          done
+
+          shasum -a 256 "${ASSETS[@]}" > release/SHA256SUMS.txt
+          ASSETS+=("release/SHA256SUMS.txt")
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "OriginOS CE v${VERSION}" \
+              --notes-file "$CHANGELOG"
+            gh release upload "$GITHUB_REF_NAME" "${ASSETS[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" \
+              --verify-tag \
+              --title "OriginOS CE v${VERSION}" \
+              --notes-file "$CHANGELOG"
+          fi

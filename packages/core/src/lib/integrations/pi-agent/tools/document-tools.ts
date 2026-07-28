@@ -6,7 +6,7 @@
 
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
-import type { AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/agent/dist/types.js";
+import type { AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/agent";
 import type { ToolRegistration } from "../types";
 import path from "path";
 import { promises as fs } from "fs";

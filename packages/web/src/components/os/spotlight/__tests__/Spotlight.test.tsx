@@ -12,6 +12,34 @@ import { SpotlightItemType } from '@originos/core/types';
 vi.mock('@/store/spotlightStore');
 
 describe('Spotlight', () => {
+  const createStoreState = (overrides = {}) => ({
+    isOpen: false,
+    query: '',
+    results: [],
+    items: [],
+    selectedIndex: 0,
+    open: vi.fn(),
+    close: vi.fn(),
+    toggle: vi.fn(),
+    setQuery: vi.fn(),
+    setSelectedIndex: vi.fn(),
+    setResults: vi.fn(),
+    setItems: vi.fn(),
+    executeSelected: vi.fn(),
+    selectNext: vi.fn(),
+    selectPrevious: vi.fn(),
+    ...overrides,
+  });
+
+  const mockUseSpotlightStore = (state: ReturnType<typeof createStoreState>) => {
+    (useSpotlightStore as unknown as ReturnType<typeof vi.fn>).mockImplementation((selector?: (value: typeof state) => unknown) => {
+      if (typeof selector === 'function') {
+        return selector(state);
+      }
+      return state;
+    });
+  };
+
   const mockItems = [
     {
       id: 'settings',
@@ -24,14 +52,7 @@ describe('Spotlight', () => {
   ];
 
   beforeEach(() => {
-    (useSpotlightStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-      isOpen: false,
-      query: '',
-      results: [],
-      selectedIndex: 0,
-      close: vi.fn(),
-      setResults: vi.fn(),
-    });
+    mockUseSpotlightStore(createStoreState());
   });
 
   it('should not render when closed', () => {
@@ -42,14 +63,7 @@ describe('Spotlight', () => {
   });
 
   it('should render when open', () => {
-    (useSpotlightStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-      isOpen: true,
-      query: '',
-      results: [],
-      selectedIndex: 0,
-      close: vi.fn(),
-      setResults: vi.fn(),
-    });
+    mockUseSpotlightStore(createStoreState({ isOpen: true }));
 
     render(<Spotlight items={mockItems} />);
     expect(screen.getByPlaceholderText('搜索应用、项目、Agent、技能...')).toBeInTheDocument();
@@ -57,14 +71,7 @@ describe('Spotlight', () => {
 
   it('should close when clicking backdrop', async () => {
     const mockClose = vi.fn();
-    (useSpotlightStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-      isOpen: true,
-      query: '',
-      results: [],
-      selectedIndex: 0,
-      close: mockClose,
-      setResults: vi.fn(),
-    });
+    mockUseSpotlightStore(createStoreState({ isOpen: true, close: mockClose }));
 
     const { container } = render(<Spotlight items={mockItems} />);
     const backdrop = container.firstChild as HTMLElement;

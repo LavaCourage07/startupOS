@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { FileContent } from '@originos/core/types';
+import { normalizeMarkdownTables } from '@/services/normalize-markdown-tables';
 
 interface MarkdownViewerProps {
   fileContent: FileContent | null;
@@ -88,7 +89,7 @@ export function MarkdownViewer({ fileContent, isLoading }: MarkdownViewerProps) 
       <div className="flex-1 overflow-auto px-6 py-4">
         <article className="prose prose-sm max-w-none">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {fileContent.content}
+            {normalizeMarkdownTables(fileContent.content)}
           </ReactMarkdown>
         </article>
       </div>

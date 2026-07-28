@@ -2,6 +2,8 @@ import { getIpcRenderer, isElectron } from '../env';
 import {
   IPC_CHANNELS,
   type IpcResponse,
+  type EntryExportRequest,
+  type EntryExportResponse,
   type WorkspaceUploadRequest,
   type WorkspaceUploadResponse,
 } from '../ipc-protocol';
@@ -117,4 +119,26 @@ export async function uploadWorkspaceFiles(request: WorkspaceUploadRequest): Pro
     body: formData,
   });
   return readJsonResponse<IpcResponse<WorkspaceUploadResponse>>(response);
+}
+
+// ── Entry Export ─────────────────────────────────────────────
+
+export async function exportWorkspaceEntry(
+  request: EntryExportRequest,
+): Promise<IpcResponse<EntryExportResponse>> {
+  if (!isElectron()) {
+    return {
+      success: false,
+      error: {
+        code: 'UNAVAILABLE',
+        message: 'Directory export is only available in the desktop application',
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  return getIpcRenderer().invoke<IpcResponse<EntryExportResponse>>(
+    IPC_CHANNELS.ENTRY_EXPORT,
+    request,
+  );
 }

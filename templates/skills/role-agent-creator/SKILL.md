@@ -1,6 +1,7 @@
 ---
 name: role-agent-creator
 description: 角色 Agent 创建助手，帮助用户基于专业角色模板或自定义角色创建 Agent，生成完整的 Agent 工程文件
+originos-system: true
 version: 1.0.0
 type: COMPOSITE
 author: OriginOS
@@ -156,11 +157,11 @@ multiSelect: false
 
 文件创建路径为 `${OUTPUT_DIR}/agents/{role-agent-id}/`，其中 `role-agent-id` 为角色名称的 kebab-case 格式（如 "Atlas 架构师" → `atlas-architect`）。
 
-使用文件工具时，路径必须写成相对 `${OUTPUT_DIR}` 的形式，例如 `agents/{role-agent-id}/Agent.md`，不要写绝对路径，也不要加 `data/` 前缀。
+使用文件工具时，路径必须写成运行时数据根路径，例如 `data/agents/{role-agent-id}/Agent.md`，不要写绝对路径。
 
 **创建步骤：**
 1. 确保目录存在：调用 `execute_command` 执行 `mkdir -p ${OUTPUT_DIR}/agents/{role-agent-id}/`
-2. 依次调用 `write_file` 创建每个文件，文件路径使用 `agents/{role-agent-id}/{FileName}.md`
+2. 依次调用 `write_file` 创建每个文件，文件路径使用 `data/agents/{role-agent-id}/{FileName}.md`
 3. 所有文件写入完成后，再向用户展示完成提示
 
 ### Agent.md 角色模板
@@ -350,7 +351,7 @@ allowedTools: ["read_file", "write_file", "edit_file", "list_files", "read_docum
 2. 将选中的技能信息写入 Tool.md 的 `## 角色技能` 部分
 3. 确保技能名称、描述和路径准确无误
 
-**保存路径**: `${OUTPUT_DIR}/agents/{role-agent-id}/`（调用 `write_file` 时使用 `agents/{role-agent-id}/{FileName}.md`）
+**保存路径**: `${OUTPUT_DIR}/agents/{role-agent-id}/`（调用 `write_file` 时使用 `data/agents/{role-agent-id}/{FileName}.md`）
 
 **完成提示**:
 > ✓ 角色 Agent「{RoleName}」已创建完成！

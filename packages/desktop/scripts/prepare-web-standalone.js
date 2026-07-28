@@ -102,6 +102,31 @@ function listPnpmPackages(pnpmRoot) {
   return packages;
 }
 
+function listNodeModulesPackages(nodeModulesRoot) {
+  if (!fs.existsSync(nodeModulesRoot)) {
+    return [];
+  }
+
+  const packages = [];
+  for (const packageEntry of fs.readdirSync(nodeModulesRoot, { withFileTypes: true })) {
+    if (packageEntry.name === '.bin' || packageEntry.name === '.pnpm') continue;
+    const packagePath = path.join(nodeModulesRoot, packageEntry.name);
+    if (packageEntry.name.startsWith('@') && packageEntry.isDirectory()) {
+      for (const scopedEntry of fs.readdirSync(packagePath, { withFileTypes: true })) {
+        if (!scopedEntry.isDirectory() && !scopedEntry.isSymbolicLink()) continue;
+        packages.push({
+          name: `${packageEntry.name}/${scopedEntry.name}`,
+          source: path.join(packagePath, scopedEntry.name),
+        });
+      }
+      continue;
+    }
+    if (!packageEntry.isDirectory() && !packageEntry.isSymbolicLink()) continue;
+    packages.push({ name: packageEntry.name, source: packagePath });
+  }
+  return packages;
+}
+
 let materializedCount = 0;
 for (let pass = 0; pass < 20; pass += 1) {
   const symlinks = collectSymlinks(target);
@@ -125,23 +150,12 @@ const pnpmRoot = path.join(rootNodeModules, '.pnpm');
 fs.mkdirSync(webNodeModules, { recursive: true });
 
 let hoistedCount = 0;
-if (fs.existsSync(pnpmRoot)) {
-  // pnpm .pnpm store exists — extract from it
-  for (const packageInfo of listPnpmPackages(pnpmRoot)) {
-    if (copyPackageIfMissing(packageInfo.source, packageInfo.name, webNodeModules)) {
-      hoistedCount += 1;
-    }
-  }
-} else {
-  // Next.js standalone already flattened deps into root node_modules
-  // Copy all packages directly to web/node_modules
-  for (const entry of fs.readdirSync(rootNodeModules, { withFileTypes: true })) {
-    const packageName = entry.name;
-    if (packageName === '.pnpm') continue;
-    const sourcePath = path.join(rootNodeModules, packageName);
-    if (copyPackageIfMissing(sourcePath, packageName, webNodeModules)) {
-      hoistedCount += 1;
-    }
+for (const packageInfo of [
+  ...listPnpmPackages(pnpmRoot),
+  ...listNodeModulesPackages(rootNodeModules),
+]) {
+  if (copyPackageIfMissing(packageInfo.source, packageInfo.name, webNodeModules)) {
+    hoistedCount += 1;
   }
 }
 

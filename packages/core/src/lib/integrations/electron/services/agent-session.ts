@@ -236,8 +236,39 @@ export async function sendAgentMessageStream(request: {
 
 // ── Subscribe to Agent Events (Electron IPC) ──────────────
 
+export interface AgentRendererEvent {
+  type: string;
+  data: unknown;
+  streamId?: string;
+}
+
+function readDelta(event: { type: string; data: unknown }): string | null {
+  if (event.type !== 'text_delta' || !event.data || typeof event.data !== 'object') {
+    return null;
+  }
+  const delta = (event.data as { delta?: unknown }).delta;
+  return typeof delta === 'string' ? delta : null;
+}
+
+export function coalesceAgentEventBatch(
+  events: Array<{ type: string; data: unknown }>,
+): Array<{ type: string; data: unknown }> {
+  const output: Array<{ type: string; data: unknown }> = [];
+  for (const event of events) {
+    const delta = readDelta(event);
+    const previous = output[output.length - 1];
+    const previousDelta = previous ? readDelta(previous) : null;
+    if (delta !== null && previous && previousDelta !== null) {
+      previous.data = { ...(previous.data as object), delta: previousDelta + delta };
+    } else {
+      output.push({ ...event });
+    }
+  }
+  return output;
+}
+
 export function subscribeAgentEvents(
-  listener: (event: { type: string; data: unknown; streamId?: string }) => void,
+  listener: (event: AgentRendererEvent) => void,
   sessionId?: string,
 ): () => void {
   if (!isElectron()) {
@@ -261,7 +292,7 @@ export function subscribeAgentEvents(
       // 处理批量事件
       if (parsed && typeof parsed === 'object' && 'type' in parsed && parsed.type === 'batch_events') {
         const batch = parsed as { events: Array<{ type: string; data: unknown }>; streamId?: string };
-        for (const event of batch.events) {
+        for (const event of coalesceAgentEventBatch(batch.events)) {
           listener({ ...event, streamId: batch.streamId });
         }
         return;

@@ -27,6 +27,7 @@ import { useFileUpload, type UploadedFile } from '@/lib/hooks/use-file-upload';
 import StatusIndicator from './StatusIndicator';
 import { AppWindowManager } from '@/services/AppWindowManager';
 import { WorkspaceWindow } from '@/components/os/workspace';
+import { EntryExportButton } from '@/components/os/EntryExportButton';
 
 interface SessionHistoryItem {
   sessionId: string;
@@ -51,6 +52,12 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
   // Resolve display name and type from props or registry
   const displayName = agentName || agent?.displayName || agent?.name || agentId;
   const resolvedAgentType = propAgentType || agent?.type || 'role-agent';
+  let exportEntryType: 'agent' | 'role-agent' | null = 'agent';
+  if (resolvedAgentType === 'role-agent') {
+    exportEntryType = 'role-agent';
+  } else if (resolvedAgentType === 'project' || resolvedAgentType === 'skill') {
+    exportEntryType = null;
+  }
 
   // Session history state
   const [sessionHistory, setSessionHistory] = useState<SessionHistoryItem[]>([]);
@@ -114,16 +121,13 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
   }, [subscribe]);
 
   const messages: Message[] = agentMessages
-    ?.map((msg: any, idx: number) => {
-      console.log('[AgentDialogContent] Mapping message:', idx, 'role:', msg.role, 'contentLen:', msg.content?.length, 'isStreaming:', msg.isStreaming);
-      return ({
+    ?.map((msg: any, idx: number) => ({
         id: msg.id || `msg-${idx}`,
         role: msg.role as Message['role'],
         content: msg.content,
         timestamp: msg.timestamp,
         isStreaming: msg.isStreaming,
-      });
-    })
+      }))
     // Hide only the user-side system trigger message
     .filter((msg: any) => {
       if (msg.role === 'user' && msg.content.startsWith('你好！请根据你的人设')) {
@@ -408,6 +412,9 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
               >
                 <FolderOpen className="w-3.5 h-3.5 text-gray-500" />
               </button>
+              {exportEntryType && (
+                <EntryExportButton entryType={exportEntryType} entryId={agentId} />
+              )}
 
               {/* Session history button */}
               <div className="native-no-drag relative">

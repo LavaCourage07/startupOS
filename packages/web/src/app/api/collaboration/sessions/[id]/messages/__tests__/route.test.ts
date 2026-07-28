@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 
 const mockSendMessageToSupervisor = vi.fn();
 
-vi.mock("@/modules/collaboration-runtime/facade", () => ({
+vi.mock("@originos/core/modules/collaboration-runtime/facade", () => ({
   sendMessageToSupervisor: mockSendMessageToSupervisor,
 }));
 
@@ -27,8 +27,8 @@ describe("POST /api/collaboration/sessions/[id]/messages — Story 9.31", () => 
 
     expect(response.status).toBe(200);
     expect(data.success).toBe(true);
-    expect(data.to).toBe("supervisor");
-    expect(mockSendMessageToSupervisor).toHaveBeenCalledWith("cs-test", "请创建一个新项目", undefined);
+    expect(data.data.to).toBe("supervisor");
+    expect(mockSendMessageToSupervisor).toHaveBeenCalledWith("cs-test", "请创建一个新项目", undefined, undefined);
   });
 
   it("rejects messages addressed to non-supervisor targets", async () => {

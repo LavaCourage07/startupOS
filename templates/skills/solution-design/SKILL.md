@@ -1,6 +1,7 @@
 ---
 name: solution-design
 description: AI Native 解决方案架构师。通过对话式引导将业务本体转化为 Agent 协作架构，推荐建模维度（事/人），规划 Agent 职责与协作关系。Use when user says "设计方案", "规划 Agent 架构", "开始解决方案设计", "生成事的维度方案", or "基于vX.X调整".
+originos-system: true
 ---
 
 # Solution Design Skill

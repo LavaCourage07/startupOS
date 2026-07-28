@@ -1,6 +1,6 @@
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import path from 'path';
-import { getDataRoot } from '../../paths';
+import { getDataRoot, getSkillsDataDir } from '../../paths';
 import { agentSessionService } from '../agent/session-service';
 import { ontologyStorage } from '../ontology/storage';
 import type { AgentMessage, AgentSession, SessionListItem } from '../../../types/agent';
@@ -11,7 +11,9 @@ import { handle as infoQueryHandler } from './bundled/info-query/handler';
 import { handle as ontologyEditorHandler } from './bundled/ontology-editor/handler';
 import {
   loadSkillContent,
+  loadSkillFromDirectory,
   loadSkills,
+  materializeBundledSkill,
   parseFrontmatter,
   type Skill,
   type SkillDiagnostic,
@@ -36,6 +38,7 @@ export interface SkillListItem {
   filePath?: string;
   baseDir?: string;
   disableModelInvocation?: boolean;
+  systemManaged?: boolean;
 }
 
 export interface SkillListResponse {
@@ -55,6 +58,8 @@ export interface SkillContentResponse {
   workingDir: string;
   /** 产物输出目录（用于创建 Agent 等产物） */
   outputDir: string;
+  /** 系统内置技能不允许作为用户技能导出 */
+  systemManaged: boolean;
   frontmatter?: SkillFrontmatter;
 }
 
@@ -247,12 +252,26 @@ function toListItem(skill: Skill): SkillListItem {
     filePath: skill.filePath,
     baseDir: skill.baseDir,
     disableModelInvocation: skill.disableModelInvocation,
+    systemManaged: skill.systemManaged,
   };
 }
 
 function findSkill(name: string): Skill | undefined {
   const result = loadSkills({ includeDefaults: true });
   return result.skills.find((skill) => skill.code === name || skill.name === name);
+}
+
+function findSkillForContent(name: string): Skill | undefined {
+  const dataSkill = loadSkillFromDirectory(path.join(getSkillsDataDir(), name), 'user').skill;
+  if (dataSkill) {
+    return dataSkill;
+  }
+
+  const skill = findSkill(name);
+  if (skill?.systemManaged) {
+    return materializeBundledSkill(skill.code ?? skill.name) ?? skill;
+  }
+  return skill ?? materializeBundledSkill(name) ?? undefined;
 }
 
 function generateExecutionId(skillName: string): string {
@@ -467,7 +486,7 @@ export function refreshSkills(): SkillListResponse {
 }
 
 export function getSkillContent(request: SkillContentRequest): SkillContentResponse {
-  const skill = findSkill(request.name);
+  const skill = findSkillForContent(request.name);
 
   if (!skill) {
     throw new SkillServiceError('NOT_FOUND', `Skill "${request.name}" not found`, 404);
@@ -481,6 +500,7 @@ export function getSkillContent(request: SkillContentRequest): SkillContentRespo
     baseDir: skill.baseDir,
     workingDir,
     outputDir,
+    systemManaged: skill.systemManaged === true,
   };
 
   if (request.includeFrontmatter) {
@@ -959,7 +979,6 @@ export async function streamSkillExecutionMessage(
             type: 'assistant_message',
             data: {
               content: merged.delta,
-              fullContent: assistantContent,
               isStreaming: true,
             },
           });

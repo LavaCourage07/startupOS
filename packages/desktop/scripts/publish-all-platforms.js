@@ -106,57 +106,6 @@ function generateMacUpdateMetadata() {
   return metadataPath;
 }
 
-function generateWindowsUpdateMetadata() {
-  const releaseDate = new Date().toISOString();
-  const exeFileName = `OriginOS CE-${version}-x64.exe`;
-  const exeFilePath = path.join(releaseDir, exeFileName);
-
-  if (!fs.existsSync(exeFilePath)) {
-    console.warn('[publish-all-platforms] Windows exe not found, skipping Windows metadata generation');
-    return null;
-  }
-
-  const entries = [
-    {
-      fileName: exeFileName,
-      filePath: exeFilePath,
-      size: fs.statSync(exeFilePath).size,
-      sha512: sha512Base64(exeFilePath),
-    },
-  ];
-
-  // Also include zip if it exists
-  const zipFileName = `OriginOS CE-${version}-x64.zip`;
-  const zipFilePath = path.join(releaseDir, zipFileName);
-  if (fs.existsSync(zipFilePath)) {
-    entries.push({
-      fileName: zipFileName,
-      filePath: zipFilePath,
-      size: fs.statSync(zipFilePath).size,
-      sha512: sha512Base64(zipFilePath),
-    });
-  }
-
-  const primary = entries[0];
-  const lines = [
-    `version: ${version}`,
-    'files:',
-    ...entries.flatMap((entry) => [
-      `  - url: ${entry.fileName}`,
-      `    sha512: ${entry.sha512}`,
-      `    size: ${entry.size}`,
-    ]),
-    `path: ${primary.fileName}`,
-    `sha512: ${primary.sha512}`,
-    `releaseDate: '${releaseDate}'`,
-    '',
-  ];
-  const metadataPath = path.join(releaseDir, 'latest.yml');
-  fs.writeFileSync(metadataPath, lines.join('\n'), 'utf8');
-  fs.copyFileSync(metadataPath, path.join(releaseDir, 'stable.yml'));
-  return metadataPath;
-}
-
 function statObject(bucketManager, bucket, key) {
   return new Promise((resolve, reject) => {
     bucketManager.stat(bucket, key, (error, body, info) => {
@@ -173,22 +122,6 @@ function statObject(bucketManager, bucket, key) {
         return;
       }
       reject(new Error(`Qiniu stat failed: ${key} status=${info.statusCode} body=${JSON.stringify(body)}`));
-    });
-  });
-}
-
-function deleteObject(bucketManager, bucket, key) {
-  return new Promise((resolve, reject) => {
-    bucketManager.delete(bucket, key, (error, body, info) => {
-      if (error && info.statusCode !== 612) {
-        reject(error);
-        return;
-      }
-      if (info.statusCode === 200 || info.statusCode === 612) {
-        resolve(true);
-        return;
-      }
-      reject(new Error(`Qiniu delete failed: ${key} status=${info.statusCode} body=${JSON.stringify(body)}`));
     });
   });
 }
@@ -221,7 +154,7 @@ function uploadFile({ mac, config, bucket, key, filePath, overwrite, cacheContro
   });
 }
 
-function buildArtifacts(macMetadataFile, winMetadataFile) {
+function buildArtifacts(metadataFile) {
   const files = [];
 
   // macOS versions
@@ -282,50 +215,26 @@ function buildArtifacts(macMetadataFile, winMetadataFile) {
     });
   }
 
-  // macOS metadata files
-  const macMetadataName = path.basename(macMetadataFile);
+  // Metadata files
+  const metadataName = path.basename(metadataFile);
   files.push({
-    fileName: macMetadataName,
-    filePath: macMetadataFile,
+    fileName: metadataName,
+    filePath: metadataFile,
     overwrite: true,
   });
 
-  if (macMetadataName !== 'latest-mac.yml') {
+  if (metadataName !== 'latest-mac.yml') {
     files.push({
       fileName: 'latest-mac.yml',
-      filePath: macMetadataFile,
+      filePath: metadataFile,
       overwrite: true,
     });
   } else {
     files.push({
       fileName: 'stable-mac.yml',
-      filePath: macMetadataFile,
+      filePath: metadataFile,
       overwrite: true,
     });
-  }
-
-  // Windows metadata files
-  if (winMetadataFile) {
-    const winMetadataName = path.basename(winMetadataFile);
-    files.push({
-      fileName: winMetadataName,
-      filePath: winMetadataFile,
-      overwrite: true,
-    });
-
-    if (winMetadataName !== 'latest.yml') {
-      files.push({
-        fileName: 'latest.yml',
-        filePath: winMetadataFile,
-        overwrite: true,
-      });
-    } else {
-      files.push({
-        fileName: 'stable.yml',
-        filePath: winMetadataFile,
-        overwrite: true,
-      });
-    }
   }
 
   return files;
@@ -410,9 +319,8 @@ async function main() {
   const mac = new qiniu.auth.digest.Mac(accessKey, secretKey);
   const bucketManager = new qiniu.rs.BucketManager(mac, config);
 
-  const macMetadataFile = generateMacUpdateMetadata();
-  const winMetadataFile = generateWindowsUpdateMetadata();
-  const artifacts = buildArtifacts(macMetadataFile, winMetadataFile);
+  const metadataFile = generateMacUpdateMetadata();
+  const artifacts = buildArtifacts(metadataFile);
 
   for (const artifact of artifacts) {
     assertFile(artifact.filePath);
@@ -432,8 +340,8 @@ async function main() {
     if (!artifact.overwrite) {
       const stat = await statObject(bucketManager, bucket, key);
       if (stat.exists) {
-        console.log(`[publish-all-platforms] deleting existing ${artifact.fileName}`);
-        await deleteObject(bucketManager, bucket, key);
+        console.log(`[publish-all-platforms] skipping existing ${artifact.fileName}`);
+        continue;
       }
     }
 
@@ -446,7 +354,7 @@ async function main() {
       bucket,
       key,
       filePath: artifact.filePath,
-      overwrite: true, // 始终覆盖，因为我们已经删除了旧文件
+      overwrite: artifact.overwrite,
       cacheControl,
     });
 

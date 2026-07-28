@@ -5,6 +5,8 @@ node_modules
 # Build outputs
 dist
 dist-electron
+**/dist-electron/
+**/.packaging/
 /.next
 .next
 /coverage
@@ -13,6 +15,8 @@ dist-electron
 dist-*
 *.tsbuildinfo
 btsconfig.tsbuildinfo
+.agents
+.wine-originos/
 
 # Runtime data (user-specific)
 /data
@@ -40,6 +44,8 @@ Thumbs.db
 .env.local
 .env.*.local
 *.env
+*.p8
+AuthKey_*.p8
 
 # Logs and debug files
 *.log

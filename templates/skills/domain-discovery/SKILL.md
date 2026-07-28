@@ -1,6 +1,7 @@
 ---
 name: domain-discovery
 description: 通过渐进式对话从用户的日常工作实践中识别行业领域、业务场景和核心业务概念。采用自然对话方式，将用户的隐性知识显性化，为后续本体建模奠定基础。
+originos-system: true
 ---
 
 # Domain Discovery Skill

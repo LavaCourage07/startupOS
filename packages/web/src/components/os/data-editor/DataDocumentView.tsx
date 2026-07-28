@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { InstanceData } from '@originos/core/lib/features/ontology-data-store/types';
+import { normalizeMarkdownTables } from '@/services/normalize-markdown-tables';
 
 interface DataDocumentViewProps {
 	instance: InstanceData;
@@ -70,7 +71,9 @@ export function DataDocumentView({ instance, onChange, onSave, isSaving }: DataD
 					/>
 				) : (
 					<div className="p-4 prose prose-sm max-w-none">
-						<ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+						<ReactMarkdown remarkPlugins={[remarkGfm]}>
+							{normalizeMarkdownTables(content)}
+						</ReactMarkdown>
 					</div>
 				)}
 			</div>

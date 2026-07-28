@@ -10,6 +10,7 @@ import type { ProjectContext } from "./types";
 import { createAgentSession, sendAgentMessage, sendAgentMessageStream, subscribeAgentEvents, abortAgentSession } from "../electron/services/agent-session";
 import { isElectron } from "../electron/env";
 import { appendStreamDelta, reconcileFinalStreamContent } from "./stream-dedupe";
+import { StreamRenderScheduler } from "./stream-render-scheduler";
 import type { RuntimeLLMConfig } from "./llm-config";
 
 // ============================================================================
@@ -435,7 +436,10 @@ export function usePiAgent(): UseClientPiAgentState {
 			}]);
 
 			// 添加占位助手消息（流式更新）
-			let currentAssistantMessageId = `msg-assistant-${Date.now()}`;
+			let assistantMessageSequence = 0;
+			const nextAssistantMessageId = () =>
+				`msg-assistant-${Date.now()}-${assistantMessageSequence++}`;
+			let currentAssistantMessageId = nextAssistantMessageId();
 			setMessages(prev => [...prev, {
 				id: currentAssistantMessageId,
 				role: "assistant" as const,
@@ -446,22 +450,72 @@ export function usePiAgent(): UseClientPiAgentState {
 
 			emitEvent({ type: "agent_start" });
 
-			let assistantContent = "";
+			let receivedAssistantContent = "";
 			let assistantTurnFinalized = false;
-			let pendingUpdate = false;
+			let rendererDeltaEvents = 0;
+			let rendererDeltaChars = 0;
 
-			// 使用 requestAnimationFrame 批量更新 React 状态，避免每个 text_delta 都触发重渲染
-			const scheduleUpdate = () => {
-				if (pendingUpdate) return;
-				pendingUpdate = true;
-				requestAnimationFrame(() => {
-					pendingUpdate = false;
-					setMessages(prev => prev.map(msg =>
-						msg.id === currentAssistantMessageId
-							? { ...msg, content: assistantContent, isStreaming: true }
-							: msg
-					));
+			const renderSchedulers = new Set<StreamRenderScheduler>();
+			const createRenderScheduler = (assistantMessageId: string) => {
+				const scheduler = new StreamRenderScheduler({
+					onCommit: (content, isStreaming) => {
+						if (isStreaming && !isActiveStream()) return;
+						setMessages(prev => prev.map(msg =>
+							msg.id === assistantMessageId
+								? { ...msg, content, isStreaming }
+								: msg
+						));
+					},
+					onDebug: (debugEvent) => {
+						console.info("[StreamRender] scheduler", {
+							streamId,
+							sessionId: sessionIdRef.current,
+							assistantMessageId,
+							...debugEvent,
+						});
+					},
 				});
+				renderSchedulers.add(scheduler);
+				return scheduler;
+			};
+			let renderScheduler = createRenderScheduler(currentAssistantMessageId);
+
+			const cancelRenderSchedulers = () => {
+				for (const scheduler of renderSchedulers) {
+					scheduler.cancel();
+				}
+				renderSchedulers.clear();
+			};
+
+			const beginAssistantTurn = () => {
+				assistantTurnFinalized = false;
+				receivedAssistantContent = "";
+				currentAssistantMessageId = nextAssistantMessageId();
+				renderScheduler = createRenderScheduler(currentAssistantMessageId);
+				setMessages(prev => [...prev, {
+					id: currentAssistantMessageId,
+					role: "assistant" as const,
+					content: "",
+					timestamp: Date.now(),
+					isStreaming: true,
+				}]);
+			};
+
+			const flushUpdate = (isStreaming: boolean) => {
+				renderScheduler.flush(receivedAssistantContent, isStreaming);
+			};
+
+			const finishUpdate = () => {
+				const scheduler = renderScheduler;
+				return scheduler.finish(receivedAssistantContent);
+			};
+
+			// Cap React commits independently from IPC frequency. Long messages otherwise
+			// re-render and re-parse the accumulated content every animation frame.
+			const scheduleUpdate = () => {
+				if (isActiveStream()) {
+					renderScheduler.schedule(receivedAssistantContent);
+				}
 			};
 
 
@@ -475,31 +529,39 @@ export function usePiAgent(): UseClientPiAgentState {
 						if (event.type === "text_delta") {
 							const delta = (event.data as { delta?: string })?.delta;
 							if (delta) {
-
-								if (assistantTurnFinalized) {
-									assistantTurnFinalized = false;
-									assistantContent = "";
-									currentAssistantMessageId = `msg-assistant-${Date.now()}`;
-									setMessages(prev => [...prev, {
-										id: currentAssistantMessageId,
-										role: "assistant" as const,
-										content: "",
-										timestamp: Date.now(),
-										isStreaming: true,
-									}]);
+								rendererDeltaEvents += 1;
+								rendererDeltaChars += delta.length;
+								if (rendererDeltaEvents === 1 || rendererDeltaEvents % 25 === 0) {
+									console.info("[StreamRender] renderer-delta", {
+										streamId,
+										sessionId: sessionIdRef.current,
+										eventCount: rendererDeltaEvents,
+										deltaChars: rendererDeltaChars,
+										incomingLength: delta.length,
+										accumulatedLength: receivedAssistantContent.length,
+									});
 								}
-								assistantContent = appendStreamDelta(assistantContent, delta);
+								if (assistantTurnFinalized) {
+									beginAssistantTurn();
+								}
+								receivedAssistantContent = appendStreamDelta(receivedAssistantContent, delta);
 								scheduleUpdate();
 							}
 						} else if (event.type === "assistant_message") {
 							const content = (event.data as { content?: string })?.content;
-							if (content) assistantContent = reconcileFinalStreamContent(assistantContent, content);
+							console.info("[StreamRender] renderer-assistant-message", {
+								streamId,
+								sessionId: sessionIdRef.current,
+								incomingLength: content?.length ?? 0,
+								accumulatedLength: receivedAssistantContent.length,
+								deltaEvents: rendererDeltaEvents,
+								deltaChars: rendererDeltaChars,
+							});
+							if (content) {
+								receivedAssistantContent = reconcileFinalStreamContent(receivedAssistantContent, content);
+							}
 							assistantTurnFinalized = true;
-							setMessages(prev => prev.map(msg =>
-								msg.id === currentAssistantMessageId
-									? { ...msg, content: assistantContent, isStreaming: false }
-									: msg
-							));
+							void finishUpdate();
 						} else if (event.type === "tool_start") {
 							const toolName = (event.data as { toolName?: string })?.toolName;
 							if (toolName) setProgressMessage(`正在执行: ${toolName}`);
@@ -511,6 +573,7 @@ export function usePiAgent(): UseClientPiAgentState {
 							if (!isActiveStream()) return;
 							const errMsg = (event.data as { message?: string })?.message || "Unknown error";
 							setErrorMessage(errMsg);
+							cancelRenderSchedulers();
 							setMessages(prev => prev.map(m =>
 								m.id === currentAssistantMessageId ? { ...m, content: `错误: ${errMsg}`, isStreaming: false } : m
 							));
@@ -528,21 +591,37 @@ export function usePiAgent(): UseClientPiAgentState {
 							}
 						} else if (event.type === "done") {
 							if (!isActiveStream()) return;
-							setMessages(prev => prev.map(msg =>
-								msg.id === currentAssistantMessageId ? { ...msg, isStreaming: false } : msg
-							));
-							setProgressMessage(null);
-							setIsThinking(false);
-							setIsRunning(false);
-							setActiveTools([]);
-							emitEvent({ type: "agent_end" });
-							unsubscribeEvents();
-							if (streamUnsubscribeRef.current === unsubscribeEvents) {
-								streamUnsubscribeRef.current = null;
+							const content = (event.data as { content?: string })?.content;
+							console.info("[StreamRender] renderer-done", {
+								streamId,
+								sessionId: sessionIdRef.current,
+								incomingLength: content?.length ?? 0,
+								accumulatedLength: receivedAssistantContent.length,
+								deltaEvents: rendererDeltaEvents,
+								deltaChars: rendererDeltaChars,
+							});
+							if (content) {
+								receivedAssistantContent = reconcileFinalStreamContent(
+									receivedAssistantContent,
+									content
+								);
 							}
-							if (activeStreamIdRef.current === streamId) {
-								activeStreamIdRef.current = null;
-							}
+							void finishUpdate().then(() => {
+								if (!isActiveStream()) return;
+								cancelRenderSchedulers();
+								setProgressMessage(null);
+								setIsThinking(false);
+								setIsRunning(false);
+								setActiveTools([]);
+								emitEvent({ type: "agent_end" });
+								unsubscribeEvents();
+								if (streamUnsubscribeRef.current === unsubscribeEvents) {
+									streamUnsubscribeRef.current = null;
+								}
+								if (activeStreamIdRef.current === streamId) {
+									activeStreamIdRef.current = null;
+								}
+							});
 						}
 					}, sessionIdRef.current ?? undefined);
 					streamUnsubscribeRef.current = unsubscribeEvents;
@@ -565,6 +644,7 @@ export function usePiAgent(): UseClientPiAgentState {
 					}
 				} catch (err) {
 					if (!isActiveStream()) return;
+					cancelRenderSchedulers();
 					const msg = err instanceof Error ? err.message : "发送消息失败";
 					setErrorMessage(msg);
 					setMessages(prev => prev.map(m =>
@@ -582,7 +662,7 @@ export function usePiAgent(): UseClientPiAgentState {
 			}
 
 			// Web 模式：通过 HTTP SSE
-			// 复用上面已声明的变量（abortController, userMessageId, currentAssistantMessageId, assistantContent, assistantTurnFinalized）
+			// 复用上面已声明的 stream 生命周期变量。
 			try {
 				const response = await fetch(`${API_BASE}/${sessionIdRef.current}/messages`, {
 					method: "POST",
@@ -607,12 +687,8 @@ export function usePiAgent(): UseClientPiAgentState {
 					// 非流式响应
 					const data = await response.json();
 					if (data.data?.assistantMessage) {
-						assistantContent = data.data.assistantMessage.content;
-						setMessages(prev => prev.map(msg =>
-							msg.id === currentAssistantMessageId
-								? { ...msg, content: assistantContent, isStreaming: false }
-								: msg
-						));
+						receivedAssistantContent = data.data.assistantMessage.content;
+						flushUpdate(false);
 					}
 					return;
 				}
@@ -645,18 +721,9 @@ export function usePiAgent(): UseClientPiAgentState {
 								if (nestedData.delta) {
 									// 新 LLM 轮次开始：创建新的助手消息占位符
 									if (assistantTurnFinalized) {
-										assistantTurnFinalized = false;
-										assistantContent = "";
-										currentAssistantMessageId = `msg-assistant-${Date.now()}`;
-										setMessages(prev => [...prev, {
-											id: currentAssistantMessageId,
-											role: "assistant" as const,
-											content: "",
-											timestamp: Date.now(),
-											isStreaming: true,
-										}]);
+										beginAssistantTurn();
 									}
-									assistantContent = appendStreamDelta(assistantContent, nestedData.delta);
+									receivedAssistantContent = appendStreamDelta(receivedAssistantContent, nestedData.delta);
 									scheduleUpdate();
 								}
 							} else if (event.type === "assistant_message") {
@@ -674,12 +741,8 @@ export function usePiAgent(): UseClientPiAgentState {
 									if (textBlock?.text) content = textBlock.text;
 								}
 								if (content) {
-									assistantContent = reconcileFinalStreamContent(assistantContent, content);
-									setMessages(prev => prev.map(msg =>
-										msg.id === currentAssistantMessageId
-											? { ...msg, content: assistantContent, isStreaming: false }
-											: msg
-									));
+									receivedAssistantContent = reconcileFinalStreamContent(receivedAssistantContent, content);
+									void finishUpdate();
 								}
 								// 标记本轮 LLM 输出已完成
 								assistantTurnFinalized = true;
@@ -701,9 +764,14 @@ export function usePiAgent(): UseClientPiAgentState {
 								const data = event.data as { message?: string };
 								throw new Error(data.message || "Unknown error");
 							} else if (event.type === "done") {
-								setMessages(prev => prev.map(msg =>
-									msg.id === currentAssistantMessageId ? { ...msg, isStreaming: false } : msg
-								));
+								const data = event.data as { content?: string };
+								if (data.content) {
+									receivedAssistantContent = reconcileFinalStreamContent(
+										receivedAssistantContent,
+										data.content
+									);
+								}
+								await finishUpdate();
 								setProgressMessage(null);
 							}
 						}
@@ -720,29 +788,37 @@ export function usePiAgent(): UseClientPiAgentState {
 						if (event.type === "text_delta" || event.type === "message_delta") {
 							const nestedData = event.data as { delta?: string };
 							if (nestedData.delta) {
-								assistantContent = appendStreamDelta(assistantContent, nestedData.delta);
+								receivedAssistantContent = appendStreamDelta(receivedAssistantContent, nestedData.delta);
 							}
 						} else if (event.type === "assistant_message") {
 							const nestedData = (event.data as any) as { content?: string | any[] };
 							if (typeof nestedData.content === 'string') {
-								assistantContent = reconcileFinalStreamContent(assistantContent, nestedData.content);
+								receivedAssistantContent = reconcileFinalStreamContent(
+									receivedAssistantContent,
+									nestedData.content
+								);
 							}
 						}
 					}
-					if (assistantContent) {
-						setMessages(prev => prev.map(msg =>
-							msg.id === currentAssistantMessageId
-								? { ...msg, content: assistantContent, isStreaming: false }
-								: msg
-						));
+					if (receivedAssistantContent) {
+						await finishUpdate();
 					}
 				}
 
+				await finishUpdate();
+
 				if (isActiveStream()) {
-					emitEvent({ type: "message_end", message: { role: "assistant", content: assistantContent } });
-					console.log("[usePiAgent] Stream completed, content length:", assistantContent.length);
+					emitEvent({
+						type: "message_end",
+						message: { role: "assistant", content: receivedAssistantContent },
+					});
+					console.log(
+						"[usePiAgent] Stream completed, content length:",
+						receivedAssistantContent.length
+					);
 				}
 			} catch (err) {
+				cancelRenderSchedulers();
 				if (err instanceof Error && err.name === "AbortError") {
 					console.log("[usePiAgent] Request aborted");
 				} else if (isActiveStream()) {
@@ -755,6 +831,7 @@ export function usePiAgent(): UseClientPiAgentState {
 					emitEvent({ type: "agent_error", error: { message: msg } });
 				}
 			} finally {
+				cancelRenderSchedulers();
 				if (activeStreamIdRef.current === streamId) {
 					setIsThinking(false);
 					setIsRunning(false);

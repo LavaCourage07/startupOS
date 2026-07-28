@@ -28,6 +28,17 @@ import {
 import type { RuntimeLLMConfig, RuntimeLLMFieldMapping } from "./llm-config";
 import { normalizeRuntimeLLMConfig, normalizeRuntimeLLMFieldMapping } from "./llm-config";
 
+export function sanitizeBaseUrlForLogging(value: unknown): string | undefined {
+	if (typeof value !== "string" || !value.trim()) {
+		return undefined;
+	}
+	try {
+		return new URL(value).origin;
+	} catch {
+		return "configured";
+	}
+}
+
 // ============================================================================
 // 模型创建（服务端专用）
 // ============================================================================
@@ -448,13 +459,15 @@ export function createRuntimeModel(
 	};
 
 	const debugCredential = debugModel.apiKey || debugModel.authToken;
-	console.error(`[createRuntimeModel] created model:`, {
-		id: debugModel.id,
-		apiKey: debugCredential ? `${debugCredential.slice(0, 8)}...` : "MISSING",
-		authMode: debugModel.authToken ? "bearer" : "api-key",
-		baseUrl: debugModel.baseUrl ?? "default",
-		provider: llmConfig.provider ?? "anthropic(default)",
-	});
+	if (process.env["ORIGINOS_WORKER_STDOUT_JSON_LINE"] !== "1") {
+		console.info(`[createRuntimeModel] created model:`, {
+			id: debugModel.id,
+			hasCredential: !!debugCredential,
+			authMode: debugModel.authToken ? "bearer" : "api-key",
+			baseUrl: sanitizeBaseUrlForLogging(debugModel.baseUrl) ?? "default",
+			provider: llmConfig.provider ?? "anthropic(default)",
+		});
+	}
 
 	return model;
 }

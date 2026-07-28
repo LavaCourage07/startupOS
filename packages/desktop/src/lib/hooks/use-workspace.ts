@@ -9,10 +9,18 @@ import type { ApiResponse } from '@originos/core/types';
 import { isElectron } from '../../lib/integrations/electron/env';
 import { deleteLocalFile, listLocalFiles, readLocalFile, writeLocalFile } from '../../lib/integrations/electron/local-fs';
 
+function normalizeWorkspacePath(value: string): string {
+  return value.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '');
+}
+
 function mapProjectFile(projectId: string, basePath: string, absolutePath: string, isDirectory: boolean, size: number, createdAt: string, modifiedAt: string): ProjectFile {
-  const relativePath = absolutePath.startsWith(basePath)
-    ? absolutePath.slice(basePath.length).replace(/^\/+/, '')
-    : absolutePath;
+  const normalizedBasePath = normalizeWorkspacePath(basePath);
+  const normalizedAbsolutePath = normalizeWorkspacePath(absolutePath);
+  const relativePath = normalizedAbsolutePath === normalizedBasePath
+    ? ''
+    : normalizedAbsolutePath.startsWith(`${normalizedBasePath}/`)
+      ? normalizedAbsolutePath.slice(normalizedBasePath.length + 1)
+      : normalizedAbsolutePath;
   const name = relativePath.split('/').filter(Boolean).pop() ?? relativePath;
 
   return {

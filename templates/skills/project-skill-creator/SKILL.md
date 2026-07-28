@@ -2,6 +2,7 @@
 name: project-skill-creator
 code: project-skill-creator
 description: 在 Agent 工作目录中创建项目级 Skill 定义。当 solution-design 或其他项目内流程需要按预收集规格直接生成 Agent 专属 Skill 时使用；必须在目标 Agent 目录内调用，避免误写到项目根 skills/ 或 data/skills/。
+originos-system: true
 version: 1.0.0
 type: COMPOSITE
 author: OriginOS

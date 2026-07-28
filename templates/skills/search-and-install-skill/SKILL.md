@@ -2,6 +2,7 @@
 name: 搜索并安装市场技能
 code: search-and-install-skill
 description: 自动根据用户输入的技能关键词或分类，从技能市场搜索匹配项，分析来源平台，下载并安装。
+originos-system: true
 version: 1.3.0
 type: SIMPLE
 author: OriginOS

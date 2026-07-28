@@ -3,8 +3,7 @@ import { app, BrowserWindow, shell } from 'electron';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import net from 'node:net';
-import { appendFileSync, mkdirSync } from 'node:fs';
-import util from 'node:util';
+import { mkdirSync } from 'node:fs';
 import { ElectronWindowManager } from './window-manager';
 import { LocalFileSystem } from './local-fs';
 import { LocalAgentBridge } from './local-agent-bridge';
@@ -21,7 +20,11 @@ import { CollaborationService } from './services/collaboration-service';
 import { AgentSessionService } from './services/agent-session-service';
 import { AgentProjectService } from './services/agent-project-service';
 import { WorkspaceService } from './services/workspace-service';
+import { EntryExportService } from './services/entry-export-service';
 import { DesktopSchedulerService } from './services/desktop-scheduler-service';
+import { BufferedDailyLogWriter } from './services/daily-log-writer';
+import { captureConsoleCall, serializeConsoleArgs } from './services/console-log-capture';
+import { processHealthMonitor } from './services/process-health-monitor';
 import { attachDevToolsContextMenu } from './devtools-context-menu';
 
 if (process.platform === 'darwin' && process.arch === 'x64') {
@@ -29,6 +32,13 @@ if (process.platform === 'darwin' && process.arch === 'x64') {
 }
 
 app.setName('OriginOS CE');
+if (!app.isPackaged) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'OriginOS CE Dev'));
+}
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.originos.ce');
 }
@@ -46,7 +56,7 @@ let packagedRendererUrlPromise: Promise<string> | null = null;
 const ipcServices: unknown[] = [];
 let llmLogCaptureInitialized = false;
 let desktopLogCaptureInitialized = false;
-let desktopLogPath: string | null = null;
+let dailyLogWriter: BufferedDailyLogWriter | null = null;
 
 const llmLogPrefixes = [
   '[LLM',
@@ -61,6 +71,7 @@ const llmLogPrefixes = [
   '[AgentSessionService]',
   '[AgentManager]',
   '[WorkspaceService]',
+  '[EntryExportService]',
   '[MiscService]',
   '[SkillService]',
   '[SkillLauncher]',
@@ -74,36 +85,27 @@ const llmLogPrefixes = [
   '[setup-data-root]',
   '[LocalFS]',
   '[MultiAgentRuntime]',
+  '[ProcessHealth]',
 ];
-
-function serializeConsoleArgs(args: unknown[]): string {
-  return args.map((arg) => {
-    if (typeof arg === 'string') {
-      return arg;
-    }
-    return util.inspect(arg, {
-      depth: 6,
-      breakLength: 120,
-      maxArrayLength: 50,
-      maxStringLength: 4000,
-      compact: false,
-    });
-  }).join(' ');
-}
 
 function shouldWriteLlmLog(line: string): boolean {
   return llmLogPrefixes.some((prefix) => line.includes(prefix));
 }
 
 function appendDesktopLog(line: string): void {
-  if (!desktopLogPath) {
+  if (!dailyLogWriter) {
     return;
   }
-  try {
-    appendFileSync(desktopLogPath, `[${new Date().toISOString()}] ${line}\n`, 'utf8');
-  } catch {
-    // Do not recurse through console while patching console methods.
-  }
+  dailyLogWriter.append('desktop', `[${new Date().toISOString()}] ${line}\n`);
+}
+
+function getDailyLogWriter(): BufferedDailyLogWriter {
+  dailyLogWriter ??= new BufferedDailyLogWriter({
+    logsDir: app.getPath('logs'),
+    flushDelayMs: 1000,
+    maxBytes: 256 * 1024,
+  });
+  return dailyLogWriter;
 }
 
 function initializeDesktopLogCapture(): void {
@@ -112,15 +114,23 @@ function initializeDesktopLogCapture(): void {
   }
   desktopLogCaptureInitialized = true;
 
-  const logsDir = app.getPath('logs');
-  mkdirSync(logsDir, { recursive: true });
-  desktopLogPath = path.join(logsDir, 'desktop.log');
+  const logWriter = getDailyLogWriter();
 
-  for (const methodName of ['log', 'warn', 'error'] as const) {
+  for (const methodName of ['log', 'info', 'warn', 'error'] as const) {
     const original = console[methodName].bind(console);
     console[methodName] = (...args: unknown[]) => {
-      appendDesktopLog(`${methodName.toUpperCase()} ${serializeConsoleArgs(args)}`);
-      original(...args);
+      captureConsoleCall({
+        methodName,
+        args,
+        llmEnabled: llmLogCaptureInitialized,
+        shouldWriteLlm: shouldWriteLlmLog,
+        appendDesktop: appendDesktopLog,
+        appendLlm: line => {
+          const timestamp = new Date().toISOString();
+          logWriter.append('llm', `[${timestamp}] ${line}\n`);
+        },
+        writeTerminal: line => original(line),
+      });
     };
   }
 
@@ -131,7 +141,7 @@ function initializeDesktopLogCapture(): void {
     appendDesktopLog(`UNHANDLED_REJECTION ${serializeConsoleArgs([reason])}`);
   });
 
-  console.log(`[desktop-log] capturing desktop logs to ${desktopLogPath}`);
+  console.log(`[desktop-log] capturing desktop logs to ${logWriter.resolvePath('desktop')}`);
 }
 
 function initializeLlmLogCapture(): void {
@@ -140,27 +150,9 @@ function initializeLlmLogCapture(): void {
   }
   llmLogCaptureInitialized = true;
 
-  const logsDir = app.getPath('logs');
-  mkdirSync(logsDir, { recursive: true });
-  const llmLogPath = path.join(logsDir, 'llm.log');
+  const logWriter = getDailyLogWriter();
 
-  for (const methodName of ['log', 'warn', 'error'] as const) {
-    const original = console[methodName].bind(console);
-    console[methodName] = (...args: unknown[]) => {
-      const line = serializeConsoleArgs(args);
-      if (shouldWriteLlmLog(line)) {
-        const timestamp = new Date().toISOString();
-        try {
-          appendFileSync(llmLogPath, `[${timestamp}] ${line}\n`, 'utf8');
-        } catch (error) {
-          original('[llm-log] Failed to write log file', error);
-        }
-      }
-      original(...args);
-    };
-  }
-
-  console.log(`[llm-log] capturing LLM logs to ${llmLogPath}`);
+  console.log(`[llm-log] capturing LLM logs to ${logWriter.resolvePath('llm')}`);
 }
 
 function resolvePreloadPath(): string {
@@ -171,6 +163,10 @@ function resolveRendererUrl(): string {
   const explicitUrl = process.env['ELECTRON_RENDERER_URL'];
   if (explicitUrl) {
     return explicitUrl;
+  }
+  const rendererUrlArg = process.argv.find((arg) => arg.startsWith('--renderer-url='));
+  if (rendererUrlArg) {
+    return rendererUrlArg.slice('--renderer-url='.length);
   }
 
   if (!app.isPackaged) {
@@ -384,6 +380,9 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  if (!hasSingleInstanceLock) {
+    return;
+  }
   void (async () => {
   // 防止热重载时重复初始化 IPC handlers（globalThis 跨模块重载保持不变）
   const g = globalThis as Record<string, unknown>;
@@ -392,10 +391,18 @@ app.whenReady().then(() => {
 
   initializeDesktopLogCapture();
   initializeLlmLogCapture();
+  processHealthMonitor.start();
+  app.on('browser-window-created', (_event, browserWindow) => {
+    processHealthMonitor.trackWindow(browserWindow);
+  });
 
   const rendererUrl = !app.isPackaged
     ? resolveRendererUrl()
     : await ensurePackagedRendererUrl();
+
+  if (!app.isPackaged) {
+    await waitForRendererReady(rendererUrl, 60000);
+  }
 
   if (rendererUrl) {
     process.env['ELECTRON_RENDERER_URL'] = rendererUrl;
@@ -421,6 +428,7 @@ app.whenReady().then(() => {
   ipcServices.push(new AgentSessionService());
   ipcServices.push(new AgentProjectService());
   ipcServices.push(new WorkspaceService());
+  ipcServices.push(new EntryExportService());
   mainWindow = createWindow();
   windowManager.setMainWindow(mainWindow);
   windowManager.createDockWindow();
@@ -453,6 +461,17 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('second-instance', () => {
+  if (!mainWindow) {
+    return;
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.show();
+  mainWindow.focus();
+});
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
@@ -460,6 +479,8 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  processHealthMonitor.stop();
+  void dailyLogWriter?.flush();
   windowManager?.closeAllWindows();
   localFileSystem?.dispose();
   void localAgentBridge?.shutdown();

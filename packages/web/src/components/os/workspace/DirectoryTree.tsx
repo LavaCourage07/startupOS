@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { ChevronRight, ChevronDown, File, Folder } from 'lucide-react';
 import type { ProjectFile } from '@originos/core/types';
 
@@ -17,12 +17,13 @@ interface DirectoryTreeProps {
  */
 export function DirectoryTree({ files, selectedFileId, onFileSelect, onOpenInSandbox }: DirectoryTreeProps) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const treeFiles = useMemo(() => normalizeFilesForTree(files), [files]);
 
   // Auto-expand root folders on mount
   useEffect(() => {
-    const rootFolders = files.filter(f => f.type === 'folder' && !f.parentPath);
+    const rootFolders = treeFiles.filter(f => f.type === 'folder' && !f.parentPath);
     setExpandedFolders(new Set(rootFolders.map(f => f.path)));
-  }, [files]);
+  }, [treeFiles]);
 
   const toggleFolder = (path: string) => {
     setExpandedFolders(prev => {
@@ -41,7 +42,7 @@ export function DirectoryTree({ files, selectedFileId, onFileSelect, onOpenInSan
     const rootItems: ProjectFile[] = [];
     const childrenMap = new Map<string, ProjectFile[]>();
 
-    files.forEach(file => {
+    treeFiles.forEach(file => {
       if (!file.parentPath) {
         rootItems.push(file);
       } else {
@@ -153,7 +154,7 @@ export function DirectoryTree({ files, selectedFileId, onFileSelect, onOpenInSan
 
       {/* File Tree */}
       <div className="flex-1 overflow-y-auto p-2">
-        {files.length === 0 ? (
+        {treeFiles.length === 0 ? (
           <div className="px-2 py-4 text-sm text-gray-400 text-center">
             暂无文件
           </div>
@@ -163,4 +164,50 @@ export function DirectoryTree({ files, selectedFileId, onFileSelect, onOpenInSan
       </div>
     </div>
   );
+}
+
+export function normalizeFilesForTree(files: ProjectFile[]): ProjectFile[] {
+  const byPath = new Map<string, ProjectFile>();
+
+  const normalizePath = (value: string) => value.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^\/+|\/+$/g, '');
+
+  const ensureFolder = (projectId: string, folderPath: string, timestamp: number) => {
+    const normalizedFolderPath = normalizePath(folderPath);
+    if (!normalizedFolderPath || byPath.has(normalizedFolderPath)) return;
+
+    const segments = normalizedFolderPath.split('/');
+    const parentPath = segments.length > 1 ? segments.slice(0, -1).join('/') : undefined;
+    byPath.set(normalizedFolderPath, {
+      id: `folder:${normalizedFolderPath}`,
+      projectId,
+      path: normalizedFolderPath,
+      name: segments[segments.length - 1] ?? normalizedFolderPath,
+      size: 0,
+      createdAt: timestamp,
+      modifiedAt: timestamp,
+      type: 'folder',
+      parentPath,
+    });
+  };
+
+  for (const file of files) {
+    const normalizedPath = normalizePath(file.path);
+    if (!normalizedPath) continue;
+
+    const segments = normalizedPath.split('/');
+    for (let depth = 1; depth < segments.length; depth += 1) {
+      ensureFolder(file.projectId, segments.slice(0, depth).join('/'), file.modifiedAt);
+    }
+
+    const parentPath = segments.length > 1 ? segments.slice(0, -1).join('/') : undefined;
+    byPath.set(normalizedPath, {
+      ...file,
+      id: file.id || `${file.type}:${normalizedPath}`,
+      path: normalizedPath,
+      name: file.name || segments[segments.length - 1] || normalizedPath,
+      parentPath,
+    });
+  }
+
+  return Array.from(byPath.values());
 }

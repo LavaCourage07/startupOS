@@ -8,6 +8,8 @@ import {
 	formatSkillsForPrompt,
 	loadSkillContent,
 	getDefaultSkillPaths,
+	getBundledSkillDir,
+	getBundledSkillDirs,
 	type Skill,
 } from "../core/skills.js";
 import {
@@ -15,7 +17,7 @@ import {
 	type SkillInvocationContext,
 } from "../core/skills.middleware.js";
 import { basename, join, resolve } from "path";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { getMonorepoRoot, setMonorepoRoot } from "../../../paths";
 
@@ -107,33 +109,34 @@ describe("Skill Framework", () => {
 				cwd: getMonorepoRoot(),
 				includeDefaults: false,
 				skillPaths: [
-					join(getMonorepoRoot(), "skills", "skill-creator-app"),
-					join(getMonorepoRoot(), "skills", "project-skill-creator"),
+					join(getBundledSkillDir(), "skill-creator-app"),
+					join(getBundledSkillDir(), "project-skill-creator"),
 				],
 			});
 
 			expect(skills.find(skill => skill.name === "skill-creator-app")?.baseDir).toContain(
-				join("skills", "skill-creator-app")
+				join("templates", "skills", "skill-creator-app")
 			);
 			expect(skills.find(skill => skill.name === "project-skill-creator")?.baseDir).toContain(
-				join("skills", "project-skill-creator")
+				join("templates", "skills", "project-skill-creator")
 			);
 		});
 
-		it("should seed bundled skills into data skills before default loading", () => {
+		it("should classify materialized system skills as bundled", () => {
 			const originalRoot = getMonorepoRoot();
 			const originalDataRoot = process.env.DATA_ROOT;
-			const tempRoot = mkdtempSync(join(tmpdir(), "originos-skill-seed-"));
+			const tempRoot = mkdtempSync(join(tmpdir(), "originos-skill-template-"));
 			const monorepoRoot = join(tempRoot, "repo");
 			const dataRoot = join(tempRoot, "data");
-			const bundledSkillDir = join(monorepoRoot, "skills", "demo-skill");
-			mkdirSync(bundledSkillDir, { recursive: true });
+			const materializedSkillDir = join(dataRoot, "skills", "demo-skill");
+			mkdirSync(materializedSkillDir, { recursive: true });
 			writeFileSync(
-				join(bundledSkillDir, "SKILL.md"),
+				join(materializedSkillDir, "SKILL.md"),
 				[
 					"---",
 					"name: demo-skill",
 					"description: Demo bundled skill",
+					"originos-system: true",
 					"---",
 					"",
 					"Use this demo skill.",
@@ -146,19 +149,92 @@ describe("Skill Framework", () => {
 				process.env.DATA_ROOT = dataRoot;
 
 				const result = loadSkills({ includeDefaults: true });
-				const seededSkillPath = join(dataRoot, "skills", "demo-skill", "SKILL.md");
 				const seededSkill = result.skills.find((skill) => skill.name === "demo-skill");
 
-				expect(existsSync(seededSkillPath)).toBe(true);
-				expect(readFileSync(seededSkillPath, "utf8")).toContain("Demo bundled skill");
-				expect(seededSkill?.source).toBe("user");
-				expect(seededSkill?.baseDir).toBe(join(dataRoot, "skills", "demo-skill"));
+				expect(seededSkill?.source).toBe("bundled");
+				expect(seededSkill?.systemManaged).toBe(true);
+				expect(seededSkill?.baseDir).toBe(materializedSkillDir);
 			} finally {
 				setMonorepoRoot(originalRoot);
 				if (originalDataRoot === undefined) {
 					delete process.env.DATA_ROOT;
 				} else {
 					process.env.DATA_ROOT = originalDataRoot;
+				}
+			}
+		});
+
+		it("should resolve bundled skills from Electron resources when running standalone server as node", () => {
+			const originalRoot = getMonorepoRoot();
+			const originalDataRoot = process.env.DATA_ROOT;
+			const originalMonorepoRoot = process.env.MONOREPO_ROOT;
+			const originalElectronRunAsNode = process.env.ELECTRON_RUN_AS_NODE;
+			const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+			const tempRoot = mkdtempSync(join(tmpdir(), "originos-skill-resources-"));
+			const resourcesRoot = join(tempRoot, "resources");
+			const fallbackRoot = join(tempRoot, "missing-repo");
+			const dataRoot = join(tempRoot, "data");
+			const bundledSkillDir = join(resourcesRoot, "templates", "skills", "skill-creator-app");
+			mkdirSync(bundledSkillDir, { recursive: true });
+			writeFileSync(
+				join(bundledSkillDir, "SKILL.md"),
+				[
+					"---",
+					"name: skill-creator-app",
+					"code: skill-creator-app",
+					"description: Skill creator bundled from resources",
+					"originos-system: true",
+					"---",
+					"",
+					"Use this packaged skill.",
+				].join("\n"),
+				"utf8",
+			);
+
+			try {
+				setMonorepoRoot(fallbackRoot);
+				process.env.DATA_ROOT = dataRoot;
+				process.env.MONOREPO_ROOT = fallbackRoot;
+				process.env.ELECTRON_RUN_AS_NODE = "1";
+				Object.defineProperty(process, "resourcesPath", {
+					value: resourcesRoot,
+					configurable: true,
+				});
+
+				const dirs = getBundledSkillDirs();
+				const result = loadSkills({ includeDefaults: true });
+				const loadedSkill = result.skills.find((skill) => skill.code === "skill-creator-app");
+
+				expect(dirs[0]).toBe(join(resourcesRoot, "templates", "skills"));
+				expect(getBundledSkillDir()).toBe(join(resourcesRoot, "templates", "skills"));
+				expect(loadedSkill?.source).toBe("bundled");
+				expect(loadedSkill?.baseDir).toBe(bundledSkillDir);
+				expect(loadedSkill?.systemManaged).toBe(true);
+				expect(existsSync(join(dataRoot, "skills", "skill-creator-app", "SKILL.md"))).toBe(false);
+			} finally {
+				setMonorepoRoot(originalRoot);
+				if (originalDataRoot === undefined) {
+					delete process.env.DATA_ROOT;
+				} else {
+					process.env.DATA_ROOT = originalDataRoot;
+				}
+				if (originalMonorepoRoot === undefined) {
+					delete process.env.MONOREPO_ROOT;
+				} else {
+					process.env.MONOREPO_ROOT = originalMonorepoRoot;
+				}
+				if (originalElectronRunAsNode === undefined) {
+					delete process.env.ELECTRON_RUN_AS_NODE;
+				} else {
+					process.env.ELECTRON_RUN_AS_NODE = originalElectronRunAsNode;
+				}
+				if (originalResourcesPath === undefined) {
+					delete (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+				} else {
+					Object.defineProperty(process, "resourcesPath", {
+						value: originalResourcesPath,
+						configurable: true,
+					});
 				}
 			}
 		});
@@ -229,8 +305,8 @@ describe("Skill Framework", () => {
 		it("should return default skill paths", () => {
 			const paths = getDefaultSkillPaths(testDir);
 
-			expect(paths.bundled).toContain("skills");
-			expect(paths.user).toContain(".claude");
+			expect(paths.bundled).toContain(join("templates", "skills"));
+			expect(paths.user).toContain("data");
 			expect(paths.user).toContain("skills");
 			expect(paths.project).toContain(".originos");
 			expect(paths.project).toContain("skills");

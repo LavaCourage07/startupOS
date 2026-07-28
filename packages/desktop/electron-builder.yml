@@ -7,6 +7,7 @@ directories:
   output: ../../release
   buildResources: ../../resources
 electronVersion: 42.3.3
+afterSign: scripts/notarize-mac-app.js
 electronDownload:
   version: 42.3.3
   mirror: https://npmmirror.com/mirrors/electron/
@@ -30,24 +31,22 @@ files:
     to: dist-electron/core/src/lib/integrations/pi-agent/tools
     filter:
       - "**/*"
+  - from: ../../packages/agent
+    to: node_modules/@mariozechner/agent
+    filter:
+      - "package.json"
+      - "index.js"
+      - "index.d.ts"
+  - from: node_modules/@mariozechner/pi-agent-core
+    to: node_modules/@mariozechner/pi-agent-core
+    filter:
+      - "package.json"
+      - "dist/**/*"
+  - from: .packaging/pi-ai-runtime/node_modules
+    to: node_modules
   - package.json
-  - node_modules/**/*
-  # 显式从根 node_modules 收集 peer/间接依赖，electron-builder 默认不收集 peer deps
-  - from: ../../node_modules/@anthropic-ai/sdk
-    to: node_modules/@anthropic-ai/sdk
-  - from: ../../node_modules/electron-updater
-    to: node_modules/electron-updater
-  - from: ../../node_modules/electron-log
-    to: node_modules/electron-log
-  - from: ../../node_modules/js-yaml
-    to: node_modules/js-yaml
-  - from: ../../node_modules/argparse
-    to: node_modules/argparse
   - "!**/*.map"
   - "!node_modules/onnxruntime-node/bin/napi-v6/linux{,/**/*}"
-  - "!node_modules/onnxruntime-node/bin/napi-v6/win32{,/**/*}"
-  - "!node_modules/.cache"
-  - "!node_modules/.bin"
 npmRebuild: false
 nodeGypRebuild: false
 buildDependenciesFromSource: false
@@ -96,7 +95,7 @@ mac:
   gatekeeperAssess: false
   entitlements: ../../resources/entitlements.mac.plist
   entitlementsInherit: ../../resources/entitlements.mac.inherit.plist
-  notarize: true
+  notarize: false
   target:
     - target: dmg
       arch:

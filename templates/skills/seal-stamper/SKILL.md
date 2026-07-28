@@ -2,6 +2,7 @@
 name: 印章盖章
 code: seal-stamper
 description: 根据用户上传的公司印章图片和 Word 文档，自动去除印章背景生成透明底图，并将印章图片以"浮于文字上方"的布局嵌入到 Word 文档的指定盖章位置。当用户提到盖章、印章、公司章、公章、签章、印章透明、去印章背景、Word盖章、合同盖章等场景时，请使用此技能。
+originos-system: true
 version: 1.1.0
 type: SIMPLE
 author: OriginOS

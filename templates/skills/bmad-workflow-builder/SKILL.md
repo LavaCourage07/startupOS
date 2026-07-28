@@ -1,6 +1,7 @@
 ---
 name: bmad-workflow-builder
 description: 工作流构建助手，通过对话引导用户构建、转换和分析工作流与技能
+originos-system: true
 version: 1.0.0
 type: COMPOSITE
 author: OriginOS

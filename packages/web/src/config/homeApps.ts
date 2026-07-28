@@ -32,8 +32,8 @@ export const HOME_APPS: HomeAppConfig[] = [
     description: '创建智能 Agent，通过对话定义能力和行为',
     icon: '🤖',
     color: 'from-primary',
-    type: 'action',
-    action: 'create-agent',
+    type: 'skill',
+    skillName: 'agent-creator',
   },
   {
     id: 'app-create-role',

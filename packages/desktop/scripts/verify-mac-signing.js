@@ -46,6 +46,19 @@ function codesignOutput(appPath) {
   }
 }
 
+function verifyGatekeeper(appPath) {
+  try {
+    const output = run('spctl', ['--assess', '--type', 'execute', '--verbose=4', appPath]);
+    if (!/source=Notarized Developer ID|source=Developer ID/i.test(output)) {
+      throw new Error(output || 'spctl did not report a Developer ID source');
+    }
+    return output;
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    throw new Error(`Gatekeeper assessment failed for ${appPath}\n${details}`);
+  }
+}
+
 function extractField(output, field) {
   const line = output
     .split('\n')
@@ -55,6 +68,7 @@ function extractField(output, field) {
 
 function verifyApp(appPath) {
   const output = codesignOutput(appPath);
+  const gatekeeperOutput = verifyGatekeeper(appPath);
   const signature = extractField(output, 'Signature');
   const teamIdentifier = extractField(output, 'TeamIdentifier');
   const authorityLines = output
@@ -86,6 +100,7 @@ function verifyApp(appPath) {
     signature: signature || 'present',
     teamIdentifier,
     authority: hasDeveloperIdAuthority ? 'Developer ID Application' : 'unavailable',
+    gatekeeper: gatekeeperOutput.trim().split('\n').find((line) => line.includes('source=')) ?? 'accepted',
   });
 }
 

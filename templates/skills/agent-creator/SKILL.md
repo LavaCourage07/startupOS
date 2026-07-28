@@ -1,6 +1,7 @@
 ---
 name: agent-creator
 description: 任务型 Agent 创建助手，通过对话式交互引导用户创建以事为维度的标准 Agent。Use when user says "创建 Agent", "新建任务型 Agent", or "create an agent".
+originos-system: true
 outputDir: data/
 ---
 
@@ -49,6 +50,8 @@ outputDir: data/
 ## 生成文件
 
 信息收集完成后，在 `${OUTPUT_DIR}/agents/{agent-id}/` 下生成文件（agent-id 为名称的 kebab-case）。确保目录存在后依次创建文件，全部完成后再展示结果。
+
+使用文件工具时，路径必须写成运行时数据根路径，例如 `data/agents/{agent-id}/Agent.md`，不要写绝对路径。依次调用 `write_file` 创建文件时，文件路径使用 `data/agents/{agent-id}/{FileName}.md`。
 
 模板见下方 `## Templates` 章节，根据收集到的信息填充占位符。
 

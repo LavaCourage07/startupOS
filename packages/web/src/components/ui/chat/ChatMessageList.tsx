@@ -3,6 +3,7 @@
 import { useRef, useEffect } from 'react';
 import { Loader2, Wrench } from 'lucide-react';
 import { cn } from '@originos/core/lib/utils';
+import { sanitizeAgentDisplayContent } from '@originos/core/lib/integrations/pi-agent/display-content';
 import ToolExecutionFrame, { type ToolExecution } from '@/components/os/agent-dialog/ToolExecutionFrame';
 import { MarkdownContent, normalizeAskUserQuestion, parseAskUserQuestion, removeYamlBlock, AskUserQuestionComponent, type ChatMessageData } from '@/components/ui/chat-message';
 
@@ -86,21 +87,45 @@ export function ChatMessageList({
   const listRef = useRef<HTMLDivElement>(null);
   const prevLengthRef = useRef(0);
   const lastScrollTimeRef = useRef(0);
+  const isNearBottomRef = useRef(true);
+  const pendingScrollFrameRef = useRef<number | null>(null);
 
-  const SCROLL_THROTTLE_MS = 200; // throttle scroll to reduce jitter during streaming
+  const SCROLL_THROTTLE_MS = 100;
+  const BOTTOM_THRESHOLD_PX = 80;
 
-  const scheduleScroll = () => {
+  const scheduleScroll = (force = false) => {
+    if (!force && !isNearBottomRef.current) return;
     const now = Date.now();
     if (now - lastScrollTimeRef.current < SCROLL_THROTTLE_MS) return;
     lastScrollTimeRef.current = now;
-    listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });
+    if (pendingScrollFrameRef.current !== null) return;
+    pendingScrollFrameRef.current = requestAnimationFrame(() => {
+      pendingScrollFrameRef.current = null;
+      const list = listRef.current;
+      if (!list || (!force && !isNearBottomRef.current)) return;
+      list.scrollTo({ top: list.scrollHeight, behavior: 'auto' });
+      isNearBottomRef.current = true;
+    });
   };
+
+  const handleScroll = () => {
+    const list = listRef.current;
+    if (!list) return;
+    const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
+    isNearBottomRef.current = distanceFromBottom <= BOTTOM_THRESHOLD_PX;
+  };
+
+  useEffect(() => () => {
+    if (pendingScrollFrameRef.current !== null) {
+      cancelAnimationFrame(pendingScrollFrameRef.current);
+    }
+  }, []);
 
   // Auto-scroll on new messages
   useEffect(() => {
     if (messages.length > prevLengthRef.current) {
       lastScrollTimeRef.current = 0; // reset throttle for new messages
-      scheduleScroll();
+      scheduleScroll(true);
     }
     prevLengthRef.current = messages.length;
   }, [messages.length]);
@@ -122,7 +147,11 @@ export function ChatMessageList({
   const showThinkingIndicator = isThinking && (!hasStreamingMsg);
 
   return (
-    <div ref={listRef} className={cn('min-h-0 flex-1 overflow-y-auto px-4 py-5 space-y-4 bg-transparent', className)}>
+    <div
+      ref={listRef}
+      onScroll={handleScroll}
+      className={cn('min-h-0 flex-1 overflow-y-auto px-4 py-5 space-y-4 bg-transparent', className)}
+    >
       {/* Empty state */}
       {messages.length === 0 && !isLoading && !isThinking && (
         emptyState || (
@@ -155,13 +184,15 @@ export function ChatMessageList({
           );
         }
 
+        const safeContent = sanitizeAgentDisplayContent(msg.content);
+
         // Skip empty non-streaming assistant messages
-        if (!msg.content && !msg.isStreaming) return null;
+        if (!safeContent && !msg.isStreaming) return null;
 
         // Parse AskUserQuestion
-        const parsedQuestion = onQuestionAnswer ? parseAskUserQuestion(msg.content) : null;
+        const parsedQuestion = onQuestionAnswer ? parseAskUserQuestion(safeContent) : null;
         const isAnswered = answeredQuestions.has(index);
-        const displayContent = parsedQuestion ? removeYamlBlock(msg.content) : msg.content;
+        const displayContent = parsedQuestion ? removeYamlBlock(safeContent) : safeContent;
 
         return (
           <div key={key} className="flex min-w-0 justify-start gap-2 items-start">

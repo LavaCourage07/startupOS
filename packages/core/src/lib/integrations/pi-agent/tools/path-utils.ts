@@ -25,6 +25,11 @@ function isInsidePath(child: string, parent: string): boolean {
 	return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
+function isSkillRuntimeDirectory(boundary: string, dataRoot: string): boolean {
+	const skillsRoot = path.resolve(dataRoot, "skills");
+	return isInsidePath(boundary, skillsRoot) && boundary !== skillsRoot;
+}
+
 function displayPathFor(fullPath: string, boundary: string): string {
 	const dataRoot = path.resolve(getDataRoot());
 	if (isInsidePath(fullPath, dataRoot)) {
@@ -68,6 +73,24 @@ export function resolveToolPath(rawPath: string): ResolvedToolPath {
 	if (normalizedInput.startsWith("data/")) {
 		const relativeToData = normalizedInput.slice("data/".length);
 		const fullPath = path.resolve(dataRootAbs, relativeToData);
+		if (!isInsidePath(fullPath, dataRootAbs)) {
+			throw new Error(`Invalid path: "${rawPath}" escapes data directory boundary`);
+		}
+		return {
+			fullPath,
+			boundary: dataRootAbs,
+			displayPath: displayPathFor(fullPath, dataRootAbs),
+		};
+	}
+
+	if (
+		isSkillRuntimeDirectory(boundaryAbs, dataRootAbs) &&
+		(normalizedInput === "agents" ||
+			normalizedInput.startsWith("agents/") ||
+			normalizedInput === "skills" ||
+			normalizedInput.startsWith("skills/"))
+	) {
+		const fullPath = path.resolve(dataRootAbs, normalizedInput);
 		if (!isInsidePath(fullPath, dataRootAbs)) {
 			throw new Error(`Invalid path: "${rawPath}" escapes data directory boundary`);
 		}

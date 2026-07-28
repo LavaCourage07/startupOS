@@ -24,12 +24,32 @@ import type {
 import type { SystemPromptVariables } from "../system/prompt";
 import type { HealthMonitor, AgentHealthStatus } from "../health";
 import { createHealthMonitor } from "../health";
-import { createAnthropicModel, createGoogleModel, createAutoModel, createRuntimeModel, getConfigStatus } from "../server-config";
+import { createAnthropicModel, createGoogleModel, createAutoModel, createRuntimeModel, getConfigStatus, sanitizeBaseUrlForLogging } from "../server-config";
 import type { RuntimeLLMConfig } from "../llm-config";
 import { compressRecentTrace } from "../recent-trace-compression";
 import { getLoopDetector, removeLoopDetector } from "../tools/loop-detector";
+import { findSuitableShell } from "../tools/bash-tools";
 import { createWorkingSummaryMessage } from "../runtime-working-summary";
-import { getVisibleStreamDelta, trimRepeatingTail } from "../stream-dedupe";
+import { getVisibleStreamDelta } from "../stream-dedupe";
+import {
+	appendRuntimeEnvironmentPrompt,
+	buildRuntimeEnvironmentPrompt,
+	getRuntimeEnvironment,
+} from "../system/runtime-environment";
+import {
+	assessCompletion,
+	buildCompletionFailureReport,
+	buildCompletionRecoveryMessage,
+	DEFAULT_COMPLETION_RECOVERY_LIMIT,
+	type ToolFailureSummary,
+} from "./completion-guard";
+import {
+	buildCompletionJudgePrompt,
+	COMPLETION_JUDGE_SYSTEM_PROMPT,
+	parseCompletionJudgeDecision,
+	type SemanticCompletionDecision,
+} from "./completion-judge";
+import { getToolEventStatus } from "./tool-event-status";
 
 // ============================================================================
 // Event Emitter
@@ -101,8 +121,76 @@ function previewText(text: string, max = 80): string {
 	return text.replace(/\s+/g, " ").slice(0, max);
 }
 
+function previewToolResult(text: string, max = 1_000): string {
+	const normalized = text.replace(/\s+/g, " ").trim();
+	const preview = normalized.slice(0, max);
+	return `length=${text.length}, hash=${hashText(text)}, preview=${JSON.stringify(preview)}${normalized.length > max ? ", truncated=true" : ""}`;
+}
+
+function getMessageText(message: unknown): string {
+	if (typeof message === "string") {
+		return message;
+	}
+	if (!message || typeof message !== "object") {
+		return "";
+	}
+	const content = (message as { content?: unknown }).content;
+	if (typeof content === "string") {
+		return content;
+	}
+	if (!Array.isArray(content)) {
+		return "";
+	}
+	return content
+		.filter((block): block is { type: "text"; text: string } =>
+			typeof block === "object" &&
+			block !== null &&
+			(block as { type?: unknown }).type === "text" &&
+			typeof (block as { text?: unknown }).text === "string"
+		)
+		.map((block) => block.text)
+		.join("");
+}
+
+function getPromptText(message: string | AgentMessage | AgentMessage[]): string {
+	if (typeof message === "string") {
+		return message;
+	}
+	if (Array.isArray(message)) {
+		for (let index = message.length - 1; index >= 0; index -= 1) {
+			const candidate = message[index];
+			if (candidate?.role === "user") {
+				return getMessageText(candidate);
+			}
+		}
+		return "";
+	}
+	return getMessageText(message);
+}
+
+function redactErrorForLogging(message: string): string {
+	return message
+		.replace(/\bBearer\s+\S+/giu, "Bearer [REDACTED]")
+		.replace(/\b(?:sk|tp)-[A-Za-z0-9._-]{8,}\b/gu, "[REDACTED]");
+}
+
+function logInfo(...args: unknown[]): void {
+	if (process.env["ORIGINOS_WORKER_STDOUT_JSON_LINE"] === "1") {
+		return;
+	}
+	console.info(...args);
+}
+
 type SyntheticSystemMessage = {
 	role: "system";
+	content: Array<{
+		type: "text";
+		text: string;
+	}>;
+};
+
+type SyntheticUserMessage = {
+	role: "user";
 	content: Array<{
 		type: "text";
 		text: string;
@@ -132,8 +220,30 @@ export class OriginOSAgent {
 	private activeTurnSequence = 0;
 	private assistantMessageSequence = 0;
 	private activeAssistantMessageSequence = 0;
+	private toolCallDeltaCount = 0;
+	private toolCallDeltaChars = 0;
 	private previousAssistantTextHash = "";
 	private previousAssistantTurnSequence = 0;
+	private previousTaskAssistantTextHash = "";
+	private runtimeEnvironment = getRuntimeEnvironment({
+		defaultShell: findSuitableShell() ?? undefined,
+	});
+	private runtimeEnvironmentPrompt = buildRuntimeEnvironmentPrompt(this.runtimeEnvironment);
+	private pendingPromiseStop = false;
+	private lastToolFailure: ToolFailureSummary | null = null;
+	private successfulToolAfterFailure = false;
+	private lastModelError: Error | null = null;
+	private activeUserRequest = "";
+	private completionToolTrace: string[] = [];
+	private pendingCompletionCandidate: {
+		message: object;
+		text: string;
+		stopReason?: string;
+		toolCallCount: number;
+		repeatedResponse: boolean;
+	} | null = null;
+	private deferredAgentEndEvent: AgentEvent | null = null;
+	private hiddenMessages = new WeakSet<object>();
 
 	/**
 	 * Agent 状态
@@ -265,7 +375,7 @@ export class OriginOSAgent {
 
 			// 日志记录 token 使用情况
 			if (validMessages.length !== keptMessages.length) {
-				console.log(`[Agent] Context truncated: ${validMessages.length} → ${keptMessages.length} messages, ~${totalTokens}/${tokenBudget} tokens`);
+				logInfo(`[Agent] Context truncated: ${validMessages.length} → ${keptMessages.length} messages, ~${totalTokens}/${tokenBudget} tokens`);
 			}
 
 			return keptMessages;
@@ -286,20 +396,14 @@ export class OriginOSAgent {
 		const modelApi = initialModel?.api;
 		const modelBaseUrl = initialModel?.baseUrl;
 
-		// 调试日志
-		console.error('[OriginOSAgent] Initializing agent with:', {
+		logInfo('[OriginOSAgent] Initializing agent with:', {
 			modelId,
 			modelApi,
-			modelBaseUrl,
+			modelBaseUrl: sanitizeBaseUrlForLogging(modelBaseUrl),
 			hasApiKey: !!modelApiKey,
 			hasAuthToken: !!modelAuthToken,
 			credentialSource: modelCredentialSource || 'env/default',
 			credentialAuthMode: modelCredentialAuthMode || (modelApiKey?.includes?.('sk-ant-oat') ? 'oauth' : 'api-key'),
-			credentialPrefix: modelApiKey
-				? `${modelApiKey.substring(0, 10)}...`
-				: modelAuthToken
-					? `${modelAuthToken.substring(0, 10)}...`
-					: 'none',
 		});
 
 		// 包装 streamFn，注入 toolChoice 确保工具调用被启用
@@ -335,16 +439,15 @@ export class OriginOSAgent {
 			} else if (currentModelApiKey && !opts['apiKey']) {
 				opts['apiKey'] = currentModelApiKey;
 			}
-			// 调试：确认凭证传递
 			const finalCredential = opts['apiKey'] || (streamModel as any)?.apiKey || (streamModel as any)?.authToken;
-			console.error(`[streamFn] credential check: hasOptsApiKey=${!!opts['apiKey']}, modelApiKey=${currentModelApiKey ? 'set' : 'null'}, model.authToken=${(streamModel as any)?.authToken ? 'set' : 'null'}, bearer=${currentModelUsesBearerAuth}, final=${finalCredential ? finalCredential.toString().slice(0, 10) + '...' : 'NONE'}`);
-			console.error(`[streamFn] Calling pi-ai streamSimple with model:`, {
+			logInfo(`[streamFn] credential check: hasOptsApiKey=${!!opts['apiKey']}, modelApiKey=${currentModelApiKey ? 'set' : 'null'}, model.authToken=${(streamModel as any)?.authToken ? 'set' : 'null'}, bearer=${currentModelUsesBearerAuth}, hasFinalCredential=${!!finalCredential}`);
+			logInfo(`[streamFn] Calling pi-ai streamSimple with model:`, {
 				id: streamModel.id,
 				api: streamModel.api,
 				provider: streamModel.provider,
-				baseUrl: (streamModel as any).baseUrl,
+					baseUrl: sanitizeBaseUrlForLogging((streamModel as any).baseUrl),
 			});
-			console.error(`[streamFn] Context messages count:`, context.messages?.length);
+			logInfo(`[streamFn] Context messages count:`, context.messages?.length);
 
 			const stream = piAi.streamSimple(streamModel, context, opts);
 
@@ -357,7 +460,10 @@ export class OriginOSAgent {
 
 		this.agent = new Agent({
 			initialState: {
-				systemPrompt: this.config.systemPrompt,
+				systemPrompt: appendRuntimeEnvironmentPrompt(
+					this.config.systemPrompt,
+					this.runtimeEnvironment,
+				),
 				model: this.config.model,
 				thinkingLevel,
 				tools: this.config.tools ?? [],
@@ -376,13 +482,348 @@ export class OriginOSAgent {
 		// 订阅 Agent 事件并转发到我们的事件发射器
 		this.agent.subscribe((event) => {
 			this.handleAgentEvent(event);
-			this.eventEmitter.emit(event);
+			this.routeAgentEvent(event);
 		});
 
 		this.state.isInitialized = true;
 
 		// 标记为运行状态
 		this.healthMonitor.markAsRunning();
+	}
+
+	private routeAgentEvent(event: AgentEvent): void {
+		const eventType = event.type;
+
+		if (eventType === "tool_execution_end") {
+			const status = getToolEventStatus(event);
+			this.completionToolTrace.push(
+				`${event.toolName}: ${status.failed ? "failed" : "succeeded"}${status.reason ? ` (${status.reason.slice(0, 500)})` : ""}`,
+			);
+			if (this.completionToolTrace.length > 20) {
+				this.completionToolTrace.shift();
+			}
+			if (status.failed) {
+				this.lastToolFailure = {
+					toolName: event.toolName,
+					toolCallId: event.toolCallId,
+					exitCode: status.exitCode,
+					reason: status.reason || "工具返回失败，但未提供具体原因。",
+				};
+				this.successfulToolAfterFailure = false;
+			} else if (this.lastToolFailure) {
+				this.successfulToolAfterFailure = true;
+			}
+		}
+
+		if (
+			eventType === "agent_end" &&
+			(this.pendingPromiseStop || this.pendingCompletionCandidate)
+		) {
+			this.deferredAgentEndEvent = event;
+			return;
+		}
+
+		this.emitUiEvent(event);
+
+		if (eventType !== "message_end" || event.message.role !== "assistant") {
+			return;
+		}
+
+		const text = Array.isArray(event.message.content)
+			? event.message.content
+					.filter((block: any) => block.type === "text" && block.text != null)
+					.map((block: any) => block.text)
+					.join("")
+			: "";
+		const toolCallCount = Array.isArray(event.message.content)
+			? event.message.content.filter((block: any) => block.type === "toolCall").length
+			: 0;
+			if ((event.message as AssistantMessage).stopReason === "error") {
+				const errorMessage =
+					(event.message as AssistantMessage).errorMessage?.trim() ||
+					"Model stream ended with stopReason=error without an errorMessage";
+				this.lastModelError = new Error(errorMessage);
+				this.pendingPromiseStop = false;
+				return;
+			}
+			if (
+				(event.message as AssistantMessage).stopReason === "stop" &&
+				toolCallCount === 0
+			) {
+				this.pendingCompletionCandidate = {
+					message: event.message,
+					text,
+					stopReason: (event.message as AssistantMessage).stopReason,
+					toolCallCount,
+					repeatedResponse: this.assistantLoopGuardTriggered,
+				};
+			}
+		}
+
+	private emitUiEvent(event: AgentEvent): void {
+		if (
+			(event.type === "message_start" ||
+				event.type === "message_end" ||
+				event.type === "turn_end") &&
+			typeof event.message === "object" &&
+			event.message !== null &&
+			this.hiddenMessages.has(event.message)
+		) {
+			return;
+		}
+
+		if (event.type === "agent_end") {
+			const stateMessages = this.agent?.state.messages ?? [];
+			const sourceMessages = stateMessages.length > 0
+				? stateMessages
+				: event.messages;
+			const visibleMessages = sourceMessages.filter(
+				(message) =>
+					typeof message !== "object" ||
+					message === null ||
+					!this.hiddenMessages.has(message),
+			);
+			this.eventEmitter.emit({
+				...event,
+				messages: visibleMessages,
+			});
+			return;
+		}
+
+		this.eventEmitter.emit(event);
+	}
+
+	private resetCompletionGuard(userRequest = ""): void {
+		this.pendingPromiseStop = false;
+		this.lastToolFailure = null;
+		this.successfulToolAfterFailure = false;
+		this.lastModelError = null;
+		this.activeUserRequest = userRequest;
+		this.completionToolTrace = [];
+		this.pendingCompletionCandidate = null;
+		this.deferredAgentEndEvent = null;
+		this.previousTaskAssistantTextHash = "";
+	}
+
+	private throwIfModelStreamFailed(): void {
+		if (this.lastModelError) {
+			throw this.lastModelError;
+		}
+	}
+
+	private async judgePendingCompletion(): Promise<void> {
+		const candidate = this.pendingCompletionCandidate;
+		if (!candidate || !this.agent) {
+			return;
+		}
+		this.pendingCompletionCandidate = null;
+
+		if (candidate.repeatedResponse) {
+			this.pendingPromiseStop = true;
+			this.hiddenMessages.add(candidate.message);
+			this.deferredAgentEndEvent = null;
+			console.warn(
+				`[LLM CompletionGuard] repeated completed assistant response — textHash=${hashText(candidate.text)}`,
+			);
+			return;
+		}
+
+		let decision: SemanticCompletionDecision;
+		try {
+			const runtimeModel = this.agent.state.model as Model<any> & {
+				apiKey?: string;
+				authToken?: string;
+				credentialAuthMode?: string;
+				headers?: Record<string, string>;
+			};
+			const options: Record<string, unknown> = {
+				temperature: 0,
+				maxTokens: 512,
+				reasoning: "minimal",
+				maxRetryDelayMs: 5_000,
+				signal: AbortSignal.timeout(15_000),
+			};
+			let judgeModel = runtimeModel;
+			if (
+				(runtimeModel.credentialAuthMode === "bearer" ||
+					runtimeModel.credentialAuthMode === "oauth") &&
+				runtimeModel.authToken
+			) {
+				options["apiKey"] = runtimeModel.authToken;
+				options["headers"] = {
+					...(runtimeModel.headers ?? {}),
+					authorization: `Bearer ${runtimeModel.authToken}`,
+				};
+				judgeModel = {
+					...runtimeModel,
+					provider: "github-copilot",
+					apiKey: undefined,
+					authToken: undefined,
+				};
+			} else if (runtimeModel.apiKey) {
+				options["apiKey"] = runtimeModel.apiKey;
+			}
+
+			const judgeMessage = await piAi.completeSimple(
+				judgeModel,
+				{
+					systemPrompt: COMPLETION_JUDGE_SYSTEM_PROMPT,
+					messages: [{
+						role: "user",
+						content: buildCompletionJudgePrompt({
+							userRequest: this.activeUserRequest,
+							assistantResponse: candidate.text,
+							toolTrace: this.completionToolTrace,
+						}),
+						timestamp: Date.now(),
+					}],
+				},
+				options,
+			);
+			if (judgeMessage.stopReason === "error") {
+				throw new Error(
+					judgeMessage.errorMessage || "Completion judge model failed",
+				);
+			}
+			const judgeText = getMessageText(judgeMessage);
+			try {
+				decision = parseCompletionJudgeDecision(judgeText);
+			} catch (parseError) {
+				throw new Error(
+					`${parseError instanceof Error ? parseError.message : String(parseError)}; stopReason=${judgeMessage.stopReason}; response="${previewText(judgeText, 300)}"`,
+				);
+			}
+			logInfo(
+				`[LLM CompletionJudge] status=${decision.status}, reason="${previewText(decision.reason, 160)}"`,
+			);
+		} catch (error) {
+			const fallback = assessCompletion({
+				role: "assistant",
+				stopReason: candidate.stopReason,
+				text: candidate.text,
+				toolCallCount: candidate.toolCallCount,
+				hasUnresolvedToolFailure: this.lastToolFailure !== null,
+				hasSuccessfulToolAfterFailure: this.successfulToolAfterFailure,
+			});
+			decision = {
+				status: fallback.shouldRecover ? "incomplete" : "complete",
+				reason: `fallback:${fallback.reason}`,
+			};
+			console.warn(
+				`[LLM CompletionJudge] failed, using fallback — ${redactErrorForLogging(
+					error instanceof Error ? error.message : String(error),
+				)}`,
+			);
+		}
+
+		this.pendingPromiseStop = decision.status === "incomplete";
+		if (this.pendingPromiseStop) {
+			this.hiddenMessages.add(candidate.message);
+			this.deferredAgentEndEvent = null;
+			return;
+		}
+
+		this.eventEmitter.emit({
+			type: "completion_accepted",
+			message: candidate.message,
+			content: candidate.text,
+		} as unknown as AgentEvent);
+
+		if (this.deferredAgentEndEvent) {
+			const deferred = this.deferredAgentEndEvent;
+			this.deferredAgentEndEvent = null;
+			this.emitUiEvent(deferred);
+		}
+	}
+
+	private async runWithCompletionGuard(
+		start: () => Promise<void>,
+	): Promise<void> {
+		if (!this.agent) {
+			throw new Error("Agent 未初始化");
+		}
+
+		await start();
+		this.throwIfModelStreamFailed();
+		await this.judgePendingCompletion();
+		let recoveryAttempt = 0;
+
+		while (
+			this.pendingPromiseStop &&
+			recoveryAttempt < DEFAULT_COMPLETION_RECOVERY_LIMIT
+		) {
+			recoveryAttempt += 1;
+			this.pendingPromiseStop = false;
+
+			const recoveryMessage: SyntheticUserMessage = {
+				role: "user",
+				content: [{
+					type: "text",
+					text: buildCompletionRecoveryMessage(
+						this.runtimeEnvironmentPrompt,
+						this.lastToolFailure,
+						recoveryAttempt,
+					),
+				}],
+			};
+			this.hiddenMessages.add(recoveryMessage);
+			logInfo(
+				`[LLM CompletionGuard] recovering incomplete stop — attempt=${recoveryAttempt}/${DEFAULT_COMPLETION_RECOVERY_LIMIT}`,
+			);
+				try {
+					await this.agent.prompt(recoveryMessage as unknown as AgentMessage);
+					this.throwIfModelStreamFailed();
+					await this.judgePendingCompletion();
+				} catch (error) {
+					const recoveryError = error instanceof Error
+						? error
+						: new Error(String(error));
+					this.lastToolFailure = {
+						toolName: "agent-recovery",
+						reason: recoveryError.message,
+					};
+					this.pendingPromiseStop = false;
+					this.emitCompletionFailureReport();
+					return;
+				}
+		}
+
+		if (!this.pendingPromiseStop) {
+			return;
+		}
+
+		this.pendingPromiseStop = false;
+		this.emitCompletionFailureReport();
+	}
+
+	private emitCompletionFailureReport(): void {
+		if (!this.agent) {
+			return;
+		}
+
+		const report = buildCompletionFailureReport(this.lastToolFailure);
+		const message = {
+			role: "assistant",
+			content: [{ type: "text", text: report }],
+			stopReason: "stop",
+			completionFailure: true,
+		} as unknown as AgentMessage;
+		this.agent.appendMessage(message);
+
+			const visibleMessages = this.getVisibleMessages();
+			const events = [
+				{ type: "message_start", message },
+				{ type: "message_end", message },
+				{ type: "turn_end", message, toolResults: [] },
+				{ type: "agent_end", messages: visibleMessages },
+		] as unknown as AgentEvent[];
+		events.forEach((event) => {
+			this.handleAgentEvent(event);
+			this.eventEmitter.emit(event);
+		});
+		console.error(
+			`[LLM CompletionGuard] recovery exhausted — tool=${this.lastToolFailure?.toolName ?? "unknown"}, exitCode=${this.lastToolFailure?.exitCode ?? "unknown"}, reason=${this.lastToolFailure?.reason ?? "semantic completion check reported incomplete"}`,
+		);
 	}
 
 	/**
@@ -417,7 +858,7 @@ export class OriginOSAgent {
 			case "agent_start":
 				this.state.uiState.isThinking = true;
 				this.healthMonitor.markProcessingStart();
-				console.error(`[LLM Event] agent_start`);
+				logInfo(`[LLM Event] agent_start`);
 				break;
 
 			case "agent_end":
@@ -425,14 +866,14 @@ export class OriginOSAgent {
 				this.state.uiState.activeTools = [];
 				this.healthMonitor.markProcessingEnd();
 				this.healthMonitor.recordMessageHandled();
-				console.error(`[LLM Event] agent_end — messages=${(event as any).messages?.length ?? 0}`);
+				logInfo(`[LLM Event] agent_end — messages=${(event as any).messages?.length ?? 0}`);
 				break;
 
 			case "turn_start":
 				this.activeTurnSequence = ++this.turnSequence;
 				this.state.uiState.isThinking = true;
 				this.healthMonitor.markProcessingStart();
-				console.error(`[LLM Event] turn_start — turnSeq=${this.activeTurnSequence}`);
+				logInfo(`[LLM Event] turn_start — turnSeq=${this.activeTurnSequence}`);
 				break;
 
 			case "turn_end": {
@@ -445,7 +886,7 @@ export class OriginOSAgent {
 				this.healthMonitor.recordMessageHandled();
 
 				// 详细日志：打印 turn 结束时的完整消息结构
-				console.error(
+				logInfo(
 					`[LLM Event] turn_end — turnSeq=${this.activeTurnSequence}, toolCalls=${hasToolCalls}, toolResults=${toolCount}`
 				);
 				if (msg) {
@@ -461,26 +902,26 @@ export class OriginOSAgent {
 						msg.role === "assistant" &&
 						assistantText.length > 0 &&
 						assistantTextHash === this.previousAssistantTextHash;
-					console.error(
+					logInfo(
 						`[LLM Turn Detail] turnSeq=${this.activeTurnSequence}, model=${msg.model ?? 'unknown'}, provider=${msg.provider ?? 'unknown'}, api=${msg.api ?? 'unknown'}, stopReason=${msg.stopReason ?? 'unknown'}, assistantTextHash=${assistantTextHash}, sameAsPreviousAssistant=${sameAsPreviousAssistant}${sameAsPreviousAssistant ? `, previousTurnSeq=${this.previousAssistantTurnSequence}` : ""}`
 					);
 					if (msg.content && Array.isArray(msg.content)) {
 						msg.content.forEach((block: any, i: number) => {
 							if (block.type === "toolCall") {
-								console.error(`[LLM Turn Detail]   toolCall[${i}]: name=${block.name}, id=${block.id}, args=${JSON.stringify(block.arguments).slice(0, 300)}`);
+								logInfo(`[LLM Turn Detail]   toolCall[${i}]: name=${block.name}, id=${block.id}, args=${JSON.stringify(block.arguments).slice(0, 300)}`);
 							} else if (block.type === "text") {
-								console.error(`[LLM Turn Detail]   text[${i}]: len=${block.text?.length ?? 0}, preview="${(block.text ?? '').slice(0, 100)}"`);
+								logInfo(`[LLM Turn Detail]   text[${i}]: len=${block.text?.length ?? 0}, preview="${(block.text ?? '').slice(0, 100)}"`);
 							} else if (block.type === "thinking") {
-								console.error(`[LLM Turn Detail]   thinking[${i}]: len=${block.thinking?.length ?? 0}`);
+								logInfo(`[LLM Turn Detail]   thinking[${i}]: len=${block.thinking?.length ?? 0}`);
 							} else {
-								console.error(`[LLM Turn Detail]   block[${i}]: type=${block.type}`);
+								logInfo(`[LLM Turn Detail]   block[${i}]: type=${block.type}`);
 							}
 						});
 					}
 					if (toolCount > 0) {
 						turnEnd.toolResults.forEach((tr: any, i: number) => {
 							const content = tr.content?.map((c: any) => c.type === 'text' ? c.text : `[${c.type}]`).join('') ?? '';
-							console.error(`[LLM Turn Detail]   toolResult[${i}]: name=${tr.toolName ?? 'unknown'}, callId=${tr.toolCallId ?? 'unknown'}, content_preview="${content.slice(0, 200)}"`);
+							logInfo(`[LLM Turn Detail]   toolResult[${i}]: name=${tr.toolName ?? 'unknown'}, callId=${tr.toolCallId ?? 'unknown'}, content_preview="${content.slice(0, 200)}"`);
 						});
 					}
 					if (msg.role === "assistant" && assistantText.length > 0) {
@@ -497,7 +938,7 @@ export class OriginOSAgent {
 					toolName: (event as any).toolName,
 					startTime: Date.now(),
 				});
-				console.error(`[LLM Event] tool_start — ${(event as any).toolName}`);
+				logInfo(`[LLM Event] tool_start — ${(event as any).toolName}`);
 				break;
 
 			case "tool_execution_end": {
@@ -510,7 +951,16 @@ export class OriginOSAgent {
 				const resultText = Array.isArray(resultContent)
 					? resultContent.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('')
 					: typeof resultContent === 'string' ? resultContent : JSON.stringify(toolEndEvent.result ?? '');
-				console.error(`[LLM Event] tool_end — ${(event as any).toolName}${(event as any).isError ? ' (ERROR)' : ''}\n[ToolResult] ${resultText}`);
+				const status = getToolEventStatus(toolEndEvent);
+				const toolCallId = toolEndEvent.toolCallId ? `, callId=${toolEndEvent.toolCallId}` : "";
+				const exitCode = status.exitCode !== undefined ? `, exitCode=${status.exitCode}` : "";
+				const reason = status.reason ? `, reason=${status.reason}` : "";
+				const message = `[LLM Event] tool_end — ${toolEndEvent.toolName}${status.failed ? " (ERROR)" : ""}${toolCallId}${exitCode}${reason}\n[ToolResult] ${previewToolResult(resultText)}`;
+				if (status.failed) {
+					console.error(message);
+				} else {
+					logInfo(message);
+				}
 				break;
 			}
 
@@ -522,10 +972,12 @@ export class OriginOSAgent {
 					this.loggedStreamContent = "";
 					this.assistantStreamContent = "";
 					this.assistantLoopGuardTriggered = false;
+					this.toolCallDeltaCount = 0;
+					this.toolCallDeltaChars = 0;
 				} else {
 					this.activeAssistantMessageSequence = 0;
 				}
-				console.error(
+				logInfo(
 					`[LLM Event] message_start — role=${role}, turnSeq=${this.activeTurnSequence}${role === "assistant" ? `, assistantMsgSeq=${this.activeAssistantMessageSequence}` : ""}`
 				);
 				break;
@@ -534,40 +986,15 @@ export class OriginOSAgent {
 			case "message_update": {
 				const update = event as any;
 				const eventType = update.assistantMessageEvent?.type || "unknown";
-				// Print text/thinking deltas (to stderr to avoid corrupting JSON Line stdout in worker mode)
 				if (eventType === "text_delta") {
-					let delta = update.assistantMessageEvent?.delta || "";
-					if (this.assistantLoopGuardTriggered) {
-						update.assistantMessageEvent.delta = "";
-						break;
-					}
+					const delta = update.assistantMessageEvent?.delta || "";
 					if (delta.length > 0) {
 						const merged = getVisibleStreamDelta(this.assistantStreamContent, delta);
-						const trimmed = trimRepeatingTail(merged.content);
-						if (trimmed.trimmed) {
-							update.assistantMessageEvent.delta = trimmed.content.startsWith(this.assistantStreamContent)
-								? trimmed.content.slice(this.assistantStreamContent.length)
-								: "";
-							this.assistantStreamContent = trimmed.content;
-							this.loggedStreamContent = trimmed.content;
-							this.assistantLoopGuardTriggered = true;
-							console.error(
-								`\n[LLM LoopGuard] repeated assistant output detected — turnSeq=${this.activeTurnSequence}, assistantMsgSeq=${this.activeAssistantMessageSequence}, patternLen=${trimmed.pattern?.length ?? 0}, repetitions=${trimmed.repetitions ?? 0}, textHash=${hashText(trimmed.content)}, preview="${previewText(trimmed.content)}"`
-							);
-							this.agent?.abort();
-							delta = update.assistantMessageEvent.delta;
-						} else {
-							update.assistantMessageEvent.delta = merged.delta;
-							this.assistantStreamContent = merged.content;
-							delta = merged.delta;
-						}
-
-						if (delta.length > 0) {
-							const logMerged = getVisibleStreamDelta(this.loggedStreamContent, delta);
+						update.assistantMessageEvent.delta = merged.delta;
+						this.assistantStreamContent = merged.content;
+						if (merged.delta.length > 0) {
+							const logMerged = getVisibleStreamDelta(this.loggedStreamContent, merged.delta);
 							this.loggedStreamContent = logMerged.content;
-							if (logMerged.delta.length > 0) {
-								process.stderr.write(logMerged.delta);
-							}
 						}
 					}
 				} else if (eventType === "thinking_delta") {
@@ -575,18 +1002,23 @@ export class OriginOSAgent {
 					if (delta.length > 0) {
 						const merged = getVisibleStreamDelta(this.loggedStreamContent, delta);
 						this.loggedStreamContent = merged.content;
-						if (merged.delta.length > 0) {
-							process.stderr.write(merged.delta);
-						}
 					}
 				}
-				// 打印 tool call 相关事件
-				if (eventType === "toolcall_start" || eventType === "toolcall_end" || eventType === "toolcall_delta") {
+				if (eventType === "toolcall_delta") {
+					const delta = update.assistantMessageEvent?.delta;
+					this.toolCallDeltaCount += 1;
+					this.toolCallDeltaChars += typeof delta === "string"
+						? delta.length
+						: JSON.stringify(delta ?? "").length;
+				} else if (eventType === "toolcall_start" || eventType === "toolcall_end") {
 					const ae = update.assistantMessageEvent || {};
-					console.error(`\n[LLM Event] message_update — ${eventType}`);
+					const deltaSummary = eventType === "toolcall_end"
+						? `, deltas=${this.toolCallDeltaCount}, deltaChars=${this.toolCallDeltaChars}`
+						: "";
+					logInfo(`\n[LLM Event] message_update — ${eventType}${deltaSummary}`);
 					if (ae.toolCall) {
 						const tc = ae.toolCall;
-						console.error(`  → name=${tc.name}, id=${tc.id}, args=${JSON.stringify(tc.arguments).slice(0, 200)}`);
+						logInfo(`  → name=${tc.name}, id=${tc.id}, args=${JSON.stringify(tc.arguments).slice(0, 200)}`);
 					}
 				}
 				break;
@@ -595,20 +1027,34 @@ export class OriginOSAgent {
 			case "message_end": {
 				const msg = (event as any).message;
 				const role = msg?.role || "unknown";
-				if (role === "assistant" && this.assistantLoopGuardTriggered && Array.isArray(msg?.content)) {
-					const textBlock = msg.content.find((block: any) => block?.type === "text" && block.text != null);
-					if (textBlock) {
-						textBlock.text = this.assistantStreamContent;
-					}
-				}
 				const hasToolCalls = msg?.content?.filter?.((c: any) => c.type === "toolCall")?.length ?? 0;
 				const textContent = Array.isArray(msg?.content)
 					? msg.content.filter((b: any) => b.type === "text" && b.text != null).map((b: any) => b.text).join("")
 					: "";
+				if (role === "assistant" && textContent.length > 0) {
+					const completedHash = hashText(textContent);
+					this.assistantLoopGuardTriggered =
+						this.previousTaskAssistantTextHash.length > 0 &&
+						completedHash === this.previousTaskAssistantTextHash;
+					this.previousTaskAssistantTextHash = completedHash;
+					if (this.assistantLoopGuardTriggered) {
+						console.warn(
+							`[LLM LoopGuard] repeated completed assistant response — turnSeq=${this.activeTurnSequence}, assistantMsgSeq=${this.activeAssistantMessageSequence}, textHash=${completedHash}`,
+						);
+					}
+				}
 				const stopReason = msg?.stopReason || "";
-				console.error(
-					`\n[LLM Event] message_end — role=${role}, turnSeq=${this.activeTurnSequence}${role === "assistant" ? `, assistantMsgSeq=${this.activeAssistantMessageSequence}` : ""}, stopReason=${stopReason}, toolCalls=${hasToolCalls}, textLen=${textContent.length}, textHash=${hashText(textContent)}, loopGuard=${role === "assistant" ? this.assistantLoopGuardTriggered : false}, preview="${previewText(textContent)}"`
-				);
+				const messageEndLog =
+					`\n[LLM Event] message_end — role=${role}, turnSeq=${this.activeTurnSequence}${role === "assistant" ? `, assistantMsgSeq=${this.activeAssistantMessageSequence}` : ""}, stopReason=${stopReason}, toolCalls=${hasToolCalls}, textLen=${textContent.length}, textHash=${hashText(textContent)}, loopGuard=${role === "assistant" ? this.assistantLoopGuardTriggered : false}, preview="${previewText(textContent)}"`;
+				if (stopReason === "error") {
+					const errorMessage =
+						typeof msg?.errorMessage === "string" && msg.errorMessage.trim()
+							? redactErrorForLogging(msg.errorMessage)
+							: "Model stream ended without an errorMessage";
+					console.error(`${messageEndLog}, errorMessage="${errorMessage}"`);
+				} else {
+					logInfo(messageEndLog);
+				}
 				if (role === "assistant") {
 					this.loggedStreamContent = "";
 				}
@@ -619,7 +1065,11 @@ export class OriginOSAgent {
 				this.healthMonitor.recordError(
 					(event as any).error?.message ?? "Unknown agent error"
 				);
-				console.error(`[LLM Event] agent_error:`, (event as any).error);
+				console.error(
+					`[LLM Event] agent_error: ${redactErrorForLogging(
+						(event as any).error?.message ?? String((event as any).error),
+					)}`,
+				);
 				break;
 		}
 	}
@@ -654,7 +1104,7 @@ export class OriginOSAgent {
 		};
 
 		this.agent.appendMessage(warningMessage as unknown as AgentMessage);
-		console.error(`[LLM LoopGuard] ${result.type} — ${result.toolName} x${result.count}`);
+		console.warn(`[LLM LoopGuard] ${result.type} — ${result.toolName} x${result.count}`);
 	}
 
 	/**
@@ -696,7 +1146,7 @@ export class OriginOSAgent {
 		const compression = compressRecentTrace(this.agent.state.messages as AgentMessage[]);
 		if (compression.compressed) {
 			this.agent.replaceMessages(compression.messages);
-			console.error(
+			logInfo(
 				`[LLM] >>> Compressed message history: ${historyBeforeCompression} → ${compression.messages.length} | preservedTrace=${compression.preservedTraceCount}`
 			);
 		}
@@ -704,7 +1154,7 @@ export class OriginOSAgent {
 		const workingSummary = createWorkingSummaryMessage(this.agent.state.messages as AgentMessage[]);
 		if (workingSummary) {
 			this.agent.appendMessage(workingSummary);
-			console.error(`[LLM] >>> Working summary injected before prompt`);
+			logInfo(`[LLM] >>> Working summary injected before prompt`);
 		}
 
 		// LLM 调用日志
@@ -721,17 +1171,20 @@ export class OriginOSAgent {
 		const thinkingLevel = this.agent.state.thinkingLevel;
 		const toolCount = this.agent.state.tools?.length ?? 0;
 
-		console.error(`[LLM] >>> Prompt called | Model: ${modelInfo.provider}/${modelInfo.id} | Thinking: ${thinkingLevel} | History msgs: ${msgCount} | Tools: ${toolCount}`);
-		console.error(`[LLM] >>> Prompt preview: ${promptPreview}`);
+		logInfo(`[LLM] >>> Prompt called | Model: ${modelInfo.provider}/${modelInfo.id} | Thinking: ${thinkingLevel} | History msgs: ${msgCount} | Tools: ${toolCount}`);
+		logInfo(`[LLM] >>> Prompt preview: ${promptPreview}`);
 		if (images && images.length > 0) {
-			console.error(`[LLM] >>> Images: ${images.length} attached`);
+			logInfo(`[LLM] >>> Images: ${images.length} attached`);
 		}
 
 		const t0 = Date.now();
 		try {
-			await this.agent.prompt(message as string, images);
+			this.resetCompletionGuard(getPromptText(message));
+			await this.runWithCompletionGuard(
+				() => this.agent!.prompt(message as string, images),
+			);
 			const elapsed = Date.now() - t0;
-			console.error(`[LLM] <<< Prompt completed | Elapsed: ${elapsed}ms`);
+			logInfo(`[LLM] <<< Prompt completed | Elapsed: ${elapsed}ms`);
 		} catch (error) {
 			const elapsed = Date.now() - t0;
 			const agentError = error instanceof Error ? error : new Error(String(error));
@@ -743,7 +1196,9 @@ export class OriginOSAgent {
 				type: "agent_error",
 				error: agentError,
 			} as unknown as AgentEvent);
-			console.error(`[LLM] <<< Prompt failed | Elapsed: ${elapsed}ms | ${agentError.message}`);
+			console.error(
+				`[LLM] <<< Prompt failed | Elapsed: ${elapsed}ms | ${redactErrorForLogging(agentError.message)}`,
+			);
 			throw agentError;
 		}
 	}
@@ -759,7 +1214,11 @@ export class OriginOSAgent {
 			throw new Error("Agent 已销毁");
 		}
 
-		await this.agent.continue();
+		const latestUserRequest = [...this.agent.state.messages]
+			.reverse()
+			.find((message) => message.role === "user");
+		this.resetCompletionGuard(getMessageText(latestUserRequest));
+		await this.runWithCompletionGuard(() => this.agent!.continue());
 	}
 
 	/**
@@ -776,7 +1235,9 @@ export class OriginOSAgent {
 		if (!this.agent) {
 			throw new Error("Agent 未初始化");
 		}
-		this.agent.setSystemPrompt(prompt);
+		this.agent.setSystemPrompt(
+			appendRuntimeEnvironmentPrompt(prompt, this.runtimeEnvironment),
+		);
 	}
 
 	/**
@@ -891,7 +1352,7 @@ export class OriginOSAgent {
 
 		return {
 			sessionId: this.sessionId,
-			messages: this.agent.state.messages,
+				messages: this.getVisibleMessages(),
 			systemPrompt: this.agent.state.systemPrompt,
 			model: {
 				provider: this.agent.state.model.provider || "unknown",
@@ -901,6 +1362,18 @@ export class OriginOSAgent {
 			updatedAt: Date.now(),
 			projectContext: this.projectContext,
 		};
+	}
+
+	private getVisibleMessages(): AgentMessage[] {
+		if (!this.agent) {
+			return [];
+		}
+		return this.agent.state.messages.filter(
+			(message) =>
+				typeof message !== "object" ||
+				message === null ||
+				!this.hiddenMessages.has(message),
+		);
 	}
 
 	/**
@@ -1006,10 +1479,12 @@ export function createOriginOSAgent(
 	const configStatus = getConfigStatus();
 
 	// 调试日志
-	console.log('[createOriginOSAgent] Config status:', configStatus);
-	console.log('[createOriginOSAgent] Env ANTHROPIC_AUTH_TOKEN:', process.env['ANTHROPIC_AUTH_TOKEN']);
-	console.log('[createOriginOSAgent] Env ANTHROPIC_BASE_URL:', process.env['ANTHROPIC_BASE_URL']);
-	console.log('[createOriginOSAgent] Env ANTHROPIC_MODEL:', process.env['ANTHROPIC_MODEL']);
+	logInfo('[createOriginOSAgent] Config status:', configStatus);
+	logInfo('[createOriginOSAgent] Environment:', {
+		hasAnthropicAuthToken: !!process.env['ANTHROPIC_AUTH_TOKEN'],
+			anthropicBaseUrl: sanitizeBaseUrlForLogging(process.env['ANTHROPIC_BASE_URL']),
+		anthropicModel: process.env['ANTHROPIC_MODEL'],
+	});
 
 	// 根据 provider 和配置选择模型
 	let agentModel: Model<any>;
@@ -1045,20 +1520,19 @@ export function createOriginOSAgent(
 
 	// 调试：查看创建的模型配置
 	const debugCredential = (agentModel as any).apiKey || (agentModel as any).authToken;
-	console.log('[createOriginOSAgent] Created model:', {
+	logInfo('[createOriginOSAgent] Created model:', {
 		id: agentModel.id,
 		api: agentModel.api,
 		provider: agentModel.provider,
-		baseUrl: (agentModel as any).baseUrl,
+			baseUrl: sanitizeBaseUrlForLogging((agentModel as any).baseUrl),
 		hasCredential: !!debugCredential,
 		credentialSource: (agentModel as any).credentialSource || (llmConfig?.anthropicAuthToken || llmConfig?.authToken
 			? 'user.anthropicAuthToken'
 			: llmConfig?.anthropicApiKey || llmConfig?.apiKey
 				? 'user.anthropicApiKey'
 				: 'env/default'),
-		credentialAuthMode: (agentModel as any).credentialAuthMode || (debugCredential?.includes?.('sk-ant-oat') ? 'oauth' : 'api-key'),
-		credentialPrefix: debugCredential ? debugCredential.substring(0, 15) + '...' : 'none',
-	});
+			credentialAuthMode: (agentModel as any).credentialAuthMode || (debugCredential?.includes?.('sk-ant-oat') ? 'oauth' : 'api-key'),
+		});
 
 	const projectContext = variables
 		? {

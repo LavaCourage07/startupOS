@@ -173,17 +173,17 @@ async function main() {
     overwrite: false,
   });
 
-  // Windows blockmaps
-  artifacts.push({
-    fileName: `${exe}.blockmap`,
-    filePath: path.join(releaseDir, `${exe}.blockmap`),
-    overwrite: false,
-  });
-  artifacts.push({
-    fileName: `${zip}.blockmap`,
-    filePath: path.join(releaseDir, `${zip}.blockmap`),
-    overwrite: false,
-  });
+  // Windows blockmaps are optional for zip-only releases.
+  for (const blockmap of [`${exe}.blockmap`, `${zip}.blockmap`]) {
+    const blockmapPath = path.join(releaseDir, blockmap);
+    if (fs.existsSync(blockmapPath)) {
+      artifacts.push({
+        fileName: blockmap,
+        filePath: blockmapPath,
+        overwrite: false,
+      });
+    }
+  }
 
   console.log('[publish-windows-only] release', {
     version,

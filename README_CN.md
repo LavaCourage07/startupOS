@@ -1,187 +1,114 @@
-# OriginOS CE
+<div align="center">
 
-OriginOS CE 是一个面向个人与小团队的 AI Native 工作系统，也是一个探索下一代操作系统形态的个人业务操作系统。它不是传统意义上的操作系统，而是运行在 Web / Electron 桌面壳之上的 Agent 工作台：用户通过项目、角色 Agent、技能、文件、通知和定时任务定义问题、组织工作流，让系统理解人的业务语境，并用 AI Native 的方式辅助生成应用、流程、知识和协作结构。
+<img src="docs/assets/readme/originos-banner.png" alt="OriginOS CE" />
 
-## 产品愿景
+<p>
+  <a href="https://github.com/NeuralNexusPro/startupOS/releases/latest"><img src="https://img.shields.io/github/v/release/NeuralNexusPro/startupOS?style=flat-square&label=最新版本" alt="最新版本" /></a>
+  <a href="https://github.com/NeuralNexusPro/startupOS/actions/workflows/desktop-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/NeuralNexusPro/startupOS/desktop-release.yml?style=flat-square&label=桌面构建" alt="桌面构建" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/许可证-AGPL--3.0-2f81f7?style=flat-square" alt="AGPL-3.0" /></a>
+  <a href="https://github.com/NeuralNexusPro/startupOS/stargazers"><img src="https://img.shields.io/github/stars/NeuralNexusPro/startupOS?style=flat-square" alt="GitHub Stars" /></a>
+</p>
 
-OriginOS CE 的使命，是为下一代操作系统建立一个可运行的原型：未来的应用不应只由预设菜单和固定软件形态决定，而应从用户定义的问题出发，由系统理解上下文、拆解任务、组织能力，并用 AI Native 的方式生产出对应的工作空间、应用界面、自动化流程和协作 Agent。
+[English](./README.md) | **简体中文**
 
-它的核心理念是让 AI 适应人的思考，而不是让人迁就 AI 的工具链。系统通过对话、项目、技能和长期记忆捕捉用户的隐性判断、业务语境和工作偏好，把分散的具身经验转化为可引用、可执行、可演化的符号结构。
+</div>
 
-在人与 AI 的关系上，OriginOS CE 不是把 AI 设计成一次性问答工具，而是设计成可长期协作的操作系统能力：人提出问题、给出目标、判断和品味，系统负责承接执行、组织知识、发现连接、生成工具，并在反馈中持续校准自己的行为。
+## OriginOS CE 是什么？
 
-## 核心能力
+OriginOS CE 是一个面向个人与小团队的 AI Native 工作系统。它不从固定的软件菜单出发，而是从你要解决的问题出发，把项目、Agent、角色、技能、文件、知识、通知和定时任务组织在同一个桌面中。
 
-- 首页工作台：把项目、角色、技能、文件、通知和定时任务组织在统一桌面中，让用户从“定义问题”开始进入工作。
-- Agent 系统：支持通用 Agent、RoleAgent、Project Agent、流式会话、工具调用、工作目录绑定、运行时 LLM 配置和会话隔离，让 AI 以长期角色参与工作。
-- Skill 系统：支持 bundled / project / user 多来源技能加载、技能市场、技能窗口会话、附件上传和受控产物输出，把可复用工作流沉淀为可调用、可组合、可再生成的能力。
-- 项目系统：支持项目初始化、项目 Agent、项目文件管理、业务访谈、business-model 产物和方案沉淀，让 AI 在具体业务上下文中理解问题。
-- 认知沉淀：围绕 `Memory.md`、`Knowledge.md`、`Patterns.md`、实践日志和 frozen snapshot 维护 Agent/Project 维度的长期上下文，使经验能够跨会话积累和演化。
-- AI Native 生产：围绕用户定义的问题，逐步把对话、知识、技能、Agent 和界面组织成新的工作应用形态，而不是只调用既有软件功能。
-- 系统能力：提供文件读写、文档解析、系统通知、后台定时调度、跨窗体事件和自动更新基础设施。
-- 多 Agent 协作 runtime：基于 solution manifest 启动 supervisor / worker，支持黑板、事件流、人审、指标和生产版日志。
-- 桌面打包：支持 macOS arm64 / x64 DMG、Windows x64 NSIS 安装包和 zip，打包前校验 worker runtime 依赖与根目录构建产物。
+你可以用它：
 
-## 技术栈
+- 把业务问题建立为带有上下文、文件和本体模型的项目；
+- 创建拥有独立身份、记忆和工作目录的 Agent / RoleAgent；
+- 像打开应用一样运行技能，上传资料并获得受控的工作产物；
+- 从解决方案设计进入多 Agent 协作，承接更长时间的任务；
+- 把上下文和工作产物保留在自己的设备上。
 
-- Next.js 14 App Router
-- React 18 + TypeScript 5
-- Tailwind CSS + shadcn/Radix 基础组件
-- Zustand 状态管理
-- Electron 桌面运行时
-- 本地文件系统 JSON 存储
-- Vitest 测试
-- pnpm workspace
+## 下载与安装
 
-## 仓库结构
+前往 [GitHub Releases](https://github.com/NeuralNexusPro/startupOS/releases/latest) 下载最新版本。
 
-```text
-originos/
-├── packages/
-│   ├── web/             # Next.js Web UI
-│   ├── desktop/         # Electron main/preload/打包配置
-│   ├── core/            # 核心业务、Pi Agent、协作 runtime、类型
-│   ├── service/         # 服务层包占位/聚合
-│   └── agent/           # @mariozechner/agent workspace 兼容包
-├── data/                # 本地运行时数据
-├── docs/                # 架构、Story、变更记录和设计文档
-├── templates/           # 模板资源（skills、project-interview 等）
-├── resources/           # 桌面资源
-├── release/             # 本地打包产物
-├── AGENTS.md            # 架构规约，开发时必须遵守
-└── README.md
-```
+| 平台                | 安装包      | 安装方式                                                 |
+| ------------------- | ----------- | -------------------------------------------------------- |
+| Windows x64         | `.exe`      | 下载安装程序，完成安装后从开始菜单启动 **OriginOS CE**。 |
+| macOS Apple Silicon | `arm64.dmg` | 打开 DMG，将 **OriginOS CE** 拖入“应用程序”。            |
+| macOS Intel         | `x64.dmg`   | 打开 DMG，将 **OriginOS CE** 拖入“应用程序”。            |
 
-## 环境要求
+桌面发布流程会同时完成签名、安装包校验、更新元数据和完整资源上传。
 
-- Node.js 20+
-- pnpm 9+
-- macOS 桌面打包需要本机 Electron / electron-builder 依赖可用
+## 第一次使用
 
-安装依赖：
+1. 打开**设置**，配置模型服务商、模型 ID、服务地址和凭证。
+2. 回到桌面，选择一个入口：
+   - 需要业务上下文、文件、建模和方案设计时，选择**创建项目**；
+   - 需要直接执行一个聚焦流程时，打开**技能**；
+   - 需要长期协作、独立身份和工作空间时，选择**创建 Agent / 创建角色**。
+3. 在窗体中发送消息；需要资料时上传附件；生成的文件可以从工作空间入口查看。
+
+当前支持 Anthropic、OpenAI-compatible、Google Gemini 和 Azure OpenAI 配置。凭证保存在本地应用配置中。
+
+## 产品体验
+
+### 从业务上下文建立项目
+
+通过访谈梳理业务问题，在同一个工作空间中查看对话、业务模型和本体结构。
+
+<p align="center">
+  <img src="docs/assets/readme/originos-interview.png" width="48%" alt="项目访谈" />
+  <img src="docs/assets/readme/originos-ontology.jpg" width="48%" alt="本体工作空间" />
+</p>
+
+### 把可复用工作变成技能和角色
+
+技能承接聚焦的工作流；RoleAgent 把身份、记忆、知识、工具和产物放在一个可持续使用的工作目录中。
+
+<p align="center">
+  <img src="docs/assets/readme/originos-skill.png" width="48%" alt="技能窗体" />
+  <img src="docs/assets/readme/originos-role.png" width="48%" alt="角色 Agent 窗体" />
+</p>
+
+### 让多个 Agent 承接长任务
+
+解决方案可以交给多 Agent runtime 执行，任务、进度、人审节点和产物保持可见。
+
+<p align="center">
+  <img src="docs/assets/readme/originos-multi-agent.jpg" width="88%" alt="多 Agent 运行时" />
+</p>
+
+## 从源码运行
+
+环境要求：Node.js **22.19+**、pnpm **9+** 和 Git。
 
 ```bash
+git clone https://github.com/NeuralNexusPro/startupOS.git
+cd startupOS
+corepack enable
 pnpm install
-```
-
-## LLM 配置
-
-LLM 配置跟随用户在应用设置页中的选择。桌面端和 Web 端运行时会读取当前用户配置，包括 provider、base URL、模型 ID、凭证、最大输出 token 和字段映射等。
-
-支持的 provider 包括 Anthropic、OpenAI-compatible、Google Gemini 和 Azure OpenAI。配置更新后，新的 Agent/Skill 会话会使用最新设置；多 Agent 协作子进程也会继承父进程下发的运行时模型配置。
-
-## 开发
-
-启动 Web 开发服务：
-
-```bash
-pnpm dev
-```
-
-启动 Electron 桌面开发模式：
-
-```bash
 pnpm desktop:dev
 ```
 
-常用命令：
+只启动 Web 界面可运行 `pnpm dev`；生成本地桌面安装包可运行 `pnpm desktop:dist`。
 
-```bash
-pnpm build                 # 构建 Web 应用
-pnpm desktop:build         # 构建 Web + Desktop，并校验 worker runtime 依赖
-pnpm desktop:dist          # 生成桌面安装包
-pnpm lint                  # Next lint
-pnpm type-check            # Web TypeScript 检查
-pnpm test                  # Web Vitest
-pnpm agents:check          # AGENTS 架构规约检查
-pnpm build:check-root-artifacts # 检查根目录是否出现误生成的构建产物
-```
+## 数据与隐私
 
-## 打包
+- 运行数据默认保存在本机应用数据目录。
+- 项目、会话、技能、Agent、知识和生成文件均采用本地文件存储。
+- 模型请求只会发送到用户在设置中选择的服务商。
+- 提交问题前，请从日志中移除 API Key、凭证和私人文档内容。
 
-生成桌面安装包：
+## 参与贡献
 
-```bash
-pnpm desktop:dist                              # 按 electron-builder 配置生成默认平台产物
-pnpm desktop:dist:mac                          # 生成 macOS arm64 / x64 DMG
-pnpm --filter @originos/desktop dist:win        # 生成 Windows x64 NSIS 安装包和 zip
-```
+欢迎参与 OriginOS CE。修改代码前请先阅读 [CONTRIBUTING.md](./CONTRIBUTING.md) 和 [AGENTS.md](./AGENTS.md)。
 
-产物默认输出到 `release/`：
+- 缺陷反馈：在 [Issues](https://github.com/NeuralNexusPro/startupOS/issues) 中提供 OriginOS 版本、操作系统、复现步骤、预期结果、实际结果和脱敏日志。
+- 功能建议：先描述用户问题和预期工作流，再讨论具体实现。
+- Pull Request：从 `dev` 创建分支，控制改动范围，补充测试，并同步更新行为相关文档。
+- 验证要求：运行受影响模块的单元/集成测试和 `pnpm lint`；桌面改动还需运行对应的安装包校验脚本。
+- 架构要求：共享业务逻辑进入 `packages/core`，Web 和 Electron 只作为 core API 的适配层。
 
-```text
-release/
-├── OriginOS CE-<version>-arm64.dmg
-├── OriginOS CE-<version>-x64.dmg
-├── OriginOS CE-<version>-x64.exe
-├── OriginOS CE-<version>-x64.zip
-├── mac-arm64/
-├── mac/
-└── win-unpacked/
-```
+较大改动需要在 `docs/specs/` 中创建或更新对应 Epic / Story，并补齐验收与回归用例。
 
-桌面 `build:app` 会执行：
+## 许可证
 
-1. `@originos/web` Next build
-2. `@originos/desktop` TypeScript build
-3. `scripts/check-root-build-artifacts.js`
-4. `packages/desktop/scripts/verify-agent-worker-runtime.js`
-5. 同步 `dist-electron/` 到桌面包目录
-6. 再次检查根目录构建产物
-
-## 数据目录
-
-运行时数据默认写入 `data/` 或桌面应用的 Application Support 数据根目录。主要目录：
-
-- `data/projects/`：项目、会话、文件、solutions、本体数据。
-- `data/skills/`：首页技能入口产物。
-- `data/agents/`：内置/用户 Agent 的运行时文件和认知数据。
-- `data/sessions/`：全局 Agent 会话。
-
-## 测试与验证
-
-推荐变更后至少运行：
-
-```bash
-pnpm --filter @originos/web build
-pnpm --filter @originos/desktop build
-```
-
-多 Agent 打包链路验证：
-
-```bash
-node packages/desktop/scripts/verify-agent-worker-runtime.js
-```
-
-根目录构建产物检查：
-
-```bash
-pnpm build:check-root-artifacts
-```
-
-定向运行 Vitest：
-
-```bash
-pnpm --filter @originos/core exec vitest run <test-file>
-pnpm --filter @originos/web test
-```
-
-注意：当前 `packages/core` 直接运行 `tsc --noEmit` 可能会暴露历史类型问题；以具体变更影响范围选择验证命令。
-
-## 架构约束
-
-开发必须遵守 `AGENTS.md`：
-
-- `packages/web/src/app/` 只放路由、页面和 API 边界，业务逻辑进入 `packages/core/src/lib/` 或 `packages/core/src/modules/`。
-- 服务端模块依赖必须单向，禁止循环依赖。
-- MVP 阶段使用本地文件系统 JSON 存储，禁止引入数据库。
-- 技能/Agent 产物必须写入对应 `data/` 子目录。
-- 每次需求变更或 bug 修复需更新 `docs/changes/changelog.md`。
-
-## 文档入口
-
-- `AGENTS.md`：架构规约和项目地图。
-- `docs/index.md`：文档索引。
-- `docs/changes/changelog.md`：变更记录。
-- `docs/specs/`：Epic / Story 规格。
-- `docs/desktop-runtime-logs.md`：桌面 runtime 日志说明。
+OriginOS CE 使用 [GNU Affero General Public License v3.0](./LICENSE) 开源。

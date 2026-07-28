@@ -7,12 +7,14 @@ const dotenv = require('dotenv');
 const qiniu = require('qiniu');
 const { execFileSync } = require('node:child_process');
 const { buildReleaseNotes } = require('./release-notes');
+const { planQiniuRetention } = require('./qiniu-retention');
 
 const repoRoot = path.resolve(__dirname, '../../..');
 const desktopRoot = path.resolve(__dirname, '..');
 const desktopPackage = require('../package.json');
 const version = desktopPackage.version;
 const releaseDir = path.join(repoRoot, 'release');
+const MIN_RELEASE_PACKAGE_BYTES = 1024 * 1024;
 
 function loadEnvFiles() {
   const envFiles = [
@@ -68,9 +70,24 @@ function assertFile(filePath) {
   }
 }
 
+function hasReleasePackage(fileName) {
+  const filePath = path.join(releaseDir, fileName);
+  if (!fs.existsSync(filePath)) {
+    return false;
+  }
+
+  return fs.statSync(filePath).size >= MIN_RELEASE_PACKAGE_BYTES;
+}
+
 function sha512Base64(filePath) {
   const hash = crypto.createHash('sha512');
   hash.update(fs.readFileSync(filePath));
+  return hash.digest('base64');
+}
+
+function sha512Base64Buffer(buffer) {
+  const hash = crypto.createHash('sha512');
+  hash.update(buffer);
   return hash.digest('base64');
 }
 
@@ -94,49 +111,14 @@ function verifyWindowsPackage() {
   });
 }
 
-function generateUpdateMetadata(platform) {
-  const releaseDate = new Date().toISOString();
-  const isMac = platform === 'mac';
-
-  const archOrder = isMac ? ['x64', 'arm64'] : ['x64'];
-  const ext = isMac ? 'zip' : 'zip';
-  const prefix = isMac ? '' : 'OriginOS CE-';
-
-  const entries = archOrder.map((arch) => {
-    const zipFileName = `OriginOS CE-${version}-${arch}.zip`;
-    const zipFilePath = path.join(releaseDir, zipFileName);
-    assertFile(zipFilePath);
-    return {
-      fileName: zipFileName,
-      filePath: zipFilePath,
-      size: fs.statSync(zipFilePath).size,
-      sha512: sha512Base64(zipFilePath),
-    };
+function generateUpdateMetadataFiles() {
+  execFileSync(process.execPath, [path.join(__dirname, 'generate-update-metadata.js')], {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      NODE_OPTIONS: '',
+    },
   });
-
-  const primary = entries[0];
-  const lines = [
-    `version: ${version}`,
-    'files:',
-    ...entries.flatMap((entry) => [
-      `  - url: ${entry.fileName}`,
-      `    sha512: ${entry.sha512}`,
-      `    size: ${entry.size}`,
-    ]),
-    `path: ${primary.fileName}`,
-    `sha512: ${primary.sha512}`,
-    `releaseDate: '${releaseDate}'`,
-    '',
-  ];
-
-  const metadataName = `latest-${platform}.yml`;
-  const metadataPath = path.join(releaseDir, metadataName);
-  fs.writeFileSync(metadataPath, lines.join('\n'), 'utf8');
-
-  const stableName = `stable-${platform}.yml`;
-  fs.copyFileSync(metadataPath, path.join(releaseDir, stableName));
-
-  return metadataPath;
 }
 
 function statObject(bucketManager, bucket, key) {
@@ -157,6 +139,99 @@ function statObject(bucketManager, bucket, key) {
       reject(new Error(`Qiniu stat failed: ${key} status=${info.statusCode} body=${JSON.stringify(body)}`));
     });
   });
+}
+
+function listObjects(bucketManager, bucket, prefix) {
+  return new Promise((resolve, reject) => {
+    const items = [];
+    let marker;
+
+    const nextPage = () => {
+      bucketManager.listPrefix(bucket, {
+        prefix: prefix ? `${prefix}/` : '',
+        marker,
+        limit: 1000,
+      }, (error, body, info) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        if (info.statusCode !== 200) {
+          reject(new Error(
+            `Qiniu list failed: prefix=${prefix} status=${info.statusCode} body=${JSON.stringify(body)}`,
+          ));
+          return;
+        }
+
+        items.push(...(Array.isArray(body.items) ? body.items : []));
+        if (!body.marker) {
+          resolve(items);
+          return;
+        }
+        if (body.marker === marker) {
+          reject(new Error(`Qiniu list returned a repeated marker for prefix: ${prefix}`));
+          return;
+        }
+        marker = body.marker;
+        nextPage();
+      });
+    };
+
+    nextPage();
+  });
+}
+
+function deleteObject(bucketManager, bucket, key) {
+  return new Promise((resolve, reject) => {
+    bucketManager.delete(bucket, key, (error, body, info) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      if (info.statusCode === 200 || info.statusCode === 612) {
+        resolve();
+        return;
+      }
+      reject(new Error(
+        `Qiniu delete failed: key=${key} status=${info.statusCode} body=${JSON.stringify(body)}`,
+      ));
+    });
+  });
+}
+
+async function cleanupOldReleases(bucketManager, bucket, prefix) {
+  const retainCount = Number.parseInt(process.env.QINIU_RETAIN_VERSIONS || '10', 10);
+  const dryRun = process.env.QINIU_RETENTION_DRY_RUN === '1';
+  const items = await listObjects(bucketManager, bucket, prefix);
+  const plan = planQiniuRetention(items, { prefix, retainCount });
+
+  console.log('[publish-qiniu-updates] retention plan', {
+    retainCount,
+    dryRun,
+    recognizedArtifactCount: plan.recognizedArtifactCount,
+    retainedVersions: plan.retainedVersions,
+    deletedVersions: plan.deletedVersions,
+    deletedObjectCount: plan.deletedKeys.length,
+  });
+
+  if (dryRun || plan.deletedKeys.length === 0) {
+    return plan;
+  }
+
+  const concurrency = 10;
+  for (let index = 0; index < plan.deletedKeys.length; index += concurrency) {
+    const keys = plan.deletedKeys.slice(index, index + concurrency);
+    await Promise.all(keys.map(async (key) => {
+      console.log(`[publish-qiniu-updates] deleting old release artifact ${key}`);
+      await deleteObject(bucketManager, bucket, key);
+    }));
+  }
+
+  console.log('[publish-qiniu-updates] retention cleanup completed', {
+    deletedVersions: plan.deletedVersions,
+    deletedObjectCount: plan.deletedKeys.length,
+  });
+  return plan;
 }
 
 function uploadFile({ mac, config, bucket, key, filePath, overwrite, cacheControl }) {
@@ -188,101 +263,93 @@ function uploadFile({ mac, config, bucket, key, filePath, overwrite, cacheContro
   });
 }
 
+function refreshCdnUrls(cdnManager, urls) {
+  if (!urls.length) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    cdnManager.refreshUrls(urls, (error, body, info) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      if (info.statusCode >= 200 && info.statusCode < 300) {
+        resolve(body);
+        return;
+      }
+      reject(new Error(`Qiniu CDN refresh failed: status=${info.statusCode} body=${JSON.stringify(body)}`));
+    });
+  });
+}
+
+function isMetadataArtifact(fileName) {
+  return fileName.endsWith('.yml') || fileName.endsWith('.yaml');
+}
+
 function buildArtifacts(metadataFiles, metadataOnly, force) {
   const files = [];
+  const pushArtifact = (fileName, overwrite = force) => {
+    const filePath = path.join(releaseDir, fileName);
+    files.push({
+      fileName,
+      filePath,
+      overwrite,
+      size: fs.existsSync(filePath) ? fs.statSync(filePath).size : null,
+      sha512: fs.existsSync(filePath) ? sha512Base64(filePath) : null,
+    });
+  };
+  const pushOptionalArtifact = (fileName, overwrite = force) => {
+    if (fs.existsSync(path.join(releaseDir, fileName))) {
+      pushArtifact(fileName, overwrite);
+    }
+  };
 
   if (!metadataOnly) {
     // macOS 版本
     for (const arch of ['arm64', 'x64']) {
       const dmg = `OriginOS CE-${version}-${arch}.dmg`;
-      const dmgPath = path.join(releaseDir, dmg);
-      if (fs.existsSync(dmgPath)) {
-        files.push({
-          fileName: dmg,
-          filePath: dmgPath,
-          overwrite: force,
-        });
-        files.push({
-          fileName: `${dmg}.blockmap`,
-          filePath: path.join(releaseDir, `${dmg}.blockmap`),
-          overwrite: force,
-        });
-      }
+      if (hasReleasePackage(dmg)) {
+        pushArtifact(dmg);
+        pushOptionalArtifact(`${dmg}.blockmap`);
 
-      // ZIP 格式（electron-updater 自动更新需要）
-      const zip = `OriginOS CE-${version}-${arch}.zip`;
-      const zipPath = path.join(releaseDir, zip);
-      if (fs.existsSync(zipPath)) {
-        files.push({
-          fileName: zip,
-          filePath: zipPath,
-          overwrite: force,
-        });
-        files.push({
-          fileName: `${zip}.blockmap`,
-          filePath: path.join(releaseDir, `${zip}.blockmap`),
-          overwrite: force,
-        });
+        // ZIP 格式（electron-updater 自动更新需要）。macOS x64 zip 与
+        // Windows zip 文件名相同，只有对应 dmg 存在时才归类为 macOS。
+        const zip = `OriginOS CE-${version}-${arch}.zip`;
+        if (hasReleasePackage(zip)) {
+          pushArtifact(zip);
+          pushOptionalArtifact(`${zip}.blockmap`);
+        }
       }
     }
 
     // Windows 版本
     const exe = `OriginOS CE-${version}-x64.exe`;
-    const exePath = path.join(releaseDir, exe);
-    if (fs.existsSync(exePath)) {
-      files.push({
-        fileName: exe,
-        filePath: exePath,
-        overwrite: force,
-      });
-      files.push({
-        fileName: `${exe}.blockmap`,
-        filePath: path.join(releaseDir, `${exe}.blockmap`),
-        overwrite: force,
-      });
+    if (hasReleasePackage(exe)) {
+      pushArtifact(exe);
+      pushOptionalArtifact(`${exe}.blockmap`);
     }
 
     // Windows ZIP（electron-updater 需要）
     const winZip = `OriginOS CE-${version}-x64.zip`;
-    const winZipPath = path.join(releaseDir, winZip);
-    if (fs.existsSync(winZipPath)) {
-      // 检查是否和 macOS x64 zip 同名（macOS 也有 x64 zip）
-      const macX64Zip = `OriginOS CE-${version}-x64.zip`;
-      const macX64ZipPath = path.join(releaseDir, macX64Zip);
-      if (!fs.existsSync(macX64ZipPath) || winZipPath === macX64ZipPath) {
-        // Windows zip 和 macOS x64 zip 是同一个文件，不需要重复添加
-      } else {
-        files.push({
-          fileName: winZip,
-          filePath: winZipPath,
-          overwrite: force,
-        });
-        files.push({
-          fileName: `${winZip}.blockmap`,
-          filePath: path.join(releaseDir, `${winZip}.blockmap`),
-          overwrite: force,
-        });
-      }
+    if (hasReleasePackage(winZip)) {
+      pushArtifact(winZip);
+      pushOptionalArtifact(`${winZip}.blockmap`);
     }
   }
 
   // 添加元数据文件
   for (const metadataFile of metadataFiles) {
     const metadataName = path.basename(metadataFile);
-    files.push({
-      fileName: metadataName,
-      filePath: metadataFile,
-      overwrite: true,
-    });
+    pushArtifact(metadataName, true);
 
     // 添加 stable 版本
     const stableName = metadataName.replace('latest-', 'stable-');
     if (stableName !== metadataName) {
-      files.push({
-        fileName: stableName,
-        filePath: path.join(releaseDir, stableName),
-        overwrite: true,
-      });
+      pushArtifact(stableName, true);
+    }
+
+    if (metadataName === 'latest-win.yml') {
+      pushArtifact('latest.yml', true);
+      pushArtifact('stable.yml', true);
     }
   }
 
@@ -304,6 +371,66 @@ async function verifyCdnUrl(url) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function fetchRemoteBuffer(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`CDN verification failed: ${response.status} ${url}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
+async function verifyCdnArtifact(url, artifact, options = {}) {
+  if (!url) return;
+
+  const expectedSize = fs.statSync(artifact.filePath).size;
+  const expectedSha512 = sha512Base64(artifact.filePath);
+  const retries = Number.parseInt(process.env.QINIU_CDN_VERIFY_RETRIES || '6', 10);
+  const retryDelayMs = Number.parseInt(process.env.QINIU_CDN_VERIFY_RETRY_DELAY_MS || '10000', 10);
+  const attempts = Math.max(1, options.retries ?? retries);
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const buffer = await fetchRemoteBuffer(url);
+      const actualSize = buffer.length;
+      const actualSha512 = sha512Base64Buffer(buffer);
+
+      if (actualSize !== expectedSize) {
+        throw new Error(
+          `CDN size mismatch for ${artifact.fileName}: expected=${expectedSize} actual=${actualSize} url=${url}`,
+        );
+      }
+      if (actualSha512 !== expectedSha512) {
+        throw new Error(
+          `CDN sha512 mismatch for ${artifact.fileName}: expected=${expectedSha512} actual=${actualSha512} url=${url}`,
+        );
+      }
+
+      console.log(`[publish-qiniu-updates] verified remote sha512 ${artifact.fileName}`);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts) {
+        break;
+      }
+      console.warn(
+        `[publish-qiniu-updates] remote verification attempt ${attempt}/${attempts} failed for ${artifact.fileName}: ${
+          error instanceof Error ? error.message : error
+        }; retrying in ${retryDelayMs}ms`,
+      );
+      await sleep(retryDelayMs);
+    }
+  }
+
+  throw lastError;
+}
+
 async function main() {
   const accessKey = requiredEnv('QINIU_ACCESS_KEY', 'QINIU_AK');
   const secretKey = requiredEnv('QINIU_SECRET_KEY', 'QINIU_AS');
@@ -315,31 +442,38 @@ async function main() {
   const metadataOnly = process.env.QINIU_METADATA_ONLY === '1';
   const force = process.env.QINIU_FORCE === '1';
   const resumeExisting = process.env.QINIU_RESUME_EXISTING === '1';
+  const skipLocalPackageVerify = process.env.QINIU_SKIP_LOCAL_PACKAGE_VERIFY === '1';
+  const retentionOnly = process.argv.includes('--retention-only');
 
   const config = new qiniu.conf.Config();
   config.regionsProvider = qiniu.httpc.Region.fromRegionId(region);
   const mac = new qiniu.auth.digest.Mac(accessKey, secretKey);
   const bucketManager = new qiniu.rs.BucketManager(mac, config);
+  const cdnManager = new qiniu.cdn.CdnManager(mac);
+
+  if (retentionOnly) {
+    await cleanupOldReleases(bucketManager, bucket, prefix);
+    return;
+  }
 
   // 检测有哪些平台的构建产物
-  const hasMacArm64 = fs.existsSync(path.join(releaseDir, `OriginOS CE-${version}-arm64.dmg`));
-  const hasMacX64 = fs.existsSync(path.join(releaseDir, `OriginOS CE-${version}-x64.dmg`));
-  const hasWinExe = fs.existsSync(path.join(releaseDir, `OriginOS CE-${version}-x64.exe`));
-  const hasWinZip = fs.existsSync(path.join(releaseDir, `OriginOS CE-${version}-x64.zip`));
+  const hasMacArm64 = hasReleasePackage(`OriginOS CE-${version}-arm64.dmg`);
+  const hasMacX64 = hasReleasePackage(`OriginOS CE-${version}-x64.dmg`);
+  const hasMacUpdateMetadata =
+    hasMacArm64 &&
+    hasMacX64 &&
+    hasReleasePackage(`OriginOS CE-${version}-arm64.zip`) &&
+    hasReleasePackage(`OriginOS CE-${version}-x64.zip`);
+  const hasWinExe = hasReleasePackage(`OriginOS CE-${version}-x64.exe`);
+  const hasWinZip = hasReleasePackage(`OriginOS CE-${version}-x64.zip`);
 
-  const metadataFiles = [];
+  console.log('[publish-qiniu-updates] generating update metadata');
+  generateUpdateMetadataFiles();
 
-  // 生成 macOS 元数据
-  if (hasMacArm64 || hasMacX64) {
-    console.log('[publish-qiniu-updates] generating macOS update metadata');
-    metadataFiles.push(generateUpdateMetadata('mac'));
-  }
-
-  // 生成 Windows 元数据
-  if (hasWinExe || hasWinZip) {
-    console.log('[publish-qiniu-updates] generating Windows update metadata');
-    metadataFiles.push(generateUpdateMetadata('win'));
-  }
+  const metadataFiles = [
+    hasMacUpdateMetadata ? path.join(releaseDir, 'latest-mac.yml') : null,
+    hasWinExe || hasWinZip ? path.join(releaseDir, 'latest-win.yml') : null,
+  ].filter(Boolean);
 
   const artifacts = buildArtifacts(metadataFiles, metadataOnly, force);
 
@@ -347,7 +481,7 @@ async function main() {
     assertFile(artifact.filePath);
   }
 
-  if (!metadataOnly) {
+  if (!metadataOnly && !skipLocalPackageVerify) {
     if (hasMacArm64 || hasMacX64) {
       verifyMacSigning();
     }
@@ -365,6 +499,7 @@ async function main() {
     metadataOnly,
     force,
     resumeExisting,
+    skipLocalPackageVerify,
     platforms: {
       mac: hasMacArm64 || hasMacX64,
       windows: hasWinExe || hasWinZip,
@@ -390,7 +525,7 @@ async function main() {
 
     console.log(`[publish-qiniu-updates] uploading ${artifact.fileName} -> ${key}`);
     // 为元数据文件设置较短的 cache-control
-    const isMetadata = artifact.fileName.endsWith('.yml') || artifact.fileName.endsWith('.yaml');
+    const isMetadata = isMetadataArtifact(artifact.fileName);
     const cacheControl = isMetadata ? 'public, max-age=300' : undefined;
     await uploadFile({
       mac,
@@ -403,19 +538,58 @@ async function main() {
     });
 
     const url = cdnUrl(baseUrl, key, prefix);
+    if (url && !skipCdnVerify && process.env.QINIU_SKIP_CDN_REFRESH !== '1') {
+      try {
+        console.log(`[publish-qiniu-updates] refreshing CDN ${url}`);
+        await refreshCdnUrls(cdnManager, [url]);
+      } catch (error) {
+        console.warn(
+          `[publish-qiniu-updates] CDN refresh failed for ${url}: ${error instanceof Error ? error.message : error}`,
+        );
+      }
+    }
     if (url && !skipCdnVerify) {
       console.log(`[publish-qiniu-updates] verifying ${url}`);
-      await verifyCdnUrl(url);
+      await verifyCdnArtifact(url, artifact, isMetadata ? { retries: 12 } : undefined);
     }
   }
 
-  // Notify the official website release service
-  await notifyReleaseService(version, baseUrl, prefix);
+  // Notify the official website release service only after package URLs are reachable.
+  await notifyReleaseService(version, baseUrl, prefix, { skipCdnVerify });
+
+  if (!metadataOnly && process.env.QINIU_SKIP_RETENTION_CLEANUP !== '1') {
+    await cleanupOldReleases(bucketManager, bucket, prefix);
+  }
 
   console.log('[publish-qiniu-updates] published successfully');
 }
 
-async function notifyReleaseService(version, baseUrl, prefix) {
+function appendDownloadUrl(releaseData, fieldName, cdnBase, fileName) {
+  if (!hasReleasePackage(fileName)) {
+    return false;
+  }
+
+  releaseData[fieldName] = new URL(fileName, cdnBase).toString();
+  return true;
+}
+
+function requireDownloadUrl(releaseData, fieldName, cdnBase, fileNames) {
+  const candidates = Array.isArray(fileNames) ? fileNames : [fileNames];
+
+  for (const fileName of candidates) {
+    if (appendDownloadUrl(releaseData, fieldName, cdnBase, fileName)) {
+      return;
+    }
+  }
+
+  throw new Error(
+    `Missing release package for ${fieldName}. Expected one of: ${candidates
+      .map((fileName) => path.join(releaseDir, fileName))
+      .join(', ')}`
+  );
+}
+
+async function notifyReleaseService(version, baseUrl, prefix, options = {}) {
   const releaseApiUrl = process.env.ORIGINOS_RELEASE_API_URL;
   const releaseApiKey = process.env.ORIGINOS_RELEASE_API_KEY;
 
@@ -435,17 +609,35 @@ async function notifyReleaseService(version, baseUrl, prefix) {
 
   const releaseData = {
     version: version,
-    win_x64_url: new URL(`OriginOS CE-${version}-x64.exe`, cdnBase).toString(),
-    mac_arm64_url: new URL(`OriginOS CE-${version}-arm64.dmg`, cdnBase).toString(),
-    mac_x64_url: new URL(`OriginOS CE-${version}-x64.dmg`, cdnBase).toString(),
     release_summary: releaseNotes.summary,
     release_notes: releaseNotes.markdown,
     changelog: releaseNotes,
   };
 
+  requireDownloadUrl(releaseData, 'win_x64_url', cdnBase, [
+    `OriginOS CE-${version}-x64.exe`,
+    `OriginOS CE-${version}-x64.zip`,
+  ]);
+  requireDownloadUrl(releaseData, 'mac_arm64_url', cdnBase, `OriginOS CE-${version}-arm64.dmg`);
+  requireDownloadUrl(releaseData, 'mac_x64_url', cdnBase, `OriginOS CE-${version}-x64.dmg`);
+
+  const downloadFields = Object.entries(releaseData).filter(([key]) => key.endsWith('_url'));
+  if (downloadFields.length === 0) {
+    console.warn('[publish-qiniu-updates] no release packages found, skipping release service notification');
+    return;
+  }
+
+  if (!options.skipCdnVerify) {
+    for (const [fieldName, url] of downloadFields) {
+      console.log(`[publish-qiniu-updates] verifying release package ${fieldName} ${url}`);
+      await verifyCdnUrl(url);
+    }
+  }
+
   console.log('[publish-qiniu-updates] notifying release service', {
     url: releaseApiUrl,
     version: releaseData.version,
+    downloadFields: downloadFields.map(([key]) => key),
     changelogItems: releaseNotes.items.length,
   });
 

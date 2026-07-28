@@ -6,25 +6,20 @@ packages:
 # hoisted 模式平铺依赖，解决 Electron + monorepo 运行期解析问题。
 nodeLinker: hoisted
 
-# 强制把 @anthropic-ai/sdk hoist 到顶层 node_modules，
-# 这样 electron-builder 打包时能扫描到它并正确收集到 app.asar 中。
-# 原因：@anthropic-ai/sdk 是 @mariozechner/pi-ai 的 peer dependency，
-# pnpm 默认不会 hoist peer dep，导致打包后 app.asar 缺失该模块。
-publicHoistPattern:
-  - '@anthropic-ai/sdk'
-  - 'electron-updater'
-  - 'electron-log'
-  - 'js-yaml'
-  - 'argparse'
-
-# 只安装当前平台架构的 optional 二进制（@next/swc-* 等），
-# 避免拉取 linux/win32 跨平台包导致 npmmirror 下载失败卡住。
+# 安装开发/打包平台和 Windows 发布目标需要的 optional 二进制
+# （@next/swc-*、@esbuild/* 等）。缺少当前平台会导致构建工具 postinstall 失败；
+# 缺少 win32 会导致 Windows 包内 native runtime 不完整。
 supportedArchitectures:
   os:
     - darwin
+    - linux
+    - win32
   cpu:
     - arm64
     - x64
+
+overrides:
+  '@electron/get': 5.0.0
 
 allowBuilds:
   '@google/genai': true
@@ -33,5 +28,8 @@ allowBuilds:
   electron-winstaller: true
   esbuild: true
   koffi: true
-  onnxruntime-node: true
+  onnxruntime-node: false
   protobufjs: true
+
+ignoredBuiltDependencies:
+  - onnxruntime-node

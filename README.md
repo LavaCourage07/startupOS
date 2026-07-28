@@ -1,146 +1,114 @@
-# OriginOS CE
+<div align="center">
 
-[中文](./README_CN.md)
+<img src="docs/assets/readme/originos-banner.png" alt="OriginOS CE" />
 
-OriginOS CE is an AI Native work system for individuals and small teams, and a personal business operating system exploring the next generation of operating systems. It is not an OS in the traditional sense — it is an Agent workbench running on Web / Electron desktop shell. Users define problems and organize workflows through projects, role agents, skills, files, notifications, and scheduled tasks, enabling the system to understand business context and generate applications, processes, knowledge, and collaboration structures in an AI Native way.
+<p>
+  <a href="https://github.com/NeuralNexusPro/startupOS/releases/latest"><img src="https://img.shields.io/github/v/release/NeuralNexusPro/startupOS?style=flat-square&label=release" alt="Latest release" /></a>
+  <a href="https://github.com/NeuralNexusPro/startupOS/actions/workflows/desktop-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/NeuralNexusPro/startupOS/desktop-release.yml?style=flat-square&label=desktop%20build" alt="Desktop build" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-2f81f7?style=flat-square" alt="AGPL-3.0" /></a>
+  <a href="https://github.com/NeuralNexusPro/startupOS/stargazers"><img src="https://img.shields.io/github/stars/NeuralNexusPro/startupOS?style=flat-square" alt="GitHub stars" /></a>
+</p>
 
-## Vision
+**English** | [简体中文](./README_CN.md)
 
-OriginOS CE aims to build a working prototype for the next generation of operating systems. Future applications should not be determined solely by preset menus and fixed software forms — they should start from problems defined by users. The system understands context, breaks down tasks, organizes capabilities, and produces corresponding workspaces, application interfaces, automation flows, and collaborative agents in an AI Native manner.
+</div>
 
-Its core philosophy is making AI adapt to human thinking, rather than forcing humans to adapt to AI toolchains. The system captures users' implicit judgment, business context, and work preferences through dialogue, projects, skills, and long-term memory, transforming scattered embodied experience into referable, executable, and evolvable symbolic structures.
+## What is OriginOS CE?
 
-Regarding the relationship between humans and AI, OriginOS CE does not design AI as a one-shot Q&A tool, but as an operable system capability for long-term collaboration: humans raise questions, set goals, exercise judgment and taste; the system handles execution, organizes knowledge, discovers connections, generates tools, and continuously calibrates its behavior based on feedback.
+OriginOS CE is an AI-native work system for individuals and small teams. Instead of starting from fixed software menus, it starts from the problem you want to solve and brings projects, agents, roles, skills, files, knowledge, notifications, and scheduled work into one desktop.
 
-## Core Capabilities
+Use it to:
 
-- **Homepage Workbench**: Organizes projects, roles, skills, files, notifications, and scheduled tasks in a unified desktop, letting users start from "defining problems."
-- **Agent System**: Supports generic Agent, RoleAgent, Project Agent, streaming sessions, tool calling, working directory binding, runtime LLM config, and session isolation — enabling AI to participate in work as long-term roles.
-- **Skill System**: Supports bundled / project / user multi-source skill loading, skill marketplace, skill window sessions, file uploads, and controlled artifact output — turning reusable workflows into callable, composable, and regenerable capabilities.
-- **Project System**: Supports project initialization, project agents, project file management, business interviews, business-model artifacts, and solution templates — enabling AI to understand problems within specific business contexts.
-- **Cognitive Persistence**: Maintains Agent/Project-level long-term context around `Memory.md`, `Knowledge.md`, `Patterns.md`, practice logs, and frozen snapshots — enabling experience accumulation and evolution across sessions.
-- **AI Native Production**: Gradually organizes dialogue, knowledge, skills, agents, and interfaces into new work application forms around user-defined problems, rather than merely invoking existing software features.
-- **System Capabilities**: File read/write, document parsing, system notifications, background scheduling, cross-window events, and auto-update infrastructure.
-- **Multi-Agent Collaboration Runtime**: Starts supervisor / worker based on solution manifests, supporting blackboard, event streaming, human review, metrics, and production-grade logging.
-- **Desktop Packaging**: Supports macOS arm64 / x64 DMG, Windows x64 NSIS installer and zip, with pre-packaging validation of worker runtime dependencies and root build artifacts.
+- turn a business problem into a project with its own context, files, and ontology;
+- create reusable Agents and RoleAgents with persistent memory and working directories;
+- run packaged skills as focused applications, with file input and controlled output;
+- design a solution and coordinate multiple Agents for longer-running work;
+- keep work artifacts and context on your own machine.
 
-## Tech Stack
+## Download and Install
 
-- Next.js 14 App Router
-- React 18 + TypeScript 5
-- Tailwind CSS + shadcn/Radix base components
-- Zustand state management
-- Electron desktop runtime
-- Local filesystem JSON storage
-- Vitest testing
-- pnpm workspace
+Download the newest build from [GitHub Releases](https://github.com/NeuralNexusPro/startupOS/releases/latest).
 
-## Repository Structure
+| Platform            | Package     | Installation                                                                    |
+| ------------------- | ----------- | ------------------------------------------------------------------------------- |
+| Windows x64         | `.exe`      | Download the installer, run it, and launch **OriginOS CE** from the Start menu. |
+| macOS Apple Silicon | `arm64.dmg` | Open the DMG and drag **OriginOS CE** into Applications.                        |
+| macOS Intel         | `x64.dmg`   | Open the DMG and drag **OriginOS CE** into Applications.                        |
 
-```text
-originos/
-├── packages/
-│   ├── web/             # Next.js Web UI
-│   ├── desktop/         # Electron main/preload/packaging config
-│   ├── core/            # Core business, Pi Agent, collaboration runtime, types
-│   ├── service/         # Service layer package placeholder/aggregation
-│   └── agent/           # @mariozechner/agent workspace compatibility
-├── data/                # Local runtime data
-├── docs/                # Architecture, Story, changelog, and design docs
-├── templates/           # Template resources (skills, project-interview, etc.)
-├── resources/           # Desktop resources
-├── release/             # Local packaging output
-├── AGENTS.md            # Architecture rules, mandatory during development
-└── README.md
-```
+Release assets are signed and validated by the desktop release workflow. Update metadata and full packages are published together.
 
-## Prerequisites
+## First Run
 
-- Node.js 20+
-- pnpm 9+
-- macOS desktop packaging requires native Electron / electron-builder dependencies
+1. Open **Settings** and configure a model provider, model ID, endpoint, and credential.
+2. Return to the desktop and choose a starting point:
+   - **Create Project** for work that needs business context, files, modeling, and a solution;
+   - **Skills** for a focused, reusable workflow;
+   - **Create Agent / Create Role** for a persistent assistant with its own identity and workspace.
+3. Send a message, attach files when needed, and inspect generated artifacts from the workspace button.
 
-Install dependencies:
+Anthropic, OpenAI-compatible, Google Gemini, and Azure OpenAI configurations are supported. Credentials remain in the local application configuration.
+
+## Product Tour
+
+### Build a project from business context
+
+OriginOS interviews the user, structures the business model, and keeps the conversation and model visible in the same workspace.
+
+<p align="center">
+  <img src="docs/assets/readme/originos-interview.png" width="48%" alt="Project interview" />
+  <img src="docs/assets/readme/originos-ontology.jpg" width="48%" alt="Ontology workspace" />
+</p>
+
+### Turn repeatable work into skills and roles
+
+Skills provide focused workflows. RoleAgents keep identity, memory, knowledge, tools, and working artifacts together across sessions.
+
+<p align="center">
+  <img src="docs/assets/readme/originos-skill.png" width="48%" alt="Skill window" />
+  <img src="docs/assets/readme/originos-role.png" width="48%" alt="RoleAgent window" />
+</p>
+
+### Coordinate longer-running work
+
+Solution design can be executed by a multi-agent runtime with visible tasks, progress, review points, and artifacts.
+
+<p align="center">
+  <img src="docs/assets/readme/originos-multi-agent.jpg" width="88%" alt="Multi-agent runtime" />
+</p>
+
+## Run from Source
+
+Requirements: Node.js **22.19+**, pnpm **9+**, and Git.
 
 ```bash
+git clone https://github.com/NeuralNexusPro/startupOS.git
+cd startupOS
+corepack enable
 pnpm install
-```
-
-## LLM Configuration
-
-LLM configuration follows the user's selection in the application settings page. Both desktop and Web runtimes read the current user configuration, including provider, base URL, model ID, credentials, max output tokens, and field mappings.
-
-Supported providers include Anthropic, OpenAI-compatible, Google Gemini, and Azure OpenAI. After configuration updates, new Agent/Skill sessions use the latest settings; multi-agent collaboration child processes also inherit the parent's runtime model config.
-
-## Development
-
-Start Web development server:
-
-```bash
-pnpm dev
-```
-
-Start Electron desktop development mode:
-
-```bash
 pnpm desktop:dev
 ```
 
-Common commands:
+Use `pnpm dev` to run only the Web interface. Local desktop packages can be created with `pnpm desktop:dist`.
 
-```bash
-pnpm build                 # Build Web application
-pnpm desktop:build         # Build Web + Desktop, validate worker runtime dependencies
-pnpm desktop:build:app     # Package desktop application
-pnpm lint                  # Run ESLint + dependency validation
-pnpm test                  # Run Vitest
-```
+## Data and Privacy
 
-## Architecture Rules
-
-See [AGENTS.md](./AGENTS.md) for mandatory architecture constraints, technology stack restrictions, directory structure rules, module dependency rules, core architecture constraints, performance targets, and data storage specifications.
-
-## Quick Reference
-
-| Topic | Key File |
-|-------|----------|
-| Architecture constraints | `AGENTS.md` |
-| Application layer (Next.js) | `packages/web/src/app/` |
-| Business logic | `packages/core/src/lib/features/` |
-| Integrations (Pi Agent) | `packages/core/src/lib/integrations/pi-agent/` |
-| Components | `packages/core/src/components/` |
-| Global types | `packages/core/src/types/` |
-| Desktop entry | `packages/desktop/src/main/` |
+- Runtime data is stored locally under the application data directory.
+- Projects, sessions, skills, Agents, knowledge, and generated files remain file-based.
+- Model requests are sent only to the provider configured by the user.
+- Before reporting a bug, remove API keys, credentials, and private document content from logs.
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for development process, commit conventions, PR requirements, and branch strategy.
+Contributions are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md) and read [AGENTS.md](./AGENTS.md) before changing code.
+
+- Bugs: open an [issue](https://github.com/NeuralNexusPro/startupOS/issues) with the OriginOS version, operating system, reproduction steps, expected result, actual result, and sanitized logs.
+- Features: describe the user problem and expected workflow before proposing implementation details.
+- Pull requests: branch from `dev`, keep changes scoped, add tests, and update documentation when behavior changes.
+- Verification: run the relevant unit/integration tests plus `pnpm lint`; desktop changes should also pass the package verification scripts they affect.
+- Architecture: shared business logic belongs in `packages/core`; Web and Electron remain adapters around core APIs.
+
+For substantial changes, create or update the corresponding Epic/Story under `docs/specs/` and include its acceptance and regression cases.
 
 ## License
 
-See [LICENSE](./LICENSE).
-
-## Directory Quick Reference
-
-- `packages/web/src/config/homeApps.ts` — Homepage app entry configuration
-- `packages/web/src/services/AppWindowManager.ts` — CSS-based window manager
-- `packages/core/src/lib/integrations/pi-agent/` — Pi Agent integration
-- `packages/core/src/components/` — Shared UI components
-- `packages/core/src/types/` — Global type definitions
-- `packages/desktop/src/main/` — Electron main process
-- `data/skills/` — Homepage skill entry artifacts
-- `data/agents/` — Built-in/user Agent runtime files and cognitive data
-- `data/sessions/` — Global Agent sessions
-
-## Testing and Verification
-
-```bash
-# Unit tests
-pnpm test
-
-# Coverage
-pnpm test --coverage
-
-# Specific module tests
-pnpm test -- --testPathPattern=features/ontology
-```
+OriginOS CE is released under the [GNU Affero General Public License v3.0](./LICENSE).

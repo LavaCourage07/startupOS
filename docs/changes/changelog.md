@@ -2,20 +2,197 @@
 
 ---
 
-## 2026-07-21 — v0.1.16
+## 2026-07-25 — fix：mac 自动更新元数据使用 zip
 
-### 修复
-- **技能加载优化**：内置技能现在直接从模板目录加载（`source: bundled`），不再复制到用户数据目录，避免与用户安装的技能混淆
-- **技能查找逻辑**：`findSkillFile` 现在同时搜索用户目录和内置模板目录，用户安装的同名技能优先
-- **macOS 打包**：修复 `create-mac-dmg.js` 脚本，自动生成 DMG 文件的 blockmap，支持自动更新
-- **Windows 自动更新**：发布脚本添加 Windows 更新元数据生成（`latest.yml` 和 `stable.yml`），修复 Windows 版本自动更新功能
-- **Windows 依赖缺失**：在 desktop 包中添加 `@anthropic-ai/sdk` 依赖，修复 Windows 版本启动时报错 `can not find package @anthropic-ai/sdk`
+**类型**：fix
+**影响模块**：`.github/workflows/desktop-release.yml`, `packages/desktop/scripts/generate-update-metadata.js`, `packages/desktop/scripts/publish-qiniu-updates.js`, `packages/desktop/scripts/verify-update-metadata.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.39`。macOS Actions artifacts 重新上传 zip 和 zip.blockmap，mac 更新元数据只在 x64/arm64 zip 成对存在时生成，避免 electron-updater 报 `zip file not provided`。
 
-### 改进
-- **技能架构**：重构技能加载机制，内置技能和用户技能分离管理，提升可维护性
-- **发布流程**：优化七牛云发布脚本，确保所有必要文件（包括 blockmap 和 Windows 元数据）正确上传
+## 2026-07-25 — fix：发布前生成全平台更新元数据
 
----
+**类型**：fix
+**影响模块**：`.github/workflows/desktop-release.yml`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.38`。Qiniu publish job 在下载三平台 artifacts 后先运行 `generate:update-metadata`，再执行 `verify:release-artifacts`，确保 mac metadata 在发布前验证阶段已经生成。
+
+## 2026-07-25 — fix：避免 Windows zip 误触发 mac 元数据校验
+
+**类型**：fix
+**影响模块**：`packages/desktop/scripts/verify-update-metadata.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.37`。`verify:update-metadata` 只有在同时存在 macOS x64/arm64 zip 或 x64/arm64 dmg 时才校验 mac metadata，避免 Windows job 里的 x64 zip 被误判为 mac zip 导致 `latest-mac.yml` 缺失失败。
+
+## 2026-07-25 — fix：发布 macOS 更新元数据
+
+**类型**：fix
+**影响模块**：`packages/desktop/scripts/generate-update-metadata.js`, `packages/desktop/scripts/publish-qiniu-updates.js`, `packages/desktop/scripts/verify-update-metadata.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.36`。macOS 发布产物没有 zip 时会基于 x64/arm64 dmg 生成 `latest-mac.yml` / `stable-mac.yml`，发布脚本会上传并校验 mac metadata，避免 CDN mac 更新元数据停留在旧版本。
+
+## 2026-07-25 — release：重新验证 Apple notarization secrets
+
+**类型**：release
+**影响模块**：`.gitignore`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.35`，用于在 GitHub Actions secrets 重新配置后触发完整桌面构建发布链路。保留 `*.p8` / `AuthKey_*.p8` ignore 规则，防止 Apple API 私钥误提交。
+
+## 2026-07-25 — ci：公开 Apple notarization 预检失败原因
+
+**类型**：ci
+**影响模块**：`packages/desktop/scripts/verify-apple-notary-credentials.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.34`。Apple notarization 凭据预检失败时会写入 GitHub Actions error annotation，让公开检查结果直接显示 App Store Connect 认证失败原因，而不是只有 generic exit code。
+
+## 2026-07-25 — ci：前移 Apple notarization 凭据预检
+
+**类型**：ci
+**影响模块**：`.github/workflows/desktop-release.yml`, `packages/desktop/scripts/verify-apple-notary-credentials.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.33`。macOS Actions 在 build:app 前安装 rcodesign 并调用 `notary-list` 验证 App Store Connect Notary API 凭据，避免错误的 `APPLE_API_ISSUER` / `APPLE_API_KEY_ID` / `APPLE_API_KEY` 组合在完整打包后才失败。
+
+## 2026-07-25 — fix：为 macOS 公证加入 rcodesign fallback
+
+**类型**：fix
+**影响模块**：`.github/workflows/desktop-release.yml`, `packages/desktop/scripts/notarize-mac-app.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.32`。GitHub macOS runner 上 `xcrun notarytool submit` 会以 `SIGTRAP` / `SIGILL` 崩溃且无输出；CI 现在预装 `rcodesign`，当 notarytool 发生这类崩溃时自动使用 rcodesign 通过 App Store Connect API 完成 notarization 和 stapling。
+
+## 2026-07-25 — fix：改为轮询 macOS 公证状态
+
+**类型**：fix
+**影响模块**：`packages/desktop/scripts/notarize-mac-app.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.31`。macOS notarization 不再使用 `notarytool submit --wait`，改为 submit 后通过 submission id 轮询 `notarytool info`，并为 submit/info/log/stapler 加子进程超时和状态日志，避免 GitHub runner 在 Apple 公证等待阶段长时间无输出。
+
+## 2026-07-25 — fix：兼容 notarytool 空 JSON 输出
+
+**类型**：fix
+**影响模块**：`packages/desktop/scripts/notarize-mac-app.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.30`。macOS 手动公证保留 Apple API issuer；当 `notarytool submit --wait --output-format json` 以 exit code 0 返回空输出时，不再错误地去掉 issuer 重试，而是继续执行 `stapler staple`，由 stapler 验证 notarization 是否真实可用。
+
+## 2026-07-25 — fix：拆出 macOS 手动公证流程
+
+**类型**：fix
+**影响模块**：`packages/desktop/electron-builder.yml`, `packages/desktop/scripts/notarize-mac-app.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.29`。关闭 electron-builder 内置 notarization，改由 afterSign hook 手动 zip `.app`、调用 `xcrun notarytool submit`、验收后 `stapler staple`，并在 API Key issuer 导致空输出时自动重试不带 issuer 的提交路径。
+
+## 2026-07-25 — ci：暴露 macOS electron-builder 失败摘要
+
+**类型**：ci
+**影响模块**：`.github/workflows/desktop-release.yml`, `packages/desktop/scripts/run-electron-builder-mac.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.28`。macOS Actions 通过包装脚本运行 electron-builder，失败时将尾部日志写入 GitHub annotation，避免公开 Actions API 无法读取完整 job log 时无法定位 notarization 真实错误。
+
+## 2026-07-25 — ci：移除不可靠的 notarytool history 预检
+
+**类型**：ci
+**影响模块**：`.github/workflows/desktop-release.yml`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.27`。移除 macOS runner 上会以 exit code 133 崩溃的 `xcrun notarytool history` 预检，保留 Apple API key 的 PKCS#8 规范化，让 electron-builder 执行正式 notarization。
+
+## 2026-07-25 — ci：增加 Apple Notary 凭据预检
+
+**类型**：ci
+**影响模块**：`.github/workflows/desktop-release.yml`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.26`。macOS Actions 在 electron-builder 前先执行 `xcrun notarytool history`，直接验证规范化后的 `.p8`、Key ID 和 Issuer，缩短 notarization 失败定位路径。
+
+## 2026-07-25 — fix：将 Apple API Key 规范化为 PKCS#8
+
+**类型**：fix
+**影响模块**：`packages/desktop/scripts/prepare-apple-api-key.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.25`。macOS notarization 前会把可解析的 EC private key 统一导出为 PKCS#8 PEM，避免 notarytool 对非 PKCS#8 ASN.1 私钥报 `invalidAsn1`。
+
+## 2026-07-25 — fix：规范化 macOS 公证 Apple API Key
+
+**类型**：fix
+**影响模块**：`.github/workflows/desktop-release.yml`, `packages/desktop/scripts/prepare-apple-api-key.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.24`。macOS Actions 在 notarization 前会把 `APPLE_API_KEY` secret 规范化为 `.p8` 文件，支持原始 PEM、带 `\n` 转义的 PEM 和 base64 PEM，并提前用 Node crypto 校验私钥格式，避免 electron-builder 阶段只返回 `invalidAsn1`。
+
+## 2026-07-25 — release：发布桌面版本 0.1.23
+
+**类型**：release
+**影响模块**：`packages/core/src/lib/integrations/pi-agent/core/skills.ts`, `packages/core/src/lib/features/skills/service.ts`, `.github/workflows/desktop-release.yml`, `packages/desktop/scripts/verify-mac-signing.js`, `package.json`, `packages/desktop/package.json`
+**摘要**：将 OriginOS CE 桌面发布版本更新到 `0.1.23`。修复 Windows CRLF `SKILL.md` 导致内置技能已存在但内容接口 404 的问题；恢复 macOS notarization，并在发布验证中加入 Gatekeeper 检查，防止下载后提示身份不明开发者。
+
+## 2026-07-25 — docs：更新应用版本到 0.1.22
+
+**类型**：docs
+**影响模块**：`package.json`, `packages/desktop/package.json`, `docs/changes/releases/v0.1.22/changelog.md`
+**摘要**：将 OriginOS CE 桌面发布版本从 `0.1.19` 更新到 `0.1.22`，用于发布内置技能按需 materialize、系统技能过滤和 macOS `pi-agent-core` runtime 校验修复。远端已存在失败的 `0.1.20/0.1.21` tag，因此本次使用新的补丁版本。
+
+## 2026-07-25 — fix：内置技能按需同步到 data 后运行
+
+**类型**：fix
+**影响模块**：`packages/core/src/lib/integrations/pi-agent/core/skills.ts`, `packages/core/src/lib/features/skills/service.ts`, `packages/core/src/lib/features/services/launcher/skill.ts`, `packages/core/src/lib/features/user-registry/index.ts`, `packages/core/src/lib/integrations/pi-agent/tools/skill-tools.ts`, `templates/skills/*/SKILL.md`
+**摘要**：内置模板技能首次点击或启动前会从 `resources/templates/skills/{skill}` 同步到 `data/skills/{skill}`，本次 SkillDialog 和 Agent 启动即使用 data 目录，避免第一次和后续运行的记忆、附件、工作空间与产物目录不一致。内置模板 `SKILL.md` 增加 `originos-system: true` 元数据，用户自定义技能区域、`/api/user-skills` 和 `list_skills` 工具会过滤这些系统技能。
+
+## 2026-07-24 — fix：修复 macOS 包缺失 pi-agent-core 运行依赖
+
+**类型**：fix
+**影响模块**：`packages/desktop/package.json`, `packages/desktop/electron-builder.yml`, `packages/desktop/scripts/verify-mac-package.js`, `.github/workflows/desktop-release.yml`, `pnpm-lock.yaml`
+**摘要**：macOS 0.1.19 安装包打开时报 `Cannot find module '@mariozechner/pi-agent-core'`，原因是 `@mariozechner/agent` 的 workspace 包运行时转发到 `pi-agent-core`，但 desktop 包没有显式声明该依赖，Mac 构建也只有签名校验，没有 app.asar runtime smoke check。现在 desktop 显式依赖 `@mariozechner/pi-agent-core`，electron-builder 从 desktop package 边界复制该依赖，并在 macOS arm64/x64 Actions 中新增 `verify:mac-package` 校验。
+
+## 2026-07-24 — fix：对齐 0.1.19 Windows 本地与 Actions 包校验
+
+**类型**：fix
+**影响模块**：`packages/desktop/scripts/verify-windows-package.js`, `package.json`, `packages/desktop/package.json`, `docs/changes/releases/v0.1.19/changelog.md`
+**摘要**：将桌面版本回退到 `0.1.19` 继续发布，并修复 Windows package verifier 对 `SkillLauncher` runtime 的读取方式。Verifier 现在先确认 required entries 无缺失再进入 smoke check，并基于 `asar.extractAll()` 后的实际运行视图读取 `skill.js`，避免 Actions 中因 asar/unpacked 路径差异抛误导性的 `was not found in this archive` 异常。本地已通过完整 Windows 构建和 `verify:win-package`。
+
+## 2026-07-24 — docs：更新应用版本到 0.1.21
+
+**类型**：docs
+**影响模块**：`package.json`, `packages/desktop/package.json`, `docs/changes/releases/v0.1.21/changelog.md`
+**摘要**：将 OriginOS CE 桌面发布版本从 `0.1.20` 更新到 `0.1.21`，用于重新触发包含 Windows verifier unpacked runtime 修复的发布链路。
+
+## 2026-07-24 — fix：修复 Windows package verifier 读取 unpacked runtime
+
+**类型**：fix
+**影响模块**：`packages/desktop/scripts/verify-windows-package.js`
+**摘要**：Windows package verifier 检查 `SkillLauncher` runtime 时，`asar.listPackage(..., { isPack: true })` 会列出 unpacked 文件，但 `asar.extractFile()` 不能读取 unpacked 条目，导致 GitHub Actions 在 `verify:win-package` 阶段抛 `"dist-electron/core/src/lib/features/services/launcher/skill.js" was not found in this archive`。现在读取 runtime 时会先尝试 app.asar，失败后回退到 `resources/app.asar.unpacked`。
+
+## 2026-07-24 — docs：更新应用版本到 0.1.20
+
+**类型**：docs
+**影响模块**：`package.json`, `packages/desktop/package.json`, `docs/changes/releases/v0.1.20/changelog.md`
+**摘要**：将 OriginOS CE 桌面发布版本从 `0.1.19` 更新到 `0.1.20`，用于发布包含 Windows 内置 skill fallback 和角色附件按钮修复的完整安装包。
+
+## 2026-07-24 — fix：修复角色窗体附件按钮禁用
+
+**类型**：fix
+**影响模块**：`packages/web/src/components/ui/chat-input-bar.tsx`, `packages/web/src/components/ui/__tests__/chat-input-bar.test.tsx`
+**摘要**：角色 Agent 窗体会在 running/thinking 状态下禁用输入框，`ChatInputBar` 之前把同一个 disabled 状态复用到附件按钮，导致 Windows 版本中创建出来的角色点击上传附件按钮没有反应。附件按钮现在只在上传进行中禁用，即使消息输入暂时不可发送，也可以正常打开文件选择器。
+
+## 2026-07-24 — docs：更新应用版本到 0.1.19
+
+**类型**：docs
+**影响模块**：`package.json`, `packages/desktop/package.json`, `docs/changes/releases/v0.1.19/changelog.md`
+**摘要**：将 OriginOS CE 桌面发布版本从 `0.1.18` 更新到 `0.1.19`，用于触发 `desktop-v0.1.19` GitHub Actions 发布，把 Windows 安装态内置 skill bundled fallback 修复推送给已安装 0.1.18 的用户。
+
+## 2026-07-24 — fix：修复 Windows 安装态内置 skill bundled fallback
+
+**类型**：fix
+**影响模块**：`packages/core/src/lib/features/services/launcher/skill.ts`, `packages/core/src/lib/features/services/launcher/__tests__/skill-launcher.test.ts`, `packages/desktop/scripts/verify-windows-package.js`, `docs/specs/epic-OS/story-OS.18/**`
+**摘要**：官网 0.1.18 Windows 包内实际包含 `resources/templates/skills/skill-creator-app/SKILL.md`，但安装态 `SkillLauncher` 只取第一个存在的 bundled skill root，当前序候选目录存在但缺少目标 skill 时会报 not found。修复为遍历所有 `getBundledSkillDirs()`，并在 Windows package verifier 中检查编译后 launcher runtime 包含多 bundled root fallback，避免资源存在但运行时选错路径。
+
+## 2026-07-24 — docs：更新应用版本到 0.1.18
+
+**类型**：docs
+**影响模块**：`package.json`, `packages/desktop/package.json`, `docs/changes/releases/v0.1.18/changelog.md`
+**摘要**：将 OriginOS CE 桌面发布版本从 `0.1.17` 更新到 `0.1.18`，用于触发 `desktop-v0.1.18` GitHub Actions 发布。新增 v0.1.18 版本归档，包含 Windows 内置模板技能加载、pi-ai provider 依赖、自动更新 sha512 metadata 校验和构建产物忽略规则等修复说明。
+
+## 2026-07-24 — docs：归档 Story OS.18 Windows 内置模板技能加载修复
+
+**类型**：docs
+**影响模块**：`docs/specs/epic-OS/README.md`, `docs/specs/epic-OS/story-OS.18/**`, `docs/changes/releases/v0.1.17/changelog.md`
+**摘要**：Story OS.18 标记为 ✅ Complete，补齐完成归档、实施摘要、测试验证记录和 Epic OS 状态。归档记录覆盖 Windows packaged build 读取 `skill-creator-app`、模板技能不复制到用户 `data/skills`、本地 Windows 包构建验证、`pi-ai` provider 依赖打包和 `verify:win-package` 通过结果。
+
+## 2026-07-24 — fix：修复 Windows 自动更新 sha512 mismatch
+
+**类型**：fix
+**影响模块**：`.github/workflows/desktop-release.yml`, `packages/desktop/scripts/generate-update-metadata.js`, `packages/desktop/scripts/verify-update-metadata.js`, `packages/desktop/scripts/publish-qiniu-updates.js`, `packages/desktop/package.json`
+**摘要**：Windows 构建完成后由项目脚本重写 update metadata，确保 `latest-win.yml`、`stable-win.yml`、`latest.yml`、`stable.yml` 都指向 NSIS `.exe` 且 sha512/size 与本地产物一致。GitHub Actions 在上传 Windows artifact 前执行 metadata 校验，七牛发布脚本上传资源后刷新 CDN 并下载远端内容重新计算 sha512，若 CDN 返回旧资源或 metadata 不匹配则发布失败，避免客户端自动更新出现 `sha512 checksum mismatch`。
+
+## 2026-07-24 — chore：移除已跟踪桌面构建产物
+
+**类型**：chore
+**影响模块**：`.gitignore`, `packages/desktop/.packaging/**`, `packages/desktop/dist-electron/**`
+**摘要**：将嵌套 `dist-electron` 和 `.packaging` 构建产物加入忽略规则，并从 Git 索引移除已跟踪的桌面 standalone 与 Electron 编译产物，避免后续本地构建污染工作区。
+
+## 2026-07-24 — fix：Windows 包打入 pi-ai provider 动态依赖
+
+**类型**：fix
+**影响模块**：`packages/desktop/scripts/prepare-pi-ai-runtime-deps.js`, `packages/desktop/scripts/build-windows-local.js`, `packages/desktop/scripts/verify-windows-package.js`, `packages/desktop/electron-builder.yml`, `package.json`, `pnpm-lock.yaml`
+**摘要**：本地 Windows 构建入口固定为 `pnpm@9.15.9` frozen install，与 GitHub Actions Windows job 对齐；打包前从 `@mariozechner/pi-ai` 实际安装目录收集 109 个动态 provider runtime 依赖并写入 package files，修复安装后 `Cannot find module '@google/genai'`。Windows package verifier 现在会实际 resolve/import Google GenAI、Bedrock、Mistral、proxy-agent 等依赖，避免只校验元数据。
 
 ## 2026-07-20 — fix：多 Agent 子进程漏传 mapping 字段
 
