@@ -308,4 +308,33 @@ describe('Session restore contract', () => {
       message: 'Session restore failed.',
     });
   });
+
+  it('TC-E3 projects 1,000 visible history messages within the restore budget', () => {
+    const messages = Array.from({ length: 1_000 }, (_, index) => ({
+      id: `message-${index}`,
+      role: index % 3 === 0 ? 'toolResult' : index % 2 === 0 ? 'assistant' : 'user',
+      content: index % 3 === 0
+        ? `tool result summary ${index}`
+        : `visible message ${index}`,
+      timestamp: index,
+    }));
+
+    const startedAt = performance.now();
+    const result = createRestoreAgentSessionResult(
+      createStoredSession({ messages }),
+      restoreRequest,
+    );
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(result.messages).toHaveLength(1_000);
+    expect(result.messages[0]).toMatchObject({
+      id: 'message-0',
+      role: 'toolResult',
+    });
+    expect(result.messages[999]).toMatchObject({
+      id: 'message-999',
+      content: 'tool result summary 999',
+    });
+    expect(elapsedMs).toBeLessThan(500);
+  });
 });
