@@ -1,0 +1,40 @@
+schema: spec-driven
+
+context: |
+  Project: OriginOS, an AI-native desktop operating environment driven by Pi Agent.
+  Runtime: Node.js 24+, pnpm workspace, TypeScript strict mode.
+  Frontend: Next.js App Router 14+, React 18+, Tailwind CSS, shadcn/ui, Zustand.
+  Desktop: Electron main/preload/IPC with shared business logic in packages/core.
+  Storage: local JSON/file storage only; databases and additional backend frameworks are forbidden for MVP.
+  Architecture source of truth: AGENTS.md.
+  Dependency direction: desktop/web boundaries -> core features/modules -> storage/integrations/shared/types.
+  Story specifications live under docs/specs/epic-*/story-* and define product requirements and acceptance tests.
+  OpenSpec proposals are implementation boundaries. Each independently deliverable Story Task maps to exactly one proposal.
+  Proposal application code is implemented by subagents on isolated task branches/worktrees, merged into the proposal integration branch, then merged to dev after full validation.
+  Do not edit generated output such as .next, dist-electron, node_modules, release artifacts, or runtime data as source.
+
+rules:
+  proposal:
+    - Include Traceability with epic-id, story-id, task-id, owner, and source Story document paths.
+    - Scope the proposal to exactly one independently deliverable Story Task.
+    - Include Why, What Changes, Non-Goals, Impact, dependencies, rollout, and rollback.
+    - Identify affected capabilities, packages, public APIs, persistence, IPC, and platform packaging when applicable.
+    - Do not start implementation until the proposal passes strict validation and is explicitly approved.
+  specs:
+    - Use normative SHALL or MUST language for requirements.
+    - Include at least one concrete Scenario for every requirement.
+    - Cover success, failure, boundary, persistence, cross-process, and recovery behavior when applicable.
+    - Keep capability specs independent from implementation-specific branch or worktree details.
+  design:
+    - Demonstrate compliance with AGENTS.md directory and dependency direction rules.
+    - Document data ownership, state authority, API contracts, concurrency, recovery, performance, security, migration, and rollback when applicable.
+    - List alternatives considered and explain why the selected design is preferred.
+    - Define implementation seams that allow subagents to work in non-overlapping write scopes.
+  tasks:
+    - Decompose the proposal into ordered work packages with stable task IDs.
+    - For every work package, declare dependencies, write scope, assigned subagent role, required tests, and completion evidence.
+    - Mark independent work packages as parallelizable and dependent or overlapping work packages as sequential.
+    - Application source changes must be implemented in subagent task branches/worktrees, not in the proposal main worktree.
+    - Treat the generic openspec apply workflow as orchestration only; implementation work must be delegated to isolated subagent task worktrees.
+    - Include integration, regression, strict OpenSpec validation, Story verification goal, merge, and cleanup tasks.
+    - Do not mark a task complete until its implementation and required evidence are present.
