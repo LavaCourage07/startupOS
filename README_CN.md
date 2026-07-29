@@ -11,8 +11,6 @@
 
 [English](./README.md) | **简体中文**
 
-![OriginOS](./docs/assets/readme/originos-cover.png)
-
 </div>
 
 ## OriginOS CE 是什么？
