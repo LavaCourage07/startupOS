@@ -8,12 +8,12 @@
   - **完成证据：** 用户于 2026-07-29 明确回复“可以，开始实施”，并在实施前完成 strict validation。
   - **执行方式：** 串行审批门禁。
 
-- [ ] 1.2 把 Proposal branch rebase 到已提交 Pi Runtime upgrade 的最新 `dev`，并从 clean checkout 验证精确 runtime namespace/version。
+- [x] 1.2 把 Proposal branch rebase 到已提交 Pi Runtime upgrade 的最新 `dev`，并从 clean checkout 验证精确 runtime namespace/version。
   - **依赖：** 1.1，以及独立 Pi Runtime upgrade 已合并到 `dev`。
   - **写入范围：** 仅限 Proposal branch history 和 A-01 evidence notes；不得修改 runtime upgrade 源码。
   - **负责角色：** Proposal integration owner。
   - **必需测试：** 使用仓库指定 Node.js 24 和 pnpm 完成 clean install；执行 package 与 lockfile 一致性检查。
-  - **完成证据：** base commit SHA、已解析 runtime package/version 列表和 clean install 结果。
+  - **完成证据：** Proposal merge-base 为 `db459ec84a15d81f088aa5212cf37bf11cd24eeb`；Runtime upgrade commit `505d157c408dc3e27ef1c09f11bf860a92cc0203` 可达；Node.js `24.14.0`、pnpm `9.15.9` 下 `pnpm install --frozen-lockfile` 成功；`pnpm --filter @originos/pi-agent-adapter test` 通过。首次 install 在 WSL 挂载盘发生一次 `undici` 临时目录 rename `EACCES`，清理未完成临时项后重试成功，未修改 lockfile。
   - **执行方式：** 串行前置任务。
 
 ## 2. 依赖与 Public Export 审计
