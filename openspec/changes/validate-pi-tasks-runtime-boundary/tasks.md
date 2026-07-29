@@ -18,20 +18,20 @@
 
 ## 2. 依赖与 Public Export 审计
 
-- [ ] 2.1 创建隔离 Task branch/worktree，锁定候选 `pi-tasks` 版本及其完整依赖图。
+- [x] 2.1 创建隔离 Task branch/worktree，锁定候选 `pi-tasks` 版本及其完整依赖图。
   - **依赖：** 1.2。
   - **写入范围：** `package.json`、`pnpm-lock.yaml`、`packages/agent/package.json`，以及必须声明直接 runtime dependency 的 package manifests。
   - **负责角色：** dependency audit subagent。
   - **必需测试：** frozen-lockfile install、重复/版本检查、package manager 一致性检查。
-  - **完成证据：** Task branch commit、lockfile diff、精确 compatibility matrix 和 install logs。
+  - **完成证据：** Task branch `proposal-task/validate-pi-tasks-runtime-boundary-2-audit`，commit `95d33628090992fb63129f22878dc6dc818349a5`；`pi-tasks@0.2.0` 以精确版本写入 adapter manifest 和 lockfile，frozen install 通过。
   - **执行方式：** 2.2、3.1 和 3.3 的串行基础任务。
 
-- [ ] 2.2 审计公共 Pi Runtime 与 `pi-tasks` exports、tool registrations、schemas、state events、branch replay 和 compaction hooks，不导入 private paths。
+- [x] 2.2 审计公共 Pi Runtime 与 `pi-tasks` exports、tool registrations、schemas、state events、branch replay 和 compaction hooks，不导入 private paths。
   - **依赖：** 2.1。
   - **写入范围：** `packages/agent/scripts/pi-task-runtime-audit.*`、相邻 audit tests/fixtures，以及有界的机器可读 audit output schema。
   - **负责角色：** 与 2.1 使用同一 Task worktree 的 dependency audit subagent。
   - **必需测试：** public-export resolution test、forbidden-private-import scan、audit output schema test。
-  - **完成证据：** export inventory、候选公共 APIs、source references、report hash 和 Task branch commit。
+  - **完成证据：** `pnpm --filter @originos/pi-agent-adapter test` 的审计测试 3/3 通过；report hash `08d3c8c1992f328f9d543eacd5b6af5e4966a0d8b757ef4c2b542a42d1f393dd`；确认 12 个公开 tools、state event v1，并把 host invocation、public mutation command、stable revision 标记为 `unsupported`。
   - **执行方式：** 2.1 后串行执行；其 commit 合并后可与 package smoke 准备并行。
 
 ## 3. Public Runtime 契约验证
