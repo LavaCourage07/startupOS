@@ -11,6 +11,8 @@
 
 **English** | [简体中文](./README_CN.md)
 
+![OriginOS product philosophy](./docs/assets/readme/originos-product-philosophy.webp)
+
 </div>
 
 ## What is OriginOS CE?
