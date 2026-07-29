@@ -11,7 +11,7 @@
 
 **English** | [简体中文](./README_CN.md)
 
-![OriginOS product philosophy](./docs/assets/readme/originos-product-philosophy.webp)
+![OriginOS](./docs/assets/readme/originos-cover.png)
 
 </div>
 
