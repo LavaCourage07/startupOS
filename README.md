@@ -11,11 +11,7 @@
 
 **English** | [简体中文](./README_CN.md)
 
-<video src="https://cdn.artseeu.cn/originos-product-philosophy.mp4" controls width="960">
-  <a href="https://cdn.artseeu.cn/originos-product-philosophy.mp4">Watch the OriginOS product philosophy video</a>
-</video>
-
-[Open the product philosophy video](https://cdn.artseeu.cn/originos-product-philosophy.mp4)
+![OriginOS product philosophy](./docs/assets/readme/originos-product-philosophy.webp)
 
 </div>
 
