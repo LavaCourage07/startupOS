@@ -28,30 +28,30 @@
 
 ## 3. Desktop 与窗体接线
 
-- [ ] 3.1 在独立 Git task worktree 中审计并补齐 Session Get/restore 的 ownership、错误映射和 Pi Agent Runtime 历史重绑。
+- [x] 3.1 在独立 Git task worktree 中审计并补齐 Session Get/restore 的 ownership、错误映射和 Pi Agent Runtime 历史重绑。
   - **依赖：** 2.1 的公开 contract commit。
   - **写入范围：** `packages/desktop/src/main/services/agent-session-service.ts`、`packages/web/src/app/api/agent/sessions/[sessionId]/route.ts`、`packages/core/src/lib/integrations/pi-agent/agent-manager.ts`、Core IPC protocol/service adapter 和相邻测试。
   - **负责角色：** Desktop Integration subagent。
   - **必需测试：** Story TC-I1、TC-I4；Electron/Web adapter contract。
-  - **完成证据：** Task branch commit、IPC/Web 测试输出、错误码矩阵，以及恢复后首次 prompt 的历史消息计数证据。
+  - **完成证据：** Task commit `f70ea78`；`session-restore.test.ts`、`agent-manager.test.ts`、`runtime-history-restore.test.ts` 和 Electron adapter tests 通过；覆盖 `NOT_FOUND`、`OWNERSHIP_MISMATCH`、`CORRUPT_SESSION`、`RESTORE_FAILED`，并验证首次 Runtime hydration 使用持久化历史。
   - **执行方式：** 2.1 后执行；与 3.2 同一 worktree 串行。
 
-- [ ] 3.2 接入 Skill、Agent 与 RoleAgent 窗体历史入口，修正 `isInitialized` 短路、welcome 重发、删除冒泡和 switching/error 状态。
+- [x] 3.2 接入 Skill、Agent 与 RoleAgent 窗体历史入口，修正 `isInitialized` 短路、welcome 重发、删除冒泡和 switching/error 状态。
   - **依赖：** 2.2、3.1。
   - **写入范围：** `SkillDialog.tsx`、`AgentDialogContent.tsx` 及相邻 component tests。
   - **负责角色：** 与 3.1 相同的 Desktop Integration subagent。
   - **必需测试：** Story TC-I2、TC-I3、TC-I4、TC-I5。
-  - **完成证据：** Task branch commit、三类窗体测试矩阵和 UI state assertions。
+  - **完成证据：** Task commit `f70ea78`；Skill 与 Agent/RoleAgent 共用 `restoreSession()`；`session-transition-guard.test.ts` 5/5 通过，覆盖 switching、welcome 抑制和迟到初始化隔离。
   - **执行方式：** 串行。
 
 ## 4. 集成与回归
 
-- [ ] 4.1 使用 `--no-ff` 把 Core 与 Desktop task branches 合并到 Proposal worktree，保留 Task commits 并解决公共 contract 冲突。
+- [x] 4.1 使用 `--no-ff` 把 Core 与 Desktop task branches 合并到 Proposal worktree，保留 Task commits 并解决公共 contract 冲突。
   - **依赖：** 2.2、3.2。
   - **写入范围：** Proposal branch merge commits；仅允许 owner files 的冲突修正。
   - **负责角色：** Proposal integration owner。
   - **必需测试：** Core hook/session tests、Desktop service/component tests、`git diff --check`。
-  - **完成证据：** merge commit SHAs、冲突说明和合并后测试输出。
+  - **完成证据：** Core merge `c34c31a`、Desktop merge `09404ea`、QA merge `71fefb4`；无源码冲突；合并态聚焦回归 39/39 通过，`git diff --check` 通过。
   - **执行方式：** 串行集成。
 
 - [ ] 4.2 运行 Session、stream、Chat Completion Guard、新建/删除和 Desktop development 回归。
@@ -59,7 +59,7 @@
   - **写入范围：** 只读验证；发现修复时必须新建隔离 task worktree。
   - **负责角色：** Regression subagent。
   - **必需测试：** Story 回归矩阵、`pnpm type-check`、`pnpm lint`、相关 package tests。
-  - **完成证据：** 带 exit code 的 command matrix、既有 warning 说明和残余风险。
+  - **完成证据：** Session restore/Runtime/hook/UI/Electron 39/39 通过；SessionStore、长会话和 Completion Guard 51/51 通过；Core/Web type-check、Desktop build、Web lint 通过。Windows `desktop:dev` 尚未执行，因此本项保持未完成。
   - **执行方式：** 串行。
 
 - [ ] 4.3 运行 Story TC-E1、TC-E2、TC-E3；无法自动化的 Electron 真实历史数据验证交给用户执行。
@@ -67,7 +67,7 @@
   - **写入范围：** E2E fixtures/tests；源码修复使用新 task worktree。
   - **负责角色：** QA/E2E subagent。
   - **必需测试：** 三类窗体切换、乱序完成、长历史性能。
-  - **完成证据：** Playwright/脚本结果、性能数据、人工验证步骤和剩余风险。
+  - **完成证据：** QA task commit `ba64b32` 验证 1,000 条历史投影，低层预算 `<500ms`；TC-E2 的乱序 restore/旧 stream 隔离由 hook tests 自动化覆盖。TC-E1 与 TC-E3 的真实 Electron renderer 首屏、滚动和内存验证待用户执行。
   - **执行方式：** 串行。
 
 ## 5. Story 验证与合并
@@ -77,7 +77,7 @@
   - **写入范围：** Goal evidence 与 Proposal 文档；修复必须使用独立 task worktree。
   - **负责角色：** Verification Goal runner。
   - **必需测试：** AC1-AC6 与 TC-U1 至 TC-E3 映射。
-  - **完成证据：** 每个 AC/TC 对应 command、Evidence、人工例外和残余风险。
+  - **完成证据：** 自动化命令与 AC/TC 映射记录在 `verification.md`；当前线程存在 paused 的旧性能 Goal，Goal runtime 拒绝创建第二个 Goal，因此本项保持未完成。
   - **执行方式：** 串行门禁。
 
 - [ ] 5.2 运行最终 OpenSpec strict validation、`pnpm agents:check` 和 architecture guard，并更新 Story OS.20/Epic OS 状态。
@@ -85,7 +85,7 @@
   - **写入范围：** Proposal artifacts、Story OS.20 和 Epic OS 文档。
   - **负责角色：** Proposal integration owner。
   - **必需测试：** strict validation、架构依赖扫描、文档占位符/链接检查。
-  - **完成证据：** validation output、architecture report 和 status diff。
+  - **完成证据：** OpenSpec strict、类型检查、Desktop build、Web lint 和人工 monorepo architecture guard 已通过；`pnpm agents:check` 因只扫描根 `src/` 而跳过，不能作为有效架构证据。待 4.3/5.1 完成后更新为 Done。
   - **执行方式：** 串行。
 
 - [ ] 5.3 获得显式 merge approval 后，把 Proposal branch 合并到 `dev`，执行 post-merge smoke 并清理已完成 worktrees/branches。
