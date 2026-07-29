@@ -2,7 +2,7 @@
 
 Story 9.41 要求由 `pi-tasks` 独占管理 Task、Step、Criterion、Evidence、Blocker 和完成状态。因此，在实现 task planning、continuation、UI projection 或 persistence 之前，OriginOS 必须具备受支持的 task tool 写入边界，以及用于读取当前 branch 状态的公共边界。
 
-已提交的 `dev` 基线仍解析到已废弃的 `@mariozechner/pi-agent-core` 和 `@mariozechner/pi-ai` `0.55.3`。独立的 Pi Runtime 升级应先合并。A-01 只验证实际提交到 `dev` 的版本，不根据未提交 workspace 或 package name 推断兼容性。
+已提交的 `dev` 基线通过 commit `505d157c408dc3e27ef1c09f11bf860a92cc0203` 提供 `@originos/pi-agent-adapter@0.80.10`，并锁定 `@earendil-works/pi-agent-core`、`@earendil-works/pi-ai`、`@earendil-works/pi-coding-agent` 和 `@earendil-works/pi-tui` `0.80.10`。A-01 只验证该已提交版本，不根据未提交 workspace 或 package name 推断兼容性。
 
 本变更涉及 Agent Runtime 维护者、Electron packaging 维护者、Story 9.41 实施者和 QA。本 Proposal 是兼容性与架构门禁，不暴露产品 Task API。
 
@@ -56,6 +56,15 @@ ADR 选择的边界 MUST 是以下方案之一：
 
 第三种方案必须在 ADR 中记录 owner、上游同步方式、兼容策略和移除条件。
 
+初步公共 API 审计已确认：
+
+- `AgentSession` 支持加载 extension、让模型调用 extension tool，并公开 `compact()` 等 Session API。
+- Runtime 可取得已注册工具定义，但没有公开保留参数校验、`beforeToolCall`、权限检查、标准 tool event 和 `afterToolCall` 的宿主 `invokeTool`/`executeToolCall` API。
+- 直接调用 `ToolDefinition.execute()` 会绕过标准 Agent tool-call 管线，不能作为获批边界。
+- `pi-tasks@0.2.0` 只公开状态事件常量与类型，没有公开宿主 mutation command API。
+
+因此 stock 组合预期无法满足本节要求。A-01 harness 必须以可重复方式确认该缺口；受控 fork/adapter 的产品化实现必须由后续独立 Proposal 承担。
+
 **考虑过的替代方案：**
 
 - 导入私有 reducer/store：拒绝，因为 package upgrade 可能静默破坏任务语义。
@@ -68,6 +77,8 @@ ADR 选择的边界 MUST 是以下方案之一：
 Harness 使用 extension 公共 state event 获取实时 snapshot，并通过公共 replay/session API 从当前 Pi branch 重建状态。每个 snapshot 必须标识 Session、branch、Task、schema version 和 revision。
 
 Mutation 成功必须同时满足：tool result 成功，且收到具有更高 revision 的匹配 state event。进程内 cache 只能协调测试，不能作为 canonical state；进程重启后必须能够重新构建。
+
+`pi-tasks@0.2.0` 的 `pi-tasks:state` 事件 payload version 为 `1`，reason 为 `session_start`、`session_tree` 或 `task_mutation`，state snapshot 会省略内部 event history。公开 state 只有 `lastUpdatedAt`，没有稳定 revision、sequence 或 cursor。进程内递增序号和时间戳均不能满足跨重启、branch replay 和 CAS 语义。因此，stock event 只能用于 UI snapshot 观察，不能直接满足本节 mutation correlation 契约。
 
 ### 4. 实现契约 harness，而非产品 adapter
 
@@ -102,6 +113,8 @@ Harness 可以定义类似未来 `PiTaskCommandGateway` 的最小测试类型，
 Harness 创建 branch divergence，并证明一个 branch 的 Task state 不会泄漏到另一个 branch。它通过锁定 Pi Runtime 支持的公共 compaction lifecycle 触发或模拟 compaction，并比较 replay 前后的 canonical Task fields。
 
 如果 runtime 不提供确定性的 compaction trigger，ADR 必须记录该限制，测试使用最接近的受支持 lifecycle hook。P0 replay 和 branch isolation 不得豁免。
+
+Pi Runtime `0.80.10` 公开 `AgentSession.compact(customInstructions?)`，`pi-tasks@0.2.0` 监听 `session_before_compact` 并追加 `task.snapshot`。该触发 API 不依赖操作系统，但实际摘要生成依赖模型。Contract test 必须注入 fake model 或固定 compaction result，使 lifecycle trigger 和 snapshot assertion 可重复；平台打包 smoke 另行验证 API 在 Windows/macOS 产物中可解析。
 
 ### 7. 打包验证使用源码驱动的 verification scripts
 
@@ -159,10 +172,10 @@ Pi Runtime 前置依赖满足后，前三个工作包可以并行。Proposal int
 
 回滚时通过 Proposal merge commit 移除候选 dependency、harness 和 verification scripts。由于不引入产品 API 或 persistence，普通聊天和 Agent runtime 行为保持不变。
 
-## 待确认问题
+## 已确认结论
 
-- 哪个 Pi Runtime upgrade commit 和 package namespace 是 A-01 已提交的前置基线？
-- 该 runtime 是否公开支持在原 Session/branch execution context 中由宿主调用 extension-registered tools？
-- 哪个 `pi-tasks` release 与该 runtime 的 extension、event 和 compaction APIs 兼容？
-- 选定公共 API 是否暴露稳定 state revision，还是受控公共 adapter 必须从上游 event sequence 派生？
-- 所有支持平台是否都提供可用于 contract test 的确定性公共 compaction trigger？
+- **Runtime 基线：** commit `505d157c408dc3e27ef1c09f11bf860a92cc0203`，`@originos/pi-agent-adapter@0.80.10`，Pi namespace 为 `@earendil-works/*@0.80.10`。
+- **宿主 tool invocation：** stock Runtime 没有公开且保留标准 validation、permission 和 lifecycle 的宿主调用 API；直接调用工具定义不合格。
+- **候选 task extension：** `pi-tasks@0.2.0` 与 Runtime `0.80.10` 的 extension、event、branch replay 和 compaction API 形状兼容，但仍需 Electron 产物和 contract tests。
+- **State revision：** stock `pi-tasks@0.2.0` 不公开稳定 revision。受控公共 adapter/fork 必须由上游持久化 event sequence 提供或派生可重放 cursor，不能使用进程内计数或时间戳冒充。
+- **Compaction：** `AgentSession.compact()` 是跨平台公共触发入口；测试必须隔离模型不确定性，Windows/macOS package resolution 仍需平台证据。

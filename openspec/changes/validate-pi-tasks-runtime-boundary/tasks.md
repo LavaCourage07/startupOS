@@ -1,11 +1,11 @@
 ## 1. 审批与 Runtime 前置依赖
 
-- [ ] 1.1 在修改任何应用源码或依赖前，获得 Proposal `validate-pi-tasks-runtime-boundary` 的显式批准。
+- [x] 1.1 在修改任何应用源码或依赖前，获得 Proposal `validate-pi-tasks-runtime-boundary` 的显式批准。
   - **依赖：** proposal、design 和 capability spec 通过 strict validation。
   - **写入范围：** 仅限 Proposal artifacts。
   - **负责角色：** Proposal integration owner。
   - **必需测试：** `openspec validate validate-pi-tasks-runtime-boundary --strict`。
-  - **完成证据：** 已记录的批准信息和成功的 strict validation 输出。
+  - **完成证据：** 用户于 2026-07-29 明确回复“可以，开始实施”，并在实施前完成 strict validation。
   - **执行方式：** 串行审批门禁。
 
 - [ ] 1.2 把 Proposal branch rebase 到已提交 Pi Runtime upgrade 的最新 `dev`，并从 clean checkout 验证精确 runtime namespace/version。
