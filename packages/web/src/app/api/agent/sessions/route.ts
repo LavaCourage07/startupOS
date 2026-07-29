@@ -83,11 +83,15 @@ export async function POST(request: NextRequest) {
     if (body.sessionId) {
       const existing = await agentSessionService.getSession(body.sessionId, body.projectId);
       if (existing) {
-        // Runtime user settings always win over an older session snapshot.
-        if (body.llmConfig) {
-          existing.llmConfig = llmConfigWithMapping;
-          await agentSessionService.saveSession(existing);
-        }
+        existing.projectContext = {
+          ...existing.projectContext,
+          ...body.projectContext,
+          ...(body.agentBaseDir ? { currentPath: body.agentBaseDir } : {}),
+          ...(body.outputDir ? { outputDir: body.outputDir } : {}),
+        };
+        if (body.agentType) existing.agentType = body.agentType;
+        if (body.llmConfig) existing.llmConfig = llmConfigWithMapping;
+        await agentSessionService.saveSession(existing);
         return NextResponse.json<ApiResponse>(
           { success: true, data: existing, timestamp: new Date().toISOString() },
           { status: 200 },
@@ -108,6 +112,7 @@ export async function POST(request: NextRequest) {
       projectContext: {
         ...body.projectContext,
         ...(body.agentBaseDir ? { currentPath: body.agentBaseDir } : {}),
+        ...(body.outputDir ? { outputDir: body.outputDir } : {}),
       },
       sessionId: body.sessionId,
       llmConfig: llmConfigWithMapping,

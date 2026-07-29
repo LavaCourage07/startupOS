@@ -262,6 +262,12 @@ export interface ProjectContext {
 	projectName?: string;
 
 	/**
+	 * 当前会话所属入口。新会话必须持久化；旧会话恢复时由已校验的请求补齐。
+	 */
+	entryType?: "skill" | "agent" | "role-agent";
+	entryId?: string;
+
+	/**
 	 * 用户ID
 	 */
 	userId?: string;

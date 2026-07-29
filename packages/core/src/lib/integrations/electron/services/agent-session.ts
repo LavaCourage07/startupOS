@@ -2,6 +2,10 @@ import { getIpcRenderer, isElectron } from '../env';
 import { IPC_CHANNELS, type IpcResponse } from '../ipc-protocol';
 import type { AgentSession } from '../../../../types/agent';
 import type { RuntimeLLMConfig } from '../../pi-agent/llm-config';
+import type {
+  RestoreAgentEntryType,
+  RestoreAgentSessionRequest,
+} from '../../pi-agent/session-restore';
 
 export interface AgentContentResponse {
   content: string;
@@ -67,16 +71,24 @@ export async function createAgentSession(request: {
 
 // ── Session Get ───────────────────────────────────────────────
 
-export async function getAgentSession(sessionId: string, projectId?: string): Promise<IpcResponse<AgentSession>> {
+export async function getAgentSession(
+  request: RestoreAgentSessionRequest,
+): Promise<IpcResponse<AgentSession>> {
   if (isElectron()) {
     return getIpcRenderer().invoke<IpcResponse<AgentSession>>(
       IPC_CHANNELS.AGENT_SESSION_GET,
-      { sessionId, projectId }
+      request,
     );
   }
 
-  const params = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
-  const response = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}${params}`);
+  const params = new URLSearchParams({
+    projectId: request.projectId,
+    entryType: request.entryType,
+    entryId: request.entryId,
+  });
+  const response = await fetch(
+    `/api/agent/sessions/${encodeURIComponent(request.sessionId)}?${params.toString()}`,
+  );
   return (await response.json()) as IpcResponse<AgentSession>;
 }
 
@@ -186,6 +198,8 @@ export async function sendAgentMessage(request: {
   content: string;
   role?: string;
   projectId?: string;
+  entryType?: RestoreAgentEntryType;
+  entryId?: string;
 }): Promise<IpcResponse<unknown>> {
   if (isElectron()) {
     return getIpcRenderer().invoke<IpcResponse<unknown>>(
@@ -201,6 +215,8 @@ export async function sendAgentMessage(request: {
       content: request.content,
       role: request.role,
       ...(request.projectId ? { projectId: request.projectId } : {}),
+      ...(request.entryType ? { entryType: request.entryType } : {}),
+      ...(request.entryId ? { entryId: request.entryId } : {}),
     }),
   });
   return readJsonResponse<IpcResponse<unknown>>(response);
@@ -213,6 +229,8 @@ export async function sendAgentMessageStream(request: {
   content: string;
   role?: string;
   projectId?: string;
+  entryType?: RestoreAgentEntryType;
+  entryId?: string;
   streamId?: string;
 }): Promise<IpcResponse<unknown>> {
   if (isElectron()) {
@@ -229,6 +247,8 @@ export async function sendAgentMessageStream(request: {
       content: request.content,
       role: request.role,
       ...(request.projectId ? { projectId: request.projectId } : {}),
+      ...(request.entryType ? { entryType: request.entryType } : {}),
+      ...(request.entryId ? { entryId: request.entryId } : {}),
     }),
   });
   return readJsonResponse<IpcResponse<unknown>>(response);

@@ -13,6 +13,7 @@ import { setToolContext, removeToolContext, getToolContextManager, type ToolExec
 import { bindToolsToSession } from './tools/bind-session';
 import { detectCorrections } from './cognitive/pattern/correction-detector';
 import type { RuntimeLLMConfig } from './llm-config';
+import type { AgentSession } from '../../../types/agent';
 
 type CognitiveSessionEndManager = {
   on_session_end: (messages: unknown[]) => Promise<void>;
@@ -51,6 +52,11 @@ export interface AgentManagerConfig {
   debug?: boolean;
 }
 
+export interface RestoredAgentRuntime {
+  sessionId: string;
+  historyMessageCount: number;
+}
+
 /**
  * 将工具列表绑定到指定 session：每次工具执行前刷新 defaultContext，
  * 避免多 session 并发时 defaultContext 被最后一个 session 覆盖导致文件写到错误目录。
@@ -74,6 +80,7 @@ function filterDisallowedToolsForAgentType(
  */
 export class AgentManager {
   private agents = new Map<string, AgentEntry>();
+  private runtimeRestorePromises = new Map<string, Promise<RestoredAgentRuntime>>();
   private config: Required<AgentManagerConfig>;
 
   constructor(config?: AgentManagerConfig) {
@@ -185,6 +192,88 @@ export class AgentManager {
     });
 
     return agent;
+  }
+
+  /**
+   * 通过公开 OriginOSAgent API 将持久化 Session 重新绑定到运行时。
+   * 调用完成后，下一条 prompt 会看到完整历史，但不会包含尚未提交的新用户消息。
+   */
+  async restoreAgentRuntime(session: AgentSession): Promise<RestoredAgentRuntime> {
+    const pendingRestore = this.runtimeRestorePromises.get(session.sessionId);
+    if (pendingRestore) {
+      return pendingRestore;
+    }
+
+    const restore = this.restoreAgentRuntimeOnce(session);
+    this.runtimeRestorePromises.set(session.sessionId, restore);
+    try {
+      return await restore;
+    } finally {
+      if (this.runtimeRestorePromises.get(session.sessionId) === restore) {
+        this.runtimeRestorePromises.delete(session.sessionId);
+      }
+    }
+  }
+
+  private async restoreAgentRuntimeOnce(session: AgentSession): Promise<RestoredAgentRuntime> {
+    const hadRuntime = this.hasAgent(session.sessionId);
+    const agent = await this.getOrCreateAgent(
+      session.sessionId,
+      session.projectContext.projectId,
+      {
+        systemPrompt: session.systemPrompt || undefined,
+        agentType: session.agentType,
+        agentBaseDir: session.projectContext.currentPath,
+        outputDir: session.projectContext.outputDir,
+        llmConfig: session.llmConfig,
+      },
+    );
+
+    if (hadRuntime) {
+      return {
+        sessionId: session.sessionId,
+        historyMessageCount: session.messages.length,
+      };
+    }
+
+    await agent.waitForIdle();
+    const historyMessageCount = agent.replacePersistedMessages(session.messages);
+
+    return {
+      sessionId: session.sessionId,
+      historyMessageCount,
+    };
+  }
+
+  /**
+   * 获取已有运行时；进程重启或缓存回收后则先从持久化 Session 恢复。
+   */
+  async getOrRestoreAgentRuntime(session: AgentSession): Promise<OriginOSAgent> {
+    const pendingRestore = this.runtimeRestorePromises.get(session.sessionId);
+    if (pendingRestore) {
+      await pendingRestore;
+    }
+
+    if (!this.hasAgent(session.sessionId)) {
+      await this.restoreAgentRuntime(session);
+      const restoredAgent = this.getAgent(session.sessionId);
+      if (!restoredAgent) {
+        throw new Error(`Agent runtime restore failed for session ${session.sessionId}`);
+      }
+      return restoredAgent;
+    }
+
+    return this.getOrCreateAgent(
+      session.sessionId,
+      session.projectContext.projectId,
+      {
+        systemPrompt: session.systemPrompt || undefined,
+        agentType: session.agentType,
+        agentBaseDir: session.projectContext.currentPath,
+        outputDir: session.projectContext.outputDir,
+        llmConfig: session.llmConfig,
+      },
+    );
   }
 
   /**
