@@ -10,20 +10,20 @@
 
 ## 2. Core restore contract
 
-- [ ] 2.1 在隔离 Git task worktree 中实现 Session restore DTO、display message 映射、ownership 校验和结构化错误。
+- [x] 2.1 在隔离 Git task worktree 中实现 Session restore DTO、display message 映射、ownership 校验和结构化错误。
   - **依赖：** 1.1。
   - **写入范围：** `packages/core/src/lib/integrations/pi-agent/` 的 restore 模块、公共导出和相邻测试。
   - **负责角色：** Core Runtime subagent。
   - **必需测试：** Story TC-U1、TC-U2；TypeScript strict；禁止 private Pi Session access scan。
-  - **完成证据：** Task branch commit、聚焦测试输出和 public export diff。
+  - **完成证据：** Task commit `c3d7a4f`；`session-restore.test.ts` 8/8 通过；公共 contract 已从 pi-agent `client`、`hooks` 和 `index` 导出。
   - **执行方式：** 与 3.1 串行，先提供 contract。
 
-- [ ] 2.2 扩展 `usePiAgent`，实现 `restoreSession()`、原子状态提交、epoch/abort guard 和旧 Session stream event 隔离。
+- [x] 2.2 扩展 `usePiAgent`，实现 `restoreSession()`、原子状态提交、epoch/abort guard 和旧 Session stream event 隔离。
   - **依赖：** 2.1。
   - **写入范围：** `client-hooks.ts`、hook tests 和必要的 Core Electron service 类型适配。
   - **负责角色：** 与 2.1 相同的 Core Runtime subagent。
   - **必需测试：** Story TC-U3、TC-U4、TC-I1；现有 hook session isolation 和 stream tests。
-  - **完成证据：** Task branch commit、乱序 barrier 测试和旧事件隔离测试。
+  - **完成证据：** Task commit `c3d7a4f`；`client-hooks-session-isolation.test.ts` 8/8 通过；覆盖 restore A/B 乱序、initialize/restore 竞态、旧 stream 迟到事件和失败不破坏当前状态。
   - **执行方式：** 2.1 后串行。
 
 ## 3. Desktop 与窗体接线
