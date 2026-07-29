@@ -1,0 +1,204 @@
+import { describe, expect, it } from 'vitest';
+import {
+  RestoreAgentSessionError,
+  assertSessionOwnership,
+  createRestoreAgentSessionResult,
+  mapSessionDisplayMessages,
+} from '../session-restore';
+
+function createStoredSession(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    sessionId: 'session-skill-a',
+    messages: [
+      {
+        id: 'user-1',
+        role: 'user',
+        content: '请继续分析',
+        timestamp: 10,
+      },
+      {
+        id: 'system-1',
+        role: 'system',
+        content: 'private system prompt',
+        timestamp: 11,
+      },
+      {
+        id: 'thinking-1',
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'private reasoning' }],
+        timestamp: 12,
+      },
+      {
+        id: 'recovery-1',
+        role: 'user',
+        content: '[Internal Completion Recovery] continue',
+        timestamp: 13,
+      },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: [{ type: 'text', text: '分析完成' }],
+        timestamp: 14,
+      },
+      {
+        id: 'tool-1',
+        role: 'toolResult',
+        content: 'report.md',
+        timestamp: 15,
+      },
+    ],
+    projectContext: {
+      projectId: 'skill-candidate-evaluator',
+      projectName: '候选人评估',
+      currentPath: 'C:\\OriginOS\\data\\skills\\candidate-evaluator',
+      outputDir: 'C:\\OriginOS\\data\\skills\\candidate-evaluator\\output',
+      entryType: 'skill',
+      entryId: 'candidate-evaluator',
+    },
+    systemPrompt: 'private system prompt',
+    agentType: 'skill',
+    llmConfig: {
+      provider: 'openai-compatible',
+      baseUrl: 'https://example.test/v1',
+      model: 'gpt-test',
+    },
+    ...overrides,
+  };
+}
+
+const restoreRequest = {
+  sessionId: 'session-skill-a',
+  projectId: 'skill-candidate-evaluator',
+  entryType: 'skill' as const,
+  entryId: 'candidate-evaluator',
+};
+
+function expectRestoreError(
+  action: () => unknown,
+  code: RestoreAgentSessionError['code'],
+): void {
+  try {
+    action();
+    throw new Error('Expected restore error.');
+  } catch (error) {
+    expect(error).toBeInstanceOf(RestoreAgentSessionError);
+    expect((error as RestoreAgentSessionError).code).toBe(code);
+  }
+}
+
+describe('Session restore contract', () => {
+  it('TC-U1 maps canonical history and context into a bounded display snapshot', () => {
+    const result = createRestoreAgentSessionResult(createStoredSession(), restoreRequest);
+
+    expect(result).toMatchObject({
+      contractVersion: 1,
+      sessionId: 'session-skill-a',
+      projectContext: {
+        projectId: 'skill-candidate-evaluator',
+        projectName: '候选人评估',
+        currentPath: 'C:\\OriginOS\\data\\skills\\candidate-evaluator',
+        outputDir: 'C:\\OriginOS\\data\\skills\\candidate-evaluator\\output',
+      },
+      agentType: 'skill',
+      workingDirectory: 'C:\\OriginOS\\data\\skills\\candidate-evaluator',
+      outputDir: 'C:\\OriginOS\\data\\skills\\candidate-evaluator\\output',
+      llmConfig: {
+        provider: 'openai-compatible',
+        baseUrl: 'https://example.test/v1',
+        model: 'gpt-test',
+      },
+      runtime: {
+        restored: true,
+        resumable: true,
+      },
+    });
+    expect(result.messages).toEqual([
+      {
+        id: 'user-1',
+        role: 'user',
+        content: '请继续分析',
+        timestamp: 10,
+      },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '分析完成',
+        timestamp: 14,
+      },
+      {
+        id: 'tool-1',
+        role: 'toolResult',
+        content: 'report.md',
+        timestamp: 15,
+      },
+    ]);
+  });
+
+  it('TC-U1 accepts a valid empty Session without synthesizing a welcome message', () => {
+    const result = createRestoreAgentSessionResult(
+      createStoredSession({ messages: [] }),
+      restoreRequest,
+    );
+
+    expect(result.messages).toEqual([]);
+  });
+
+  it('TC-U1 rejects unknown schemas and malformed messages with CORRUPT_SESSION', () => {
+    expectRestoreError(
+      () => createRestoreAgentSessionResult(
+        createStoredSession({ schemaVersion: 999 }),
+        restoreRequest,
+      ),
+      'CORRUPT_SESSION',
+    );
+    expectRestoreError(
+      () => mapSessionDisplayMessages([{ role: 'assistant', content: { text: 'invalid' } }]),
+      'CORRUPT_SESSION',
+    );
+  });
+
+  it('TC-U2 accepts matching ownership before projecting message bodies', () => {
+    expect(() => assertSessionOwnership(createStoredSession(), restoreRequest)).not.toThrow();
+  });
+
+  it.each([
+    {
+      name: 'another Skill',
+      request: {
+        ...restoreRequest,
+        projectId: 'skill-other',
+        entryId: 'other',
+      },
+    },
+    {
+      name: 'another project',
+      request: {
+        ...restoreRequest,
+        projectId: 'project-other',
+        entryType: undefined,
+        entryId: undefined,
+      },
+    },
+    {
+      name: 'an Agent entry with the same id',
+      request: {
+        ...restoreRequest,
+        projectId: 'candidate-evaluator',
+        entryType: 'agent' as const,
+      },
+    },
+    {
+      name: 'a RoleAgent entry',
+      request: {
+        ...restoreRequest,
+        projectId: 'candidate-evaluator',
+        entryType: 'role-agent' as const,
+      },
+    },
+  ])('TC-U2 rejects ownership from $name without returning display messages', ({ request }) => {
+    expectRestoreError(
+      () => createRestoreAgentSessionResult(createStoredSession(), request),
+      'OWNERSHIP_MISMATCH',
+    );
+  });
+});

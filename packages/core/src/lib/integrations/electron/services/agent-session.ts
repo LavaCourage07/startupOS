@@ -67,9 +67,9 @@ export async function createAgentSession(request: {
 
 // ── Session Get ───────────────────────────────────────────────
 
-export async function getAgentSession(sessionId: string, projectId?: string): Promise<IpcResponse<unknown>> {
+export async function getAgentSession(sessionId: string, projectId?: string): Promise<IpcResponse<AgentSession>> {
   if (isElectron()) {
-    return getIpcRenderer().invoke<IpcResponse<unknown>>(
+    return getIpcRenderer().invoke<IpcResponse<AgentSession>>(
       IPC_CHANNELS.AGENT_SESSION_GET,
       { sessionId, projectId }
     );
@@ -77,7 +77,7 @@ export async function getAgentSession(sessionId: string, projectId?: string): Pr
 
   const params = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
   const response = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}${params}`);
-  return readJsonResponse<IpcResponse<unknown>>(response);
+  return (await response.json()) as IpcResponse<AgentSession>;
 }
 
 // ── Session Update ────────────────────────────────────────────

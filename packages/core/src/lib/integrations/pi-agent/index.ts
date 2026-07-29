@@ -110,4 +110,5 @@ export * from "./core/skills";
 export * from "./core/skills.types";
 export * from "./core/skills.middleware";
 export * from "./stream-render-scheduler";
+export * from "./session-restore";
 export * from "./use-persistent-agent";

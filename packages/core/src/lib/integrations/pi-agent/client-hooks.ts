@@ -7,11 +7,24 @@
 
 import { useEffect, useCallback, useMemo, useState, useRef } from "react";
 import type { ProjectContext } from "./types";
-import { createAgentSession, sendAgentMessage, sendAgentMessageStream, subscribeAgentEvents, abortAgentSession } from "../electron/services/agent-session";
+import {
+	createAgentSession,
+	getAgentSession,
+	sendAgentMessage,
+	sendAgentMessageStream,
+	subscribeAgentEvents,
+	abortAgentSession,
+} from "../electron/services/agent-session";
 import { isElectron } from "../electron/env";
 import { appendStreamDelta, reconcileFinalStreamContent } from "./stream-dedupe";
 import { StreamRenderScheduler } from "./stream-render-scheduler";
 import type { RuntimeLLMConfig } from "./llm-config";
+import {
+	createRestoreAgentSessionResult,
+	toRestoreAgentSessionError,
+	type RestoreAgentSessionRequest,
+	type RestoreAgentSessionResult,
+} from "./session-restore";
 
 // ============================================================================
 // 全局状态存储（解决 hook 重新实例化问题）
@@ -105,11 +118,14 @@ export interface UseClientPiAgentState {
 	isInitialized: boolean;
 	isRunning: boolean;
 	isThinking: boolean;
+	isRestoring: boolean;
 	sessionId: string | null;
 	projectContext: ProjectContext | null;
+	restoredSession: RestoreAgentSessionResult | null;
 	uiState: {
 		isThinking: boolean;
 		isRunning: boolean;
+		isRestoring: boolean;
 		activeTools: Array<{
 			toolName: string;
 			startTime: number;
@@ -133,6 +149,9 @@ export interface UseClientPiAgentState {
 		variables?: Record<string, string>,
 		llmConfig?: RuntimeLLMConfig
 	) => Promise<void>;
+	restoreSession: (
+		request: RestoreAgentSessionRequest
+	) => Promise<RestoreAgentSessionResult | null>;
 	destroy: () => void;
 	sendMessage: (message: string) => Promise<void>;
 	sendMessageStream: (message: string) => Promise<void>;
@@ -265,9 +284,11 @@ export function usePiAgent(): UseClientPiAgentState {
 	const [isInitialized, setIsInitialized] = useState(false);
 	const [isRunning, setIsRunning] = useState(false);
 	const [isThinking, setIsThinking] = useState(false);
+	const [isRestoring, setIsRestoring] = useState(false);
 	const [artifactVersion, setArtifactVersion] = useState(0);
 	const [sessionId, setSessionId] = useState<string | null>(null);
 	const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
+	const [restoredSession, setRestoredSession] = useState<RestoreAgentSessionResult | null>(null);
 	const [activeTools, setActiveTools] = useState<Array<{ toolName: string; startTime: number }>>([]);
 	const [progressMessage, setProgressMessage] = useState<string | null>(null);
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -284,11 +305,31 @@ export function usePiAgent(): UseClientPiAgentState {
 
 	// Session ID ref for access in sendMessage (避免闭包问题)
 	const sessionIdRef = useRef<string | null>(null);
+	const projectContextRef = useRef<ProjectContext | null>(null);
 	const isInitializedRef = useRef(false);
 	const abortControllerRef = useRef<AbortController | null>(null);
 	const activeStreamIdRef = useRef<string | null>(null);
 	const streamSequenceRef = useRef(0);
 	const streamUnsubscribeRef = useRef<(() => void) | null>(null);
+	const sessionOperationEpochRef = useRef(0);
+	const restoreAbortControllerRef = useRef<AbortController | null>(null);
+	const restoreTargetRef = useRef<string | null>(null);
+	const destroyedRef = useRef(false);
+
+	useEffect(() => {
+		return () => {
+			destroyedRef.current = true;
+			sessionOperationEpochRef.current += 1;
+			restoreTargetRef.current = null;
+			restoreAbortControllerRef.current?.abort();
+			restoreAbortControllerRef.current = null;
+			activeStreamIdRef.current = null;
+			streamUnsubscribeRef.current?.();
+			streamUnsubscribeRef.current = null;
+			abortControllerRef.current?.abort();
+			abortControllerRef.current = null;
+		};
+	}, []);
 
 	// 触发事件
 	const emitEvent = useCallback((event: ClientAgentEvent) => {
@@ -301,30 +342,143 @@ export function usePiAgent(): UseClientPiAgentState {
 		});
 	}, []);
 
+	const invalidatePendingRestore = useCallback(() => {
+		restoreTargetRef.current = null;
+		restoreAbortControllerRef.current?.abort();
+		restoreAbortControllerRef.current = null;
+		setIsRestoring(false);
+	}, []);
+
+	const detachActiveStream = useCallback((notifyServer: boolean) => {
+		const previousSessionId = sessionIdRef.current;
+		activeStreamIdRef.current = null;
+		streamUnsubscribeRef.current?.();
+		streamUnsubscribeRef.current = null;
+		abortControllerRef.current?.abort();
+		abortControllerRef.current = null;
+		setIsThinking(false);
+		setIsRunning(false);
+		setActiveTools([]);
+		if (notifyServer && previousSessionId) {
+			void abortAgentSession(previousSessionId).catch(() => {});
+		}
+	}, []);
+
 	// 初始化
 	const initialize = useCallback(
 		async (newSessionId: string, newProjectContext: ProjectContext, variables?: Record<string, string>, llmConfig?: { provider?: string; baseUrl?: string; apiKey?: string; model?: string; maxTokens?: number }) => {
+			destroyedRef.current = false;
+			const operationEpoch = sessionOperationEpochRef.current + 1;
+			sessionOperationEpochRef.current = operationEpoch;
+			invalidatePendingRestore();
+			detachActiveStream(true);
 			setErrorMessage(null);
 			setProgressMessage("初始化中...");
+			const isCurrentOperation = () =>
+				!destroyedRef.current
+					&& sessionOperationEpochRef.current === operationEpoch;
 
 			try {
 				// 获取服务器返回的真实 sessionId
 				const serverSessionId = await initializeSession(newSessionId, newProjectContext, variables, llmConfig);
+				if (!isCurrentOperation()) return;
 				setSessionId(serverSessionId);  // 使用服务器的 sessionId
 				sessionIdRef.current = serverSessionId;
 				setProjectContext(newProjectContext);
+				projectContextRef.current = newProjectContext;
+				setRestoredSession(null);
 				setIsInitialized(true);
 				isInitializedRef.current = true;
 				setMessages([]);  // 清空消息
 				setProgressMessage(null);
 			} catch (err) {
+				if (!isCurrentOperation()) return;
 				const msg = err instanceof Error ? err.message : "初始化失败";
 				setErrorMessage(msg);
 				setProgressMessage(null);
 				throw err;
 			}
 		},
-		[]
+		[detachActiveStream, invalidatePendingRestore]
+	);
+
+	const restoreSession = useCallback(
+		async (
+			request: RestoreAgentSessionRequest,
+		): Promise<RestoreAgentSessionResult | null> => {
+			if (
+				isInitializedRef.current
+				&& sessionIdRef.current === request.sessionId
+			) {
+				return null;
+			}
+
+			destroyedRef.current = false;
+			const operationEpoch = sessionOperationEpochRef.current + 1;
+			sessionOperationEpochRef.current = operationEpoch;
+			restoreTargetRef.current = request.sessionId;
+			restoreAbortControllerRef.current?.abort();
+			const restoreController = new AbortController();
+			restoreAbortControllerRef.current = restoreController;
+
+			detachActiveStream(true);
+			setIsRestoring(true);
+			setErrorMessage(null);
+			setProgressMessage("正在恢复会话...");
+
+			const isLatestRestore = () =>
+				!destroyedRef.current
+				&& !restoreController.signal.aborted
+				&& sessionOperationEpochRef.current === operationEpoch
+				&& restoreTargetRef.current === request.sessionId;
+
+			try {
+				const response = await getAgentSession(request.sessionId, request.projectId);
+				if (!isLatestRestore()) {
+					return null;
+				}
+				if (!response.success || !response.data) {
+					throw toRestoreAgentSessionError(
+						response.error ?? { code: 'RESTORE_FAILED' },
+					);
+				}
+
+				const snapshot = createRestoreAgentSessionResult(response.data, request);
+				if (!isLatestRestore()) {
+					return null;
+				}
+
+				sessionIdRef.current = snapshot.sessionId;
+				projectContextRef.current = snapshot.projectContext;
+				isInitializedRef.current = true;
+				setSessionId(snapshot.sessionId);
+				setProjectContext(snapshot.projectContext);
+				setMessages(snapshot.messages);
+				setRestoredSession(snapshot);
+				setIsInitialized(true);
+				setIsThinking(false);
+				setIsRunning(false);
+				setActiveTools([]);
+				setProgressMessage(null);
+				setErrorMessage(null);
+				return snapshot;
+			} catch (error) {
+				if (!isLatestRestore()) {
+					return null;
+				}
+				const restoreError = toRestoreAgentSessionError(error);
+				setErrorMessage(`${restoreError.code}: ${restoreError.message}`);
+				setProgressMessage(null);
+				throw restoreError;
+			} finally {
+				if (isLatestRestore()) {
+					restoreTargetRef.current = null;
+					restoreAbortControllerRef.current = null;
+					setIsRestoring(false);
+				}
+			}
+		},
+		[detachActiveStream],
 	);
 
 	// 发送消息
@@ -333,7 +487,13 @@ export function usePiAgent(): UseClientPiAgentState {
 			if (!isInitializedRef.current || !sessionIdRef.current) {
 				throw new Error("Agent 未初始化。请先调用 initialize()。");
 			}
+			if (restoreTargetRef.current) {
+				throw new Error("会话正在恢复，请稍后再发送消息。");
+			}
 
+			const operationSessionId = sessionIdRef.current;
+			const operationProjectId = projectContextRef.current?.projectId;
+			const isCurrentOperation = () => sessionIdRef.current === operationSessionId;
 			console.log('[usePiAgent] sendMessage called with:', message?.slice(0, 50));
 			setErrorMessage(null);
 			setIsRunning(true);
@@ -357,7 +517,12 @@ export function usePiAgent(): UseClientPiAgentState {
 			try {
 				// 发送消息到 API 并获取响应
 				console.log('[usePiAgent] Calling API...');
-				const result = await sendMessageToAgent(sessionIdRef.current, message, projectContext?.projectId);
+				const result = await sendMessageToAgent(
+					operationSessionId,
+					message,
+					operationProjectId,
+				);
+				if (!isCurrentOperation()) return;
 				console.log('[usePiAgent] API result:', result);
 
 				// 添加助手消息（如果有）
@@ -389,16 +554,19 @@ export function usePiAgent(): UseClientPiAgentState {
 
 				emitEvent({ type: "agent_end" });
 			} catch (err) {
+				if (!isCurrentOperation()) return;
 				const msg = err instanceof Error ? err.message : "发送消息失败";
 				console.error('[usePiAgent] Error:', msg);
 				setErrorMessage(msg);
 				emitEvent({ type: "agent_error", error: { message: msg } });
 			} finally {
-				setIsThinking(false);
-				setIsRunning(false);
+				if (isCurrentOperation()) {
+					setIsThinking(false);
+					setIsRunning(false);
+				}
 			}
 		},
-		[emitEvent, projectContext?.projectId]
+		[emitEvent]
 	);
 
 	// 发送消息 (流式响应)
@@ -407,8 +575,13 @@ export function usePiAgent(): UseClientPiAgentState {
 			if (!isInitializedRef.current || !sessionIdRef.current) {
 				throw new Error("Agent 未初始化。请先调用 initialize()。");
 			}
+			if (restoreTargetRef.current) {
+				throw new Error("会话正在恢复，请稍后再发送消息。");
+			}
 
-			console.log('[usePiAgent] sendMessageStream called, sessionId:', sessionIdRef.current, message?.slice(0, 50));
+			const streamSessionId = sessionIdRef.current;
+			const streamProjectId = projectContextRef.current?.projectId;
+			console.log('[usePiAgent] sendMessageStream called, sessionId:', streamSessionId, message?.slice(0, 50));
 			setErrorMessage(null);
 			setIsRunning(true);
 			setIsThinking(true);
@@ -424,7 +597,10 @@ export function usePiAgent(): UseClientPiAgentState {
 			abortControllerRef.current = abortController;
 			const streamId = `stream-${Date.now()}-${streamSequenceRef.current++}`;
 			activeStreamIdRef.current = streamId;
-			const isActiveStream = () => activeStreamIdRef.current === streamId && !abortController.signal.aborted;
+			const isActiveStream = () =>
+				activeStreamIdRef.current === streamId
+					&& sessionIdRef.current === streamSessionId
+					&& !abortController.signal.aborted;
 
 			// 添加用户消息
 			const userMessageId = `msg-user-${Date.now()}`;
@@ -467,9 +643,9 @@ export function usePiAgent(): UseClientPiAgentState {
 						));
 					},
 					onDebug: (debugEvent) => {
-						console.info("[StreamRender] scheduler", {
-							streamId,
-							sessionId: sessionIdRef.current,
+							console.info("[StreamRender] scheduler", {
+								streamId,
+								sessionId: streamSessionId,
 							assistantMessageId,
 							...debugEvent,
 						});
@@ -534,7 +710,7 @@ export function usePiAgent(): UseClientPiAgentState {
 								if (rendererDeltaEvents === 1 || rendererDeltaEvents % 25 === 0) {
 									console.info("[StreamRender] renderer-delta", {
 										streamId,
-										sessionId: sessionIdRef.current,
+										sessionId: streamSessionId,
 										eventCount: rendererDeltaEvents,
 										deltaChars: rendererDeltaChars,
 										incomingLength: delta.length,
@@ -551,7 +727,7 @@ export function usePiAgent(): UseClientPiAgentState {
 							const content = (event.data as { content?: string })?.content;
 							console.info("[StreamRender] renderer-assistant-message", {
 								streamId,
-								sessionId: sessionIdRef.current,
+								sessionId: streamSessionId,
 								incomingLength: content?.length ?? 0,
 								accumulatedLength: receivedAssistantContent.length,
 								deltaEvents: rendererDeltaEvents,
@@ -594,7 +770,7 @@ export function usePiAgent(): UseClientPiAgentState {
 							const content = (event.data as { content?: string })?.content;
 							console.info("[StreamRender] renderer-done", {
 								streamId,
-								sessionId: sessionIdRef.current,
+								sessionId: streamSessionId,
 								incomingLength: content?.length ?? 0,
 								accumulatedLength: receivedAssistantContent.length,
 								deltaEvents: rendererDeltaEvents,
@@ -623,15 +799,15 @@ export function usePiAgent(): UseClientPiAgentState {
 								}
 							});
 						}
-					}, sessionIdRef.current ?? undefined);
+						}, streamSessionId);
 					streamUnsubscribeRef.current = unsubscribeEvents;
 
 					// 发送请求（主进程立即返回 started:true，后台异步推事件）
 					const response = await sendAgentMessageStream({
-						sessionId: sessionIdRef.current,
+						sessionId: streamSessionId,
 						content: message,
 						role: "user",
-						projectId: projectContext?.projectId,
+						projectId: streamProjectId,
 						streamId,
 					});
 
@@ -664,7 +840,7 @@ export function usePiAgent(): UseClientPiAgentState {
 			// Web 模式：通过 HTTP SSE
 			// 复用上面已声明的 stream 生命周期变量。
 			try {
-				const response = await fetch(`${API_BASE}/${sessionIdRef.current}/messages`, {
+				const response = await fetch(`${API_BASE}/${streamSessionId}/messages`, {
 					method: "POST",
 					headers: {
 						"Content-Type": "application/json",
@@ -673,7 +849,7 @@ export function usePiAgent(): UseClientPiAgentState {
 					body: JSON.stringify({
 						role: "user",
 						content: message,
-						projectId: projectContext?.projectId,
+						projectId: streamProjectId,
 					}),
 					signal: abortController.signal,
 				});
@@ -841,7 +1017,7 @@ export function usePiAgent(): UseClientPiAgentState {
 				}
 			}
 		},
-		[emitEvent, projectContext?.projectId]
+		[emitEvent]
 	);
 
 	// 中断
@@ -872,11 +1048,19 @@ export function usePiAgent(): UseClientPiAgentState {
 
 	// 销毁
 	const destroy = useCallback(() => {
+		destroyedRef.current = true;
+		sessionOperationEpochRef.current += 1;
+		restoreTargetRef.current = null;
+		restoreAbortControllerRef.current?.abort();
+		restoreAbortControllerRef.current = null;
 		setIsInitialized(false);
 		isInitializedRef.current = false;
+		setIsRestoring(false);
 		setSessionId(null);
 		sessionIdRef.current = null;
 		setProjectContext(null);
+		projectContextRef.current = null;
+		setRestoredSession(null);
 		setMessages([]);
 		setActiveTools([]);
 		setProgressMessage(null);
@@ -894,7 +1078,11 @@ export function usePiAgent(): UseClientPiAgentState {
 	// 更新项目上下文
 	const updateProjectContext = useCallback(
 		(context: Partial<ProjectContext>) => {
-			setProjectContext(prev => prev ? { ...prev, ...context } : null);
+			setProjectContext(prev => {
+				const nextContext = prev ? { ...prev, ...context } : null;
+				projectContextRef.current = nextContext;
+				return nextContext;
+			});
 		},
 		[]
 	);
@@ -946,26 +1134,30 @@ export function usePiAgent(): UseClientPiAgentState {
 		() => ({
 			isThinking,
 			isRunning,
+			isRestoring,
 			activeTools,
 			progressMessage,
 			errorMessage,
 		}),
-		[isThinking, isRunning, activeTools, progressMessage, errorMessage]
+		[isThinking, isRunning, isRestoring, activeTools, progressMessage, errorMessage]
 	);
 
 	return {
 		// State
 		isInitialized,
-		isRunning,
-		isThinking,
-		sessionId,
-		projectContext,
+			isRunning,
+			isThinking,
+			isRestoring,
+			sessionId,
+			projectContext,
+			restoredSession,
 		uiState,
 		messages,
 		artifactVersion,
 
 		// Actions
-		initialize,
+			initialize,
+			restoreSession,
 		destroy,
 		sendMessage,
 		sendMessageStream,

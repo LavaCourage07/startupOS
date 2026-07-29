@@ -252,6 +252,11 @@ export interface ProjectContext {
 	currentPath?: string;
 
 	/**
+	 * 当前 Session 的产物输出目录
+	 */
+	outputDir?: string;
+
+	/**
 	 * 项目名称
 	 */
 	projectName?: string;
