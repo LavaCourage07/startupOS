@@ -12,15 +12,21 @@
 
 ### A-01 pi-tasks 公共边界验证
 
-- [ ] 锁定兼容当前 Pi Runtime 的 `pi-tasks` 版本和完整依赖树。
-- [ ] 审查扩展入口、注册工具、state event、custom entries、current branch replay 和 compaction 行为。
+- [x] 锁定兼容当前 Pi Runtime 的 `pi-tasks` 版本和完整依赖树。
+- [x] 审查扩展入口、注册工具、state event、custom entries、current branch replay 和 compaction 行为。
 - [ ] 证明宿主可在相同 Pi Session/branch 的受控上下文调用已注册 task tools。
 - [ ] 验证 schema validation、权限、错误结果和 state event revision。
 - [ ] 验证 Electron 开发态及 Windows/macOS 打包态的 CJS/ESM 加载。
-- [ ] 形成 ADR，记录选定命令边界、版本锁定、迁移和兼容策略。
-- [ ] 如果宿主 tool invocation 不受支持，停止后续实现，选择上游 API 或受控 fork。
+- [x] 形成 ADR，记录选定命令边界、版本锁定、迁移和兼容策略。
+- [x] 如果宿主 tool invocation 不受支持，停止后续实现，选择上游 API 或受控 fork。
 
 A-01 未通过时禁止以私有 reducer/store、Session 文件解析或 custom entry 伪造替代。
+
+**A-01 结果（2026-07-29）：Rejected。** stock Pi Runtime `0.80.10` 缺少保留
+标准 tool pipeline 的公共宿主调用 API，`pi-tasks@0.2.0` 缺少公共 mutation API
+和稳定 revision，重复/乱序 replay 及 `force_with_reason` 也不满足首版契约。
+Story 9.41 产品实现保持 blocked，详见
+`docs/architecture/decisions/ADR-009-pi-tasks-runtime-boundary.md`。
 
 ## 实施步骤
 
@@ -181,3 +187,4 @@ A-01 未通过时禁止以私有 reducer/store、Session 文件解析或 custom 
 | 2026-07-28 | 改为 `pi-tasks` 直接任务执行实施计划 |
 | 2026-07-28 | Workflow 和多 Agent 实施迁移到 Story 9.42 |
 | 2026-07-29 | 增加A-01集成门、planning reservation、policy入口隔离、EvidenceVerifier和持久恢复步骤 |
+| 2026-07-29 | 完成A-01审计并判定stock边界Rejected，阻止后续产品实施 |
