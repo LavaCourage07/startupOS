@@ -11,7 +11,11 @@
 
 [English](./README.md) | **简体中文**
 
-> [观看 OriginOS 产品理念视频](./docs/assets/readme/originos-product-philosophy.mp4)
+<video src="https://cdn.artseeu.cn/originos-product-philosophy.mp4" controls width="960">
+  <a href="https://cdn.artseeu.cn/originos-product-philosophy.mp4">观看 OriginOS 产品理念视频</a>
+</video>
+
+[打开产品理念视频](https://cdn.artseeu.cn/originos-product-philosophy.mp4)
 
 </div>
 
