@@ -1,71 +1,71 @@
-## Traceability
+## 追溯信息
 
 - **epic-id:** 9
 - **story-id:** 9.41
 - **task-id:** A-01
 - **owner:** Agent Runtime
-- **source Story documents:**
+- **来源 Story 文档：**
   - `docs/specs/epic-9/story-9.41/README.md`
   - `docs/specs/epic-9/story-9.41/requirements.md`
   - `docs/specs/epic-9/story-9.41/architecture.md`
   - `docs/specs/epic-9/story-9.41/implementation.md`
   - `docs/specs/epic-9/story-9.41/testing.md`
 
-## Why
+## 变更动机
 
-Story 9.41 cannot safely enter product implementation until OriginOS proves that a locked `pi-tasks` release can be driven through supported Pi extension APIs in the current Session and branch. The committed `dev` baseline still uses deprecated Pi `0.55.3` packages, so the runtime version, task extension version, state replay contract, and Electron packaging behavior must be made explicit before task UI or execution control code depends on them.
+在 OriginOS 证明锁定版本的 `pi-tasks` 能通过受支持的 Pi extension API 在当前 Session 和 branch 中运行之前，Story 9.41 不能安全进入产品实施。已提交的 `dev` 基线仍使用已废弃的 Pi `0.55.3` packages，因此必须先明确 runtime 版本、task extension 版本、状态回放契约和 Electron 打包行为，任务 UI 和执行控制代码才能依赖这些能力。
 
-## What Changes
+## 变更内容
 
-- Establish and validate a compatibility matrix for the Pi Runtime and `pi-tasks`, including the complete dependency tree and the exact versions that Story 9.41 may consume.
-- Add a contract-level spike and automated harness that proves host-triggered task tool calls use the same Session, branch, schema validation, permission checks, custom entry path, and public state event path as model-triggered calls.
-- Verify public current-branch replay and compaction behavior for Task, Step, Criterion, Evidence, Blocker, status, and monotonically advancing state revision.
-- Verify Electron development loading and packaged Windows/macOS CJS/ESM resolution for the selected packages.
-- Produce an ADR that selects one supported command boundary:
-  - direct host invocation through a public Pi extension tool execution API;
-  - an upstream public `pi-tasks` command API; or
-  - a versioned, controlled fork when neither public boundary exists.
-- Fail the gate and stop Story 9.41 product implementation when no maintainable public boundary can be proven.
-- Explicitly prohibit importing private `pi-tasks` reducers/stores, parsing or modifying Pi Session files, forging custom entries, or copying the `pi-tasks` state machine into OriginOS.
+- 建立并验证 Pi Runtime 与 `pi-tasks` 的兼容矩阵，包括完整依赖树和 Story 9.41 可使用的精确版本。
+- 增加契约级技术验证和自动化 harness，证明宿主触发的 task tool 调用与模型触发调用使用相同的 Session、branch、schema validation、permission checks、custom entry 路径和公共 state event 路径。
+- 验证 Task、Step、Criterion、Evidence、Blocker、status 和单调递增 state revision 的公共 current-branch replay 与 compaction 行为。
+- 验证选定 packages 在 Electron 开发态以及 Windows/macOS 打包态中的 CJS/ESM 解析。
+- 形成 ADR，并从以下方案中选择一个受支持的命令边界：
+  - 通过公共 Pi extension tool execution API 由宿主直接调用；
+  - 使用上游公共 `pi-tasks` command API；
+  - 两种公共边界都不存在时，维护带版本约束的受控 fork。
+- 无法证明存在可维护公共边界时，门禁失败并停止 Story 9.41 产品实施。
+- 明确禁止导入 `pi-tasks` 私有 reducer/store、解析或修改 Pi Session 文件、伪造 custom entry，或把 `pi-tasks` 状态机复制到 OriginOS。
 
-## Capabilities
+## 能力范围
 
-### New Capabilities
+### 新增能力
 
-- `pi-task-runtime-boundary`: Defines the compatibility, invocation, state replay, failure, compaction, and Electron packaging contract required before OriginOS can integrate `pi-tasks`.
+- `pi-task-runtime-boundary`：定义 OriginOS 集成 `pi-tasks` 前必须满足的兼容、调用、状态回放、失败、compaction 和 Electron 打包契约。
 
-### Modified Capabilities
+### 修改能力
 
-None.
+无。
 
-## Non-Goals
+## 非目标
 
-- Implementing the Agent/RoleAgent task composer, task card, IPC surface, execution lease, continuation controller, Evidence verifier, or recovery UI.
-- Creating a production Task Runtime adapter before the selected boundary is approved.
-- Adding Workflow, DAG, Worker, sub-Agent, multi-Agent execution, or a second Goal/Task state machine.
-- Migrating existing chat sessions or enabling Task Runtime for ordinary chat.
-- Publishing a desktop release.
+- 实现 Agent/RoleAgent 任务编辑器、任务卡片、IPC 边界、execution lease、continuation controller、Evidence verifier 或恢复 UI。
+- 在选定边界获得批准前创建生产级 Task Runtime adapter。
+- 增加 Workflow、DAG、Worker、sub-Agent、multi-Agent 执行或第二套 Goal/Task 状态机。
+- 迁移现有 chat session，或为普通聊天启用 Task Runtime。
+- 发布桌面版本。
 
-## Impact
+## 影响
 
-- **Packages:** the investigation and contract harness may touch `packages/agent/`, public Pi integration test seams under `packages/core/src/lib/integrations/pi-agent/`, and package verification scripts under `packages/desktop/scripts/`. Product feature and Web UI packages remain unchanged.
-- **Public APIs:** no OriginOS product API is introduced. The ADR will define the approved internal `PiTaskCommandGateway` and state subscription boundary for later proposals.
-- **Persistence:** no OriginOS task persistence schema is introduced. Tests may create isolated temporary Pi Sessions and must delete them after validation.
-- **IPC:** no product IPC channel is introduced.
-- **Dependencies:** execution depends on the Pi Runtime upgrade being merged into `dev` and version-locked before the compatibility matrix is finalized. `pi-tasks` and transitive dependencies must be frozen in `pnpm-lock.yaml` by an isolated implementation task.
-- **Platform packaging:** Electron development, Windows package, and macOS package resolution are mandatory gate evidence; code signing and release publication are outside this proposal.
+- **Packages：** 调研和 contract harness 可能涉及 `packages/agent/`、`packages/core/src/lib/integrations/pi-agent/` 下的公共 Pi integration 测试边界，以及 `packages/desktop/scripts/` 下的 package verification scripts。产品 feature 和 Web UI packages 保持不变。
+- **Public APIs：** 不新增 OriginOS 产品 API。ADR 将为后续 Proposal 定义获批的内部 `PiTaskCommandGateway` 和状态订阅边界。
+- **Persistence：** 不新增 OriginOS task persistence schema。测试可以创建隔离的临时 Pi Sessions，但验证后必须删除。
+- **IPC：** 不新增产品 IPC channel。
+- **Dependencies：** 必须先把 Pi Runtime 升级合并到 `dev` 并锁定版本，才能最终确定兼容矩阵。`pi-tasks` 及其传递依赖必须由隔离实施任务固定到 `pnpm-lock.yaml`。
+- **Platform packaging：** Electron 开发态、Windows package 和 macOS package 的解析结果都是强制门禁证据；code signing 和 release publication 不属于本 Proposal。
 
-## Rollout
+## 推进方案
 
-1. Audit the selected Pi Runtime and candidate `pi-tasks` public surfaces.
-2. Run the same-session invocation, state event, replay, compaction, and packaging contract suites.
-3. Record the selected boundary and compatibility matrix in the ADR.
-4. Mark A-01 passed only when all P0 contract cases and platform loading checks have evidence.
-5. Allow subsequent Story 9.41 proposals to depend only on the approved public boundary.
+1. 审计选定 Pi Runtime 和候选 `pi-tasks` 的公共接口。
+2. 运行 same-session invocation、state event、replay、compaction 和 packaging 契约测试。
+3. 在 ADR 中记录选定边界和兼容矩阵。
+4. 只有全部 P0 契约用例和平台加载检查都有证据时，才把 A-01 标记为通过。
+5. 后续 Story 9.41 Proposal 只能依赖获批的公共边界。
 
-## Rollback
+## 回滚方案
 
-- Remove the candidate dependency and contract spike if the gate fails.
-- Restore the pre-proposal lockfile and package manifests without changing product behavior.
-- Keep Story 9.41 behind the A-01 gate and document the failed boundary plus the next approved route.
-- If a later upstream version invalidates the selected contract, disable Task Runtime integration and rerun A-01 before adopting the new version.
+- 门禁失败时移除候选依赖和契约技术验证。
+- 恢复 Proposal 前的 lockfile 和 package manifests，不改变产品行为。
+- Story 9.41 继续保持在 A-01 门禁之后，并记录失败边界和下一条获批路线。
+- 后续上游版本使选定契约失效时，禁用 Task Runtime integration，并在采用新版本前重新执行 A-01。

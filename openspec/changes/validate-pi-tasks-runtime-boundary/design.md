@@ -1,168 +1,168 @@
-## Context
+## 背景
 
-Story 9.41 requires `pi-tasks` to be the sole authority for Task, Step, Criterion, Evidence, Blocker, and completion state. OriginOS therefore needs a supported write boundary for task tools and a public read boundary for current-branch state before it can implement task planning, continuation, UI projection, or persistence.
+Story 9.41 要求由 `pi-tasks` 独占管理 Task、Step、Criterion、Evidence、Blocker 和完成状态。因此，在实现 task planning、continuation、UI projection 或 persistence 之前，OriginOS 必须具备受支持的 task tool 写入边界，以及用于读取当前 branch 状态的公共边界。
 
-The committed `dev` baseline still resolves deprecated `@mariozechner/pi-agent-core` and `@mariozechner/pi-ai` version `0.55.3`. A separate Pi Runtime upgrade is expected to land first. A-01 validates the version that is actually committed to `dev`; it does not infer compatibility from an uncommitted workspace or from package names alone.
+已提交的 `dev` 基线仍解析到已废弃的 `@mariozechner/pi-agent-core` 和 `@mariozechner/pi-ai` `0.55.3`。独立的 Pi Runtime 升级应先合并。A-01 只验证实际提交到 `dev` 的版本，不根据未提交 workspace 或 package name 推断兼容性。
 
-The affected stakeholders are Agent Runtime maintainers, Electron packaging maintainers, Story 9.41 implementers, and QA. This proposal is a compatibility and architectural gate. It does not expose a product Task API.
+本变更涉及 Agent Runtime 维护者、Electron packaging 维护者、Story 9.41 实施者和 QA。本 Proposal 是兼容性与架构门禁，不暴露产品 Task API。
 
-### Architecture constraints
+### 架构约束
 
-- Integration code remains under `packages/core/src/lib/integrations/pi-agent/` and cannot depend on core features, Web, or Desktop.
-- Desktop verification scripts may depend on public package exports and built application artifacts, but business logic cannot move into Desktop.
-- Generated `.next`, `dist-electron`, `node_modules`, release artifacts, and runtime data are evidence inputs only, never source edit targets.
-- `pi-tasks` private reducers, stores, Session files, and custom entry encodings are outside the allowed boundary.
-- All source implementation is delegated to isolated task worktrees. The Proposal worktree owns planning, integration, ADR consolidation, and validation.
+- Integration 代码位于 `packages/core/src/lib/integrations/pi-agent/`，不得依赖 core features、Web 或 Desktop。
+- Desktop verification scripts 可以依赖公共 package exports 和已构建应用 artifacts，但业务逻辑不得下沉到 Desktop。
+- 生成的 `.next`、`dist-electron`、`node_modules`、release artifacts 和 runtime data 只能作为证据输入，不能作为源码修改入口。
+- `pi-tasks` 私有 reducer、store、Session file 和 custom entry encoding 不属于允许使用的边界。
+- 所有源码实施必须委派到隔离的 Task worktree。Proposal worktree 只负责规划、集成、ADR 汇总和验证。
 
-## Goals / Non-Goals
+## 目标与非目标
 
-**Goals:**
+**目标：**
 
-- Lock one compatible Pi Runtime and `pi-tasks` dependency graph.
-- Prove that the host can invoke the required registered task tools in the same Pi Session and branch through a supported public boundary.
-- Prove that mutations pass public schema validation and permissions and become observable through the public state event with a new revision.
-- Prove current-branch replay, branch isolation, and compaction preservation.
-- Prove Electron development, Windows package, and macOS package module resolution.
-- Select and document the maintainable command boundary for subsequent Story 9.41 proposals.
-- Produce repeatable automated evidence rather than a manual source inspection only.
+- 锁定一组兼容的 Pi Runtime 与 `pi-tasks` 依赖图。
+- 证明宿主能够通过受支持的公共边界，在相同 Pi Session 和 branch 中调用所需的已注册 task tools。
+- 证明 mutation 经过公共 schema validation 和 permission 检查，并通过公共 state event 暴露新 revision。
+- 证明 current-branch replay、branch isolation 和 compaction preservation。
+- 证明 Electron 开发态、Windows package 和 macOS package 的模块解析。
+- 为后续 Story 9.41 Proposal 选定并记录可维护的命令边界。
+- 产生可重复执行的自动化证据，而不是只进行人工源码检查。
 
-**Non-Goals:**
+**非目标：**
 
-- Product task UI, IPC, persistence, execution leases, completion policy routing, continuation, or evidence verification.
-- Multi-Agent, Workflow, Worker, DAG, or Goal mode integration.
-- A second task state machine or compatibility shim around private `pi-tasks` internals.
-- Desktop signing, notarization, release upload, or publication.
-- Supporting multiple Pi Runtime or `pi-tasks` versions simultaneously.
+- 产品任务 UI、IPC、persistence、execution lease、completion policy routing、continuation 或 evidence verification。
+- Multi-Agent、Workflow、Worker、DAG 或 Goal mode integration。
+- 第二套 Task 状态机，或围绕 `pi-tasks` 私有内部实现构建兼容层。
+- Desktop signing、notarization、release upload 或 publication。
+- 同时支持多个 Pi Runtime 或 `pi-tasks` 版本。
 
-## Decisions
+## 设计决策
 
-### 1. Validate the committed Pi Runtime baseline
+### 1. 验证已提交的 Pi Runtime 基线
 
-A-01 SHALL run against an exact Pi Runtime version already committed to the Proposal branch. If the prerequisite Pi upgrade has not landed, implementation stops after recording the mismatch; it does not modify A-01 to silently absorb an unrelated runtime upgrade.
+A-01 SHALL 针对已经提交到 Proposal branch 的精确 Pi Runtime 版本运行。如果前置 Pi upgrade 尚未合并，实施必须在记录版本不匹配后停止，不能在 A-01 中静默吸收无关的 runtime upgrade。
 
-**Rationale:** compatibility evidence tied to a dirty or transitional workspace cannot be reproduced by CI or another worktree.
+**理由：** 依赖脏 workspace 或过渡状态得出的兼容性证据无法由 CI 或其他 worktree 重现。
 
-**Alternative considered:** combine the Pi Runtime upgrade and `pi-tasks` validation in one Proposal. Rejected because they are independently reviewable changes with different rollback boundaries.
+**考虑过的替代方案：** 在同一 Proposal 中合并 Pi Runtime upgrade 和 `pi-tasks` 验证。该方案被拒绝，因为二者是可独立审查的变更，具有不同的回滚边界。
 
-### 2. Public extension execution is the preferred command path
+### 2. 优先使用公共 extension execution 命令路径
 
-The preferred path is a public Pi Runtime API that invokes a registered extension tool with the same Session, branch, schema validation, permissions, and custom entry behavior as an Agent-originated tool call.
+首选路径是 Pi Runtime 公共 API：它能够使用与 Agent 发起 tool call 相同的 Session、branch、schema validation、permission 和 custom entry 行为，调用已注册的 extension tool。
 
-The boundary selected by the ADR MUST be one of:
+ADR 选择的边界 MUST 是以下方案之一：
 
-1. supported host invocation of registered extension tools;
-2. an upstream public `pi-tasks` command API;
-3. a controlled fork with a narrow, versioned public command API.
+1. 通过公共 API 由宿主调用已注册 extension tools；
+2. 使用上游公共 `pi-tasks` command API；
+3. 使用带有狭窄、版本化公共 command API 的受控 fork。
 
-The third option requires ownership, upstream sync, compatibility, and removal criteria in the ADR.
+第三种方案必须在 ADR 中记录 owner、上游同步方式、兼容策略和移除条件。
 
-**Alternatives considered:**
+**考虑过的替代方案：**
 
-- Importing a private reducer/store: rejected because package upgrades can silently corrupt task semantics.
-- Parsing or modifying Session files: rejected because it bypasses Pi branch ownership, validation, events, and compaction.
-- Forging custom entries: rejected because OriginOS would become a second writer of undocumented state.
-- Copying the state machine: rejected because it creates a second canonical Task model.
+- 导入私有 reducer/store：拒绝，因为 package upgrade 可能静默破坏任务语义。
+- 解析或修改 Session file：拒绝，因为会绕过 Pi branch ownership、validation、event 和 compaction。
+- 伪造 custom entry：拒绝，因为 OriginOS 会成为未公开状态的第二写入方。
+- 复制状态机：拒绝，因为会产生第二套 canonical Task model。
 
-### 3. Public state events and branch replay are the read authority
+### 3. 公共 state event 和 branch replay 是读取事实源
 
-The harness consumes the extension's public state event for live snapshots and reconstructs state from the current Pi branch using public replay/session APIs. Each snapshot must identify its Session, branch, Task, schema version, and revision.
+Harness 使用 extension 公共 state event 获取实时 snapshot，并通过公共 replay/session API 从当前 Pi branch 重建状态。每个 snapshot 必须标识 Session、branch、Task、schema version 和 revision。
 
-Mutation success requires both a successful tool result and a matching state event with a later revision. A process-local cache can coordinate tests but is never canonical and must be reconstructible after restart.
+Mutation 成功必须同时满足：tool result 成功，且收到具有更高 revision 的匹配 state event。进程内 cache 只能协调测试，不能作为 canonical state；进程重启后必须能够重新构建。
 
-### 4. Contract harness instead of product adapter
+### 4. 实现契约 harness，而非产品 adapter
 
-A-01 introduces only:
+A-01 只引入：
 
-- version and export audits;
-- an executable contract harness;
-- fixtures needed to create isolated test Sessions;
-- Electron package resolution smoke checks;
-- an ADR and machine-readable compatibility report.
+- 版本和 export 审计；
+- 可执行的 contract harness；
+- 创建隔离测试 Session 所需的 fixtures；
+- Electron package resolution smoke checks；
+- ADR 和机器可读 compatibility report。
 
-The harness may define minimal test-only types resembling the future `PiTaskCommandGateway`, but production services, feature state, IPC, and renderer code remain outside this Proposal.
+Harness 可以定义类似未来 `PiTaskCommandGateway` 的最小测试类型，但生产 service、feature state、IPC 和 renderer code 不属于本 Proposal。
 
-**Rationale:** a failed gate must be removable without leaving a partially implemented Task Runtime in the product.
+**理由：** 门禁失败时必须能够完整移除验证代码，不在产品中残留半成品 Task Runtime。
 
-### 5. Required contract sequence
+### 5. 必须验证的契约序列
 
-The same isolated Pi Session and branch executes:
+在同一个隔离的 Pi Session 和 branch 中依次执行：
 
-1. `task_plan`;
-2. at least one step mutation through `task_update`;
-3. Evidence registration through `task_evidence`;
-4. pause/block and recovery when the selected version exposes the corresponding public tool contract;
-5. `task_resume`;
-6. rejected `task_complete` with insufficient evidence;
-7. accepted `task_complete` after valid evidence.
+1. `task_plan`；
+2. 通过 `task_update` 执行至少一次 Step mutation；
+3. 通过 `task_evidence` 登记 Evidence；
+4. 选定版本公开 tool contract 支持时，验证 pause/block 与恢复；
+5. `task_resume`；
+6. Evidence 不足时调用 `task_complete` 并确认拒绝；
+7. Evidence 有效后调用 `task_complete` 并确认成功。
 
-Every mutation captures tool name, redacted arguments, result classification, pre/post revision, Session identity, branch identity, and state event correlation. The harness MUST also attempt invalid schema input, stale or wrong branch input where supported, duplicate replay, and process restart.
+每次 mutation 都记录 tool name、脱敏 arguments、result classification、前后 revision、Session identity、branch identity 和 state event correlation。Harness MUST 同时覆盖 invalid schema input、受支持时的 stale/wrong branch input、duplicate replay 和 process restart。
 
-### 6. Compaction and branch behavior are tested as invariants
+### 6. 把 compaction 和 branch 行为作为不变量验证
 
-The harness creates a branch divergence and proves that Task state from one branch does not leak to another. It triggers or simulates the public compaction lifecycle supported by the locked Pi Runtime and compares canonical Task fields before and after replay.
+Harness 创建 branch divergence，并证明一个 branch 的 Task state 不会泄漏到另一个 branch。它通过锁定 Pi Runtime 支持的公共 compaction lifecycle 触发或模拟 compaction，并比较 replay 前后的 canonical Task fields。
 
-If the runtime does not expose a deterministic compaction trigger, the ADR records the limitation and the test uses the closest supported lifecycle hook. P0 replay and branch isolation cannot be waived.
+如果 runtime 不提供确定性的 compaction trigger，ADR 必须记录该限制，测试使用最接近的受支持 lifecycle hook。P0 replay 和 branch isolation 不得豁免。
 
-### 7. Packaging validation uses source-driven verification scripts
+### 7. 打包验证使用源码驱动的 verification scripts
 
-Electron development smoke runs under Node.js 24 and the repository package manager. Windows and macOS checks build or inspect platform artifacts using repository scripts and verify that every runtime import is resolvable from the packaged application.
+Electron development smoke 在 Node.js 24 和仓库指定 package manager 下运行。Windows/macOS 检查使用仓库 scripts 构建或检查 platform artifacts，并验证 packaged application 中所有 runtime imports 都可解析。
 
-Package checks MUST cover CJS/ESM entry points, transitive dependencies, ASAR/unpacked placement, and dynamic import behavior. Platform execution that cannot run locally is delegated to CI, and its artifact/log evidence is attached before A-01 passes.
+Package checks MUST 覆盖 CJS/ESM entry points、transitive dependencies、ASAR/unpacked placement 和 dynamic import behavior。无法在本地执行的平台测试委派给 CI，并在 A-01 通过前附加 artifact/log evidence。
 
-### 8. Data ownership and persistence
+### 8. 数据所有权与持久化
 
-`pi-tasks` owns all Task state in Pi Session custom entries. A-01 writes no OriginOS production persistence. Test Sessions and compatibility reports live under temporary test directories or tracked documentation locations, respectively.
+`pi-tasks` 拥有 Pi Session custom entries 中的全部 Task state。A-01 不写入 OriginOS production persistence。测试 Session 位于临时测试目录，compatibility report 位于受版本管理的文档目录。
 
-The compatibility report contains versions, export names, capability results, and hashes only. It MUST NOT contain prompts, task content, credentials, home paths, or complete tool output.
+Compatibility report 只包含 version、export name、capability result 和 hash。MUST NOT 包含 prompt、task content、credential、home path 或完整 tool output。
 
-### 9. Concurrency, recovery, performance, and security
+### 9. 并发、恢复、性能与安全
 
-- Tests isolate Session and branch identifiers and reject cross-test reuse.
-- Correlation waits are bounded by explicit timeouts and clean up subscriptions in `finally`.
-- A crashed harness can restart and replay the same branch without forging state.
-- Event payload logging is bounded and redacted.
-- No synchronous filesystem/network work is added to Electron production paths.
-- Dependency installation scripts and package exports are reviewed before execution.
-- The harness fails closed on unknown schema versions, missing public exports, revision regression, or ambiguous branch identity.
+- 测试隔离 Session 和 branch identifier，并拒绝跨测试复用。
+- Correlation wait 使用显式 timeout，并在 `finally` 中清理 subscription。
+- Harness 崩溃后能够重启并 replay 同一 branch，不伪造 state。
+- Event payload 日志必须有界并脱敏。
+- 不在 Electron production path 增加同步文件或网络操作。
+- 执行前审查 dependency installation script 和 package export。
+- 遇到未知 schema version、缺失 public export、revision regression 或不明确 branch identity 时，harness 必须失败关闭。
 
-### 10. Subagent implementation seams
+### 10. Subagent 实施边界
 
-Application source and test changes use non-overlapping worktrees:
+源码和测试变更使用互不重叠的 worktree：
 
-| Work package | Write scope | Integration contract |
+| 工作包 | 写入范围 | 集成契约 |
 |---|---|---|
-| Runtime/dependency audit | package manifests, lockfile, compatibility audit script/report | exact version matrix and public export inventory |
-| Pi task contract harness | test-only Pi integration harness and fixtures | machine-readable pass/fail results keyed by Session/branch/revision |
-| Electron packaging smoke | Desktop verification scripts and package tests | platform resolution report using locked dependency graph |
-| ADR/integration | Proposal artifacts and ADR only in Proposal worktree | consumes all three evidence outputs; no product source |
+| Runtime/dependency 审计 | package manifests、lockfile、compatibility audit script/report | 精确版本矩阵和 public export inventory |
+| Pi task contract harness | 测试专用 Pi integration harness 和 fixtures | 以 Session/branch/revision 为键的机器可读结果 |
+| Electron packaging smoke | Desktop verification scripts 和 package tests | 基于锁定依赖图的平台解析报告 |
+| ADR/集成 | Proposal worktree 中的 Proposal artifacts 和 ADR | 消费前三类证据，不修改产品源码 |
 
-The first three can run in parallel after the Pi Runtime prerequisite is present. The Proposal integration owner merges each task branch, resolves conflicts without rewriting task evidence, runs the full suite, and updates the ADR.
+Pi Runtime 前置依赖满足后，前三个工作包可以并行。Proposal integration owner 负责合并各 Task branch，在不改写 Task evidence 的前提下解决冲突，运行完整测试并更新 ADR。
 
-## Risks / Trade-offs
+## 风险与权衡
 
-- **The selected Pi Runtime has no public host tool invocation API** → Stop product implementation and evaluate an upstream API or controlled fork; never fall back to private state access.
-- **The Pi Runtime upgrade is not committed before A-01 starts** → Keep A-01 blocked and preserve the compatibility proposal without modifying unrelated runtime dependencies.
-- **`pi-tasks` changes public event or schema behavior between releases** → Pin exact versions and lockfile, record export/schema fingerprints, and rerun A-01 for upgrades.
-- **A controlled fork creates maintenance burden** → Require an owner, upstream sync cadence, compatibility suite, and removal trigger in the ADR.
-- **macOS package execution is unavailable in the local Windows/WSL environment** → Run the same smoke contract in GitHub Actions macOS runners and retain CI evidence.
-- **A test-only harness diverges from future production calls** → Define its command/state interfaces from public APIs and require later adapters to reuse the same contract tests.
-- **Compaction is nondeterministic** → Use public lifecycle hooks and fail the gate when state preservation cannot be demonstrated reproducibly.
+- **选定 Pi Runtime 不提供公共 host tool invocation API** → 停止产品实施，评估上游 API 或受控 fork；不得回退到私有 state access。
+- **A-01 开始时 Pi Runtime upgrade 尚未提交** → 保持 A-01 blocked，保留兼容 Proposal，不修改无关 runtime dependency。
+- **`pi-tasks` 在不同 release 中修改公共 event 或 schema 行为** → 锁定精确版本和 lockfile，记录 export/schema fingerprint，升级时重新执行 A-01。
+- **受控 fork 产生维护成本** → ADR 必须定义 owner、上游同步周期、compatibility suite 和移除条件。
+- **本地 Windows/WSL 环境无法执行 macOS package** → 在 GitHub Actions macOS runner 中运行同一 smoke contract 并保留 CI evidence。
+- **测试 harness 与未来生产调用产生偏差** → 根据公共 API 定义 command/state interface，并要求后续 adapter 复用相同 contract tests。
+- **Compaction 行为不确定** → 使用公共 lifecycle hook；无法重现 state preservation 时门禁失败。
 
-## Migration Plan
+## 迁移方案
 
-1. Merge the prerequisite Pi Runtime upgrade to `dev` and rebase this Proposal branch.
-2. Pin the candidate `pi-tasks` version and generate the complete lockfile dependency graph in an isolated task worktree.
-3. Run runtime, replay/compaction, and Electron packaging work packages.
-4. Merge evidence into the Proposal branch and select the command boundary in the ADR.
-5. Run Story 9.41 A-01 contract cases and strict OpenSpec validation.
-6. Mark A-01 passed and allow downstream Story 9.41 Proposals only when all mandatory evidence exists.
+1. 把前置 Pi Runtime upgrade 合并到 `dev`，然后 rebase 本 Proposal branch。
+2. 在隔离 Task worktree 中锁定候选 `pi-tasks` 版本，并生成完整 lockfile dependency graph。
+3. 运行 runtime、replay/compaction 和 Electron packaging 工作包。
+4. 把证据合并到 Proposal branch，并在 ADR 中选择 command boundary。
+5. 运行 Story 9.41 A-01 contract cases 和 OpenSpec strict validation。
+6. 只有全部强制证据存在时才把 A-01 标记为通过，并允许后续 Story 9.41 Proposal 开始。
 
-Rollback removes the candidate dependency, harness, and verification scripts through the Proposal merge commit. Since no product API or persistence is introduced, ordinary chat and Agent runtime behavior remain unchanged.
+回滚时通过 Proposal merge commit 移除候选 dependency、harness 和 verification scripts。由于不引入产品 API 或 persistence，普通聊天和 Agent runtime 行为保持不变。
 
-## Open Questions
+## 待确认问题
 
-- Which exact Pi Runtime upgrade commit and package namespace will be the committed prerequisite for A-01?
-- Does that runtime publicly expose host invocation of extension-registered tools with the original Session/branch execution context?
-- Which `pi-tasks` release is compatible with that runtime's extension, event, and compaction APIs?
-- Can the selected public API expose a stable state revision, or must the controlled public adapter derive one from an upstream event sequence?
-- Is a deterministic public compaction trigger available for contract tests on all supported platforms?
+- 哪个 Pi Runtime upgrade commit 和 package namespace 是 A-01 已提交的前置基线？
+- 该 runtime 是否公开支持在原 Session/branch execution context 中由宿主调用 extension-registered tools？
+- 哪个 `pi-tasks` release 与该 runtime 的 extension、event 和 compaction APIs 兼容？
+- 选定公共 API 是否暴露稳定 state revision，还是受控公共 adapter 必须从上游 event sequence 派生？
+- 所有支持平台是否都提供可用于 contract test 的确定性公共 compaction trigger？
