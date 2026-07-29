@@ -13,7 +13,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { Loader2, Clock, Plus, ChevronDown, Trash2, FolderOpen } from 'lucide-react';
 import { usePiAgent } from '@originos/core/lib/integrations/pi-agent/hooks';
-import { normalizeRuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent';
+import { normalizeRuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent/client';
 import { useAgentRegistryStore } from '@/store/agentRegistry';
 import { useSettingsStore } from '@/store/settingsStore';
 import { launchEntry } from '@originos/core/lib/integrations/electron/services/misc';

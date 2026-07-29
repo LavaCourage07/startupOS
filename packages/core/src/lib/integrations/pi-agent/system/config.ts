@@ -2,8 +2,8 @@
  * 系统配置管理
  */
 
-import type { Model } from "@mariozechner/pi-ai";
-import { getModel } from "@mariozechner/pi-ai";
+import type { Model } from "@originos/pi-agent-adapter/ai";
+import { getModel } from "@originos/pi-agent-adapter/ai";
 import type { SystemPromptVariables } from "./prompt";
 import { buildSystemPrompt } from "./prompt";
 

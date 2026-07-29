@@ -1,4 +1,4 @@
-import type { AgentMessage } from '@mariozechner/agent';
+import type { AgentMessage } from '@originos/pi-agent-adapter';
 
 type TraceMessage = AgentMessage & { role?: string };
 

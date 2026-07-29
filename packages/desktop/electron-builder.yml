@@ -32,15 +32,18 @@ files:
     filter:
       - "**/*"
   - from: ../../packages/agent
-    to: node_modules/@mariozechner/agent
+    to: node_modules/@originos/pi-agent-adapter
     filter:
       - "package.json"
       - "index.js"
       - "index.d.ts"
-  - from: node_modules/@mariozechner/pi-agent-core
-    to: node_modules/@mariozechner/pi-agent-core
-    filter:
-      - "package.json"
+      - "ai.js"
+      - "ai.d.ts"
+      - "goal.js"
+      - "goal.d.ts"
+      - "coding-agent.js"
+      - "coding-agent.d.ts"
+      - "load-runtime.js"
       - "dist/**/*"
   - from: .packaging/pi-ai-runtime/node_modules
     to: node_modules

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { getUserConfig, setUserConfig } from '@originos/core/lib/integrations/electron/services/misc';
-import type { AnthropicCredentialSource } from '@originos/core/lib/integrations/pi-agent';
+import type { AnthropicCredentialSource } from '@originos/core/lib/integrations/pi-agent/client';
 
 export type LLMProviderType = 'anthropic' | 'openai';
 export type UserLanguagePreference = 'zh-CN' | 'en-US' | 'ja-JP';

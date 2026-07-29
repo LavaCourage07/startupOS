@@ -8,7 +8,7 @@ import { SolutionGraphView } from './TopologyGraph';
 import { SolutionList } from './SolutionList';
 import { WorkspaceWindow } from '@/components/os/workspace';
 import { usePiAgent } from '@originos/core/lib/integrations/pi-agent/client-hooks';
-import { normalizeRuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent';
+import { normalizeRuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent/client';
 import { useSettingsStore } from '@/store/settingsStore';
 import { AppWindowManager } from '@/services/AppWindowManager';
 

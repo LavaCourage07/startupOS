@@ -13,7 +13,7 @@ const mockGetModel = vi.fn().mockReturnValue({
   maxTokens: 16384,
 });
 
-vi.mock('@mariozechner/pi-ai', () => ({
+vi.mock('@originos/pi-agent-adapter/ai', () => ({
   getModel: mockGetModel,
 }));
 

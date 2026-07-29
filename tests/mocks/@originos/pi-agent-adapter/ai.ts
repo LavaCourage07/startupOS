@@ -1,5 +1,5 @@
 /**
- * Mock implementation of @mariozechner/pi-ai package
+ * Mock implementation of @originos/pi-agent-adapter/ai package.
  * Created for testing purposes since workspace packages may not be fully built
  */
 
@@ -189,6 +189,11 @@ export type StreamFunction<TApi extends Api = Api, TOptions extends StreamOption
 // ============================================================================
 
 const mockRegistry = new Map<string, Map<string, Model<Api>>>();
+export const __streamCalls: Array<{
+	model: Model<Api>;
+	context: Context;
+	options?: StreamOptions;
+}> = [];
 
 // Initialize with some mock models
 function initMockModels() {
@@ -247,10 +252,11 @@ export function getModels<TProvider extends KnownProvider>(provider: TProvider):
 }
 
 export async function* streamSimple(
-	_model: Model<Api>,
-	_context: Context,
-	_options?: StreamOptions,
+	model: Model<Api>,
+	context: Context,
+	options?: StreamOptions,
 ): AssistantMessageEventStream {
+	__streamCalls.push({ model, context, options });
 	yield { type: "start", partial: {} as any };
 	yield { type: "text_start", contentIndex: 0, partial: {} as any };
 	yield { type: "text_delta", contentIndex: 0, delta: "Mock response", partial: {} as any };

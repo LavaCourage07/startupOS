@@ -13,7 +13,7 @@ import { sanitizeAgentDisplayContent } from '@originos/core/lib/integrations/pi-
 import { getVisibleStreamDelta, reconcileFinalStreamContent } from '@originos/core/lib/integrations/pi-agent/stream-dedupe';
 import type { ApiResponse } from '@originos/core/types';
 import type { AgentMessage } from '@originos/core/types';
-import type { AgentEvent } from '@mariozechner/agent';
+import type { AgentEvent } from '@originos/pi-agent-adapter';
 
 /**
  * Response message format for streaming

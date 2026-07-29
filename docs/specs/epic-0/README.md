@@ -3,7 +3,7 @@
 **Epic 编号:** 0
 **Epic 名称:** 技术架构实施层 - Pi Agent 核心调度系统
 **优先级:** 🔴 Critical (基础设施，必须优先实施)
-**状态:** Planning
+**状态:** In Progress（Story 0.7 Verification）
 **负责人:** -
 **开始日期:** 2026-03-02
 
@@ -90,7 +90,7 @@
 | `src/agents/pi-tools.ts` | `src/lib/integrations/pi-agent/tools/` | 工具注册和执行 |
 | `src/agents/pi-embedded-subscribe.ts` | `src/lib/integrations/pi-agent/core/session.ts` | 事件订阅机制 |
 | `src/config/sessions/` | `src/lib/integrations/pi-agent/store.ts` | 会话持久化 |
-| `@mariozechner/pi-coding-agent` | 直接引用依赖 | SessionManager, createAgentSession |
+| `@originos/pi-agent-adapter` | OriginOS workspace 适配层 | 稳定 Agent/AI/Goal 运行时边界 |
 
 **关键实现模式（openclaw 验证）：**
 1. 使用 `SessionManager` 管理会话生命周期
@@ -114,9 +114,10 @@
 
 | 包名 | 来源 | 用途 |
 |------|------|------|
-| `@mariozechner/agent` | `pi-mono/packages/agent` | pi-agent-core 核心库 |
-| `@mariozechner/pi-ai` | `pi-mono/packages/ai` | LLM 抽象层 |
-| `@mariozechner/pi-coding-agent` | `pi-mono/packages/coding-agent` | SessionManager, createAgentSession |
+| `@originos/pi-agent-adapter` | `packages/agent` | OriginOS 稳定适配入口 |
+| `@earendil-works/pi-agent-core@0.80.10` | Earendil Works Pi | Agent 核心循环 |
+| `@earendil-works/pi-ai@0.80.10` | Earendil Works Pi | LLM 抽象层 |
+| `pi-agent-goal@2026.7.18` | Pi 扩展 | Goal 生命周期（产品入口由 Story 9.41 实现） |
 
 ---
 
@@ -130,6 +131,7 @@
 | 0.4 | 意图理解与路由 | ✅ Complete | High |
 | 0.5 | 会话持久化 | ✅ Complete | High |
 | 0.6 | 错误处理与恢复 | ✅ Complete | High |
+| 0.7 | Pi Runtime 0.80.x 升级与 pi-agent-goal 兼容迁移 | 🟠 Verification | Critical |
 
 ---
 
@@ -154,7 +156,7 @@
 
 ### Epic 级别验收标准
 
-- [x] 所有 6 个 Stories 完成 (6/6 完成: 0.1, 0.2, 0.3, 0.4, 0.5, 0.6 ✅)
+- [ ] 所有 7 个 Stories 完成（6/7 完成；0.7 Verification）
 - [x] 通过所有单元测试和集成测试 ✅
 - [x] CUI 可以通过核心调度层发送消息 ✅
 - [x] 核心调度层可以正确理解并调用能力 ✅
@@ -189,6 +191,7 @@
 
 | 日期 | 变更内容 | 变更人 |
 |------|---------|--------|
+| 2026-07-28 | 新增 Story 0.7：Pi Runtime 0.80.x 升级与 pi-agent-goal 兼容迁移 | Codex |
 | 2026-03-02 | Epic 0 初始化 | archersado |
 
 ---
@@ -197,7 +200,7 @@
 
 ### 关键约束
 
-1. **pi-agent-core 依赖**: Epic 0 依赖 `pi-mono/packages/agent`，需要确保正确导入
+1. **pi-agent-core 依赖**: Epic 0 通过 `@originos/pi-agent-adapter` 使用精确锁定的 Earendil Works Runtime
 2. **单向依赖**: 核心调度层作为基础设施，必须符合 AGENTS.md 的单向依赖原则
 3. **性能要求**: 所有调度操作必须在 < 100ms 内完成响应
 4. **类型安全**: 必须使用 TypeScript 严格模式，禁止 `any` 类型
@@ -213,6 +216,6 @@
 
 ## 🎯 下一步行动
 
-1. **分析 pi-agent-core**: 深度分析 pi-agent-core 的源代码和 API
-2. **设计集成方案**: 设计符合 AGENTS.md 规约的集成方案
-3. **创建 Story 0.1**: 开始实施第一个 Story
+1. **实施 Story 0.7**: 迁移 Pi Runtime 至 0.80.10 兼容基线
+2. **执行验证 Goal**: 通过 Story 0.7 定义的全部测试 case
+3. **解除 Story 9.41 阻塞**: 在兼容基线上实施 Goal 任务入口

@@ -54,6 +54,8 @@
 | P2.4 | 沙盒推演与本体反馈回路 | 🔴 仅有类型定义 | High | 场景生成、模拟运行、缺口报告 |
 | P2.5 | 方案版本管理与执行清单 | 🔴 部分（Skill 写文件） | Medium | 左侧版本列表、确认锁定、清单下载 |
 | P2.6 | SOP I/O 契约（本体数据流） | ⬜ 未开始 | High | Skill inputContract/outputContract、SOP 数据流验证 |
+| P2.7 | Agent-Skill 协作图谱与建模维度扩展 | ⬜ 未开始 | High | Workflow/Team 设计视图和 Agent-Skill 拓扑 |
+| P2.8 | Workflow 设计与解决方案执行契约发布 | 🟡 Planning | Critical | 设计门控、不可变契约编译、版本化发布 |
 
 ---
 
@@ -96,6 +98,7 @@ void onComplete;     // 第 210 行 - 需要移除
 | 依赖模块 | 用途 |
 |---------|------|
 | Phase 3（第三阶段）| 消费执行清单创建实际 Agent |
+| Story 9.42 | 消费 P2.8 已发布执行契约，实例化多 Agent WorkItem |
 
 ---
 
@@ -135,8 +138,10 @@ data/projects/{projectId}/
 | Week 1 | P2.1 验证入口完整性，P2.3 修复拓扑接通 | 1-2 天 |
 | Week 1 | P2.2 Agent 编辑 UI 补充（如有需要） | 1 天 |
 | Week 1 | P2.6 SOP I/O 契约类型 + solution-design Skill 扩展 | 1-2 天 |
+| Week 1 | P2.7 Workflow/Team 与 Agent-Skill 图谱 | 1-2 天 |
 | Week 2 | P2.4 沙盒推演独立面板 UI | 2-3 天 |
 | Week 2 | P2.5 版本列表 + 执行清单下载 | 1-2 天 |
+| Week 2 | P2.8 设计门控与不可变执行契约发布 | 2-3 天 |
 
 ---
 
@@ -154,3 +159,4 @@ data/projects/{projectId}/
 | 日期 | 变更内容 | 变更人 |
 |------|---------|--------|
 | 2026-04-22 | Epic P2 初始化，梳理现有实现状态 | archersado |
+| 2026-07-28 | 增加 P2.7 与 P2.8，明确 Workflow 只在设计阶段并发布执行契约 | Codex |

@@ -1,4 +1,4 @@
-import type { AgentToolResult } from "@mariozechner/agent";
+import type { AgentToolResult } from "@originos/pi-agent-adapter";
 import { Value } from "@sinclair/typebox/value";
 import { getToolRegistry } from "../../lib/integrations/pi-agent/tools/registry";
 import { getToolContextManager } from "../../lib/integrations/pi-agent/tools/context";

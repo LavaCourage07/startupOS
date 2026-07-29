@@ -71,8 +71,8 @@
 
 ### 实施顺序（基于依赖关系）
 
-**Phase 0 (基础设施 - 已完成):**
-1. ✅ **Epic 0** (技术架构实施层) - pi-agent-core 集成（基础设施）
+**Phase 0 (基础设施 - 维护升级中):**
+1. 🟡 **Epic 0** (技术架构实施层) - Pi Runtime 0.80.x 兼容迁移进行中
 
 **Phase 1 (业务与交互 - 已完成/进行中):**
 2. ✅ **Epic 1** (项目访谈与创建) - 依赖 Epic 0
@@ -91,7 +91,7 @@
 
 | Epic | 状态 | 优先级 | 文档路径 |
 |------|------|--------|---------|
-| **Epic 0**: 技术架构实施层 | ✅ Complete | Critical | [specs/epic-0/README.md](./specs/epic-0/README.md) |
+| **Epic 0**: 技术架构实施层 | 🟡 In Progress | Critical | [specs/epic-0/README.md](./specs/epic-0/README.md) |
 | **Epic 1**: 项目访谈与创建 | ✅ Complete | High | [specs/epic-1/README.md](./specs/epic-1/README.md) |
 | **Epic OS**: OS 交互基础 | ✅ Complete | Critical | [specs/epic-OS/STATUS.md](./specs/epic-OS/STATUS.md) |
 | **Epic R**: RoleAgent pi-agent 循环 | ✅ Complete | High | [specs/epic-R/README.md](./specs/epic-R/README.md) |
@@ -227,15 +227,15 @@
 ### 总体进度
 
 - **总 Epic 数:** 9 (0, 1, OS, R, C, P2, M, T, A2UI)
-- **已完成 Epic:** 5 (Epic 0, Epic 1, Epic OS, Epic P2, Epic R)
-- **进行中 Epic:** 1 (Epic C - 设计完成，C.1 基础设施已实现)
+- **已完成 Epic:** 4 (Epic 1, Epic OS, Epic P2, Epic R)
+- **进行中 Epic:** 2 (Epic 0 - Runtime 升级；Epic C - 设计完成，C.1 基础设施已实现)
 - **规划中 Epic:** 3 (Epic M、Epic T、Epic A2UI)
 
 ### 按 Epic 统计
 
 | Epic | Story 数 | 优先级 | 已完成 | 部分实现 | 规划中 |
 |------|---------|--------|--------|---------|--------|
-| Epic 0 (基础设施) | 6 | Critical | 6 ✅ | - | - |
+| Epic 0 (基础设施) | 7 | Critical | 6 ✅ | - | 1 📋 |
 | Epic 1 (项目访谈) | 6 | High | 0 ⚠️ 重构中 | 0 | 6 📋 |
 | Epic OS (OS 交互) | 13 | Critical | 8 ✅ | - | 5 📋 |
 | Epic M (Memory Core) | 11 | Critical | - | - | 11 📋 |

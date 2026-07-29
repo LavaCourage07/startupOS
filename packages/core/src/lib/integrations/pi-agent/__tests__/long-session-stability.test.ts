@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentMessage } from '@mariozechner/agent';
+import type { AgentMessage } from '@originos/pi-agent-adapter';
 import { compressRecentTrace } from '../recent-trace-compression';
 import { LoopDetector } from '../tools/loop-detector';
 import { createWorkingSummaryMessage } from '../runtime-working-summary';

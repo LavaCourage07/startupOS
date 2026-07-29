@@ -24,13 +24,15 @@ const bundledSkillEntries = fs
   .map((entry) => `templates/skills/${entry.name}/SKILL.md`)
   .filter((entry) => fs.existsSync(path.join(repoRoot, entry)));
 const piAiRuntimeDependencies = [
+  '@anthropic-ai/sdk',
   '@aws-sdk/client-bedrock-runtime',
   '@google/genai',
   '@mistralai/mistralai',
-  'ajv',
-  'ajv-formats',
-  'proxy-agent',
-  'zod-to-json-schema',
+  '@opentelemetry/api',
+  '@smithy/node-http-handler',
+  'http-proxy-agent',
+  'https-proxy-agent',
+  'openai',
 ];
 
 function fail(message) {
@@ -108,8 +110,12 @@ function verifyAsar() {
     'dist-electron/desktop/src/main/services/workspace-service.js',
     'dist-electron/desktop/src/main/services/entry-export-service.js',
     'dist-electron/desktop/src/main/main.js',
-    'node_modules/@mariozechner/agent/index.js',
-    'node_modules/@mariozechner/pi-agent-core/dist/index.js',
+    'node_modules/@originos/pi-agent-adapter/index.js',
+    'node_modules/@originos/pi-agent-adapter/ai.js',
+    'node_modules/@originos/pi-agent-adapter/goal.js',
+    'node_modules/@originos/pi-agent-adapter/dist/index.cjs',
+    'node_modules/@originos/pi-agent-adapter/dist/ai.cjs',
+    'node_modules/@originos/pi-agent-adapter/dist/goal.cjs',
     'node_modules/archiver/index.js',
     ...piAiRuntimeDependencies.map((dependency) => `node_modules/${dependency}/package.json`),
   ];
@@ -139,8 +145,22 @@ function verifyAsar() {
   for (const modulePath of modules) {
     smokeRequire.resolve(path.join(smokeDir, modulePath));
   }
-  smokeRequire.resolve('@mariozechner/agent');
-  smokeRequire.resolve('@mariozechner/pi-agent-core');
+  smokeRequire.resolve('@originos/pi-agent-adapter');
+  const piAgentRuntime = smokeRequire('@originos/pi-agent-adapter');
+  const piAiRuntime = smokeRequire('@originos/pi-agent-adapter/ai');
+  const goalExtension = smokeRequire('@originos/pi-agent-adapter/goal');
+  if (typeof piAgentRuntime.Agent !== 'function') {
+    fail('pi-agent adapter does not expose Agent');
+  }
+  if (
+    typeof piAiRuntime.streamSimple !== 'function' ||
+    typeof piAiRuntime.completeSimple !== 'function'
+  ) {
+    fail('pi-agent AI adapter does not expose compatibility stream functions');
+  }
+  if (typeof goalExtension !== 'function') {
+    fail('pi-agent goal adapter does not expose an extension function');
+  }
   const archiverRuntime = smokeRequire('archiver');
   if (typeof archiverRuntime.ZipArchive !== 'function') {
     fail('archiver runtime does not expose ZipArchive');

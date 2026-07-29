@@ -16,7 +16,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { Launcher, type LaunchContext, type LaunchResult, buildAgentSystemPrompt } from './base';
 import { agentManager } from '../../../../lib/integrations/pi-agent/agent-manager';
-import { type AgentEvent, type AgentMessage } from '@mariozechner/agent';
+import { type AgentEvent, type AgentMessage } from '@originos/pi-agent-adapter';
 import { loadRoleContext, parseToolMdTools, type RoleContext } from '../../../../lib/integrations/pi-agent/role-agent/role-context';
 import { scanInstalledSkills } from '../../../../lib/integrations/pi-agent/role-agent/skill-resolver';
 import { parseStateMachine, checkTransition, applyTransition, type StateMachine } from '../../../../lib/integrations/pi-agent/role-agent/state-machine';

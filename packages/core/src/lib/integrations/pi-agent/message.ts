@@ -3,7 +3,7 @@
  * 定义消息类型、格式验证和编码/解码
  */
 
-import type { AgentMessage } from "@mariozechner/agent";
+import type { AgentMessage } from "@originos/pi-agent-adapter";
 import { extractDisplayContent } from "./display-content";
 
 // ============================================================================

@@ -12,7 +12,7 @@ import { getGlobalSpawner } from '@originos/core/modules/collaboration-runtime/s
 import { setRuntimeAgent } from '@/app/api/agent/_runtime-agent-registry';
 import type { ApiResponse } from '@originos/core/types';
 import type { RuntimeEvent } from '@originos/core/modules/collaboration-runtime/session/types';
-import type { RuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent';
+import type { RuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent/server';
 import path from 'path';
 import fs from 'fs/promises';
 import { getDataRoot } from '@originos/core/lib/paths';

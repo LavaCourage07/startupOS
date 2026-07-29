@@ -6,7 +6,7 @@
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
 import type { ToolRegistration } from "../types";
-import type { AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/agent";
+import type { AgentToolResult, AgentToolUpdateCallback } from "@originos/pi-agent-adapter";
 
 import * as store from "../../../../lib/features/ontology-data-store/store";
 import * as queryEngine from "../../../../lib/features/ontology-data-store/query-engine";

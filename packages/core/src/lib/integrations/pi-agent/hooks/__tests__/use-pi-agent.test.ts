@@ -3,7 +3,7 @@ import { renderHook, act } from "@testing-library/react";
 import { usePiAgent, usePiAgentStatus, usePiAgentEvent } from "../../hooks";
 import { usePiAgentStore } from "../../store";
 import type { ProjectContext } from "../../types";
-import type { AgentEvent } from "@mariozechner/agent";
+import type { AgentEvent } from "@originos/pi-agent-adapter";
 
 const mockSubscribe = vi.fn();
 const mockUnsubscribe = vi.fn();

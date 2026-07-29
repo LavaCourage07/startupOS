@@ -8,16 +8,16 @@ import type {
 	AgentMessage,
 	AgentTool,
 	AgentToolResult,
-} from "@mariozechner/agent";
-import type { Model } from "@mariozechner/pi-ai";
+} from "@originos/pi-agent-adapter";
+import type { Model } from "@originos/pi-agent-adapter/ai";
 import type { TSchema, Static } from "@sinclair/typebox";
-import type { AgentToolUpdateCallback } from "@mariozechner/agent";
+import type { AgentToolUpdateCallback } from "@originos/pi-agent-adapter";
 
 // ============================================================================
 // 扩展 pi-agent-core 的消息类型
 // ============================================================================
 
-declare module "@mariozechner/agent" {
+declare module "@originos/pi-agent-adapter" {
 	interface CustomAgentMessages {
 		// OriginOS 系统事件消息
 		system_event: SystemEventMessage;

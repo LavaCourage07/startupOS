@@ -13,8 +13,12 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { OntologyPreview } from '@/components/os/ontology-preview';
-import { agentSessionService } from '@originos/core/lib/features/agent';
-import type { AgentSession, OntologyEntity } from '@originos/core/types';
+import type {
+  AgentMessage,
+  AgentSession,
+  ApiResponse,
+  OntologyEntity,
+} from '@originos/core/types';
 
 type PreviewState =
   | 'generating' // Showing Wow Moment animation
@@ -30,6 +34,27 @@ interface ProjectCompletionProps {
   onComplete?: (projectData: any) => void;
   /** Cancel callback */
   onCancel?: () => void;
+}
+
+interface OntologyToolResult {
+  entities_created?: OntologyEntity[];
+}
+
+function extractCreatedEntities(messages: AgentMessage[]): OntologyEntity[] {
+  return messages.flatMap((message) =>
+    (message.toolResults ?? []).flatMap((toolResult) => {
+      if (
+        typeof toolResult.result !== 'object'
+        || toolResult.result === null
+        || !('entities_created' in toolResult.result)
+      ) {
+        return [];
+      }
+
+      const result = toolResult.result as OntologyToolResult;
+      return Array.isArray(result.entities_created) ? result.entities_created : [];
+    }),
+  );
 }
 
 export default function ProjectCompletion({
@@ -52,18 +77,18 @@ export default function ProjectCompletion({
   useEffect(() => {
     async function loadSession() {
       try {
-        const agentSession = await agentSessionService.getSession(sessionId);
+        const response = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`);
+        const payload = await response.json() as ApiResponse<AgentSession>;
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error?.message ?? 'Failed to load session');
+        }
+
+        const agentSession = payload.data;
         if (agentSession) {
           setSession(agentSession);
 
           // Extract ontology from session context
-          const entities = agentSession.messages
-            .filter((m: any) => m.toolResults?.length > 0)
-            .flatMap((m: any) =>
-              m.toolResults
-                ?.filter((r: any) => r.data?.entities_created)
-                .flatMap((r: any) => r.data.entities_created as any[]) || []
-            );
+          const entities = extractCreatedEntities(agentSession.messages);
 
           setOntologyData({
             entities,

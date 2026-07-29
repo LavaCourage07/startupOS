@@ -217,8 +217,8 @@ The `__tests__/mocks/pi-mono-mocks.ts` file provides:
 All tests mock these external dependencies:
 
 ```typescript
-import { Agent } from "@mariozechner/agent";
-import { getModel } from "@mariozechner/pi-ai";
+import { Agent } from "@originos/pi-agent-adapter";
+import { getModel } from "@originos/pi-agent-adapter/ai";
 ```
 
 These are mocked to isolate unit tests from external API calls.

@@ -78,7 +78,7 @@ OriginOS CE 是一个面向个人与小团队的 AI Native 工作系统。它不
 
 ## 从源码运行
 
-环境要求：Node.js **22.19+**、pnpm **9+** 和 Git。
+环境要求：Node.js **24+**、pnpm **9+** 和 Git。
 
 ```bash
 git clone https://github.com/NeuralNexusPro/startupOS.git

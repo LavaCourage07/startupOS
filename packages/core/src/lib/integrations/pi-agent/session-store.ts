@@ -3,7 +3,7 @@
  * 会话持久化管理 - 保存和恢复 Agent 会话状态
  */
 
-import type { AgentMessage } from "@mariozechner/agent";
+import type { AgentMessage } from "@originos/pi-agent-adapter";
 import type { ProjectContext } from "./types";
 import type { SessionData } from "./core/agent";
 import { jsonStore } from "../../../lib/storage";

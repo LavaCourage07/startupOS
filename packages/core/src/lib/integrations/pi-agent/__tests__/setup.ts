@@ -3,8 +3,8 @@
  * These mocks are loaded before the tested code is imported
  */
 
-// Mock @mariozechner/agent module
-vi.mock("@mariozechner/agent", () => ({
+// Mock @originos/pi-agent-adapter module
+vi.mock("@originos/pi-agent-adapter", () => ({
 	Agent: class MockAgent {
 		state: {
 			systemPrompt: "",
@@ -106,8 +106,8 @@ vi.mock("@mariozechner/agent", () => ({
 	},
 }));
 
-// Mock @mariozechner/pi-ai module
-vi.mock("@mariozechner/pi-ai", () => {
+// Mock @originos/pi-agent-adapter/ai module
+vi.mock("@originos/pi-agent-adapter/ai", () => {
 	const streamCalls: Array<{ model: any; context: any; options: any }> = [];
 
 	return {
@@ -177,4 +177,4 @@ vi.mock("@mariozechner/pi-ai", () => {
 });
 
 // Re-export MockAgent for test use
-export { MockAgentMock as MockAgent } from "@mariozechner/agent";
+export { MockAgentMock as MockAgent } from "@originos/pi-agent-adapter";

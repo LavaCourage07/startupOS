@@ -255,17 +255,31 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: windows-release
-          path: release
+          path: .release-input/windows
 
       - uses: actions/download-artifact@v4
         with:
           name: macos-arm64-release
-          path: release
+          path: .release-input/macos-arm64
 
       - uses: actions/download-artifact@v4
         with:
           name: macos-x64-release
-          path: release
+          path: .release-input/macos-x64
+
+      - name: Assemble release artifacts
+        run: |
+          VERSION="$(node -p "require('./packages/desktop/package.json').version")"
+          mkdir -p release
+
+          cp -R .release-input/windows/. release/
+          cp "release/OriginOS CE-${VERSION}-x64.zip" \
+            "release/OriginOS CE-${VERSION}-windows-x64.zip"
+          cp "release/OriginOS CE-${VERSION}-x64.zip.blockmap" \
+            "release/OriginOS CE-${VERSION}-windows-x64.zip.blockmap"
+
+          cp -R .release-input/macos-arm64/. release/
+          cp -R .release-input/macos-x64/. release/
 
       - run: pnpm --filter @originos/desktop generate:update-metadata
 
@@ -310,19 +324,36 @@ jobs:
         run: |
           VERSION="$(node -p "require('./packages/desktop/package.json').version")"
           CHANGELOG="docs/changes/releases/v${VERSION}/changelog.md"
-          ASSETS=(
+          PACKAGES=(
             "release/OriginOS CE-${VERSION}-x64.exe"
+            "release/OriginOS CE-${VERSION}-windows-x64.zip"
             "release/OriginOS CE-${VERSION}-arm64.dmg"
             "release/OriginOS CE-${VERSION}-x64.dmg"
+            "release/OriginOS CE-${VERSION}-arm64.zip"
+            "release/OriginOS CE-${VERSION}-x64.zip"
+          )
+          SUPPORTING_ASSETS=(
+            "release/OriginOS CE-${VERSION}-x64.exe.blockmap"
+            "release/OriginOS CE-${VERSION}-windows-x64.zip.blockmap"
+            "release/OriginOS CE-${VERSION}-arm64.dmg.blockmap"
+            "release/OriginOS CE-${VERSION}-x64.dmg.blockmap"
+            "release/OriginOS CE-${VERSION}-arm64.zip.blockmap"
+            "release/OriginOS CE-${VERSION}-x64.zip.blockmap"
+            "release/latest-win.yml"
+            "release/stable-win.yml"
+            "release/latest-mac.yml"
+            "release/stable-mac.yml"
+            "release/latest.yml"
+            "release/stable.yml"
           )
 
           test -f "$CHANGELOG"
-          for asset in "${ASSETS[@]}"; do
+          for asset in "${PACKAGES[@]}" "${SUPPORTING_ASSETS[@]}"; do
             test -s "$asset"
           done
 
-          shasum -a 256 "${ASSETS[@]}" > release/SHA256SUMS.txt
-          ASSETS+=("release/SHA256SUMS.txt")
+          shasum -a 256 "${PACKAGES[@]}" > release/SHA256SUMS.txt
+          ASSETS=("${PACKAGES[@]}" "${SUPPORTING_ASSETS[@]}" "release/SHA256SUMS.txt")
 
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release edit "$GITHUB_REF_NAME" \

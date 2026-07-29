@@ -18,7 +18,7 @@ import {
 } from "../../system/config";
 
 // Mock external dependencies
-vi.mock("@mariozechner/pi-ai", () => ({
+vi.mock("@originos/pi-agent-adapter/ai", () => ({
 	getModel: vi.fn((provider: string, id: string) => ({
 		provider,
 		id,

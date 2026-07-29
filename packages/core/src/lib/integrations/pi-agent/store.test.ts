@@ -15,8 +15,8 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import type { TSchema } from "@sinclair/typebox";
-import type { AgentTool } from "@mariozechner/agent";
-import type { AgentEvent } from "@mariozechner/agent";
+import type { AgentTool } from "@originos/pi-agent-adapter";
+import type { AgentEvent } from "@originos/pi-agent-adapter";
 import type { ProjectContext, PiAgentStore } from "./store";
 import type { OriginOSAgentState } from "../../types";
 

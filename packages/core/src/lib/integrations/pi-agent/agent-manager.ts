@@ -6,7 +6,7 @@
  */
 
 import { OriginOSAgent, createOriginOSAgent } from './core/agent';
-import type { AgentEvent, AgentTool } from '@mariozechner/agent';
+import type { AgentEvent, AgentTool } from '@originos/pi-agent-adapter';
 import { initializeBuiltInTools, getAgentToolsForScope } from './tools/index';
 import { createRuntimeModel } from './server-config';
 import { setToolContext, removeToolContext, getToolContextManager, type ToolExecutionContext } from './tools/context';

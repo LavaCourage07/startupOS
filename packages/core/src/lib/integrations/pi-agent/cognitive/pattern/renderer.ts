@@ -74,8 +74,8 @@ export class PatternRenderer {
 async function summarizeWithAgent(input: PatternSummaryInput): Promise<string> {
   try {
     const factory = await import('../../server-config');
-    const model = factory.createAutoModel(undefined, { maxTokens: 4096 }) as unknown as import('@mariozechner/pi-ai').Model<import('@mariozechner/pi-ai').Api>;
-    const { complete } = await import('@mariozechner/pi-ai');
+    const model = factory.createAutoModel(undefined, { maxTokens: 4096 }) as unknown as import('@originos/pi-agent-adapter/ai').Model<import('@originos/pi-agent-adapter/ai').Api>;
+    const { complete } = await import('@originos/pi-agent-adapter/ai');
     const result = await complete(model, {
       messages: [{ role: 'user', content: buildSummaryPrompt(input), timestamp: Date.now() }],
     });

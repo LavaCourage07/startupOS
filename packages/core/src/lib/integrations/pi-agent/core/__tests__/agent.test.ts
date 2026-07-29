@@ -11,9 +11,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import * as piAi from "@mariozechner/pi-ai";
+import * as piAi from "@originos/pi-agent-adapter/ai";
 
-// Import after mocking - @mariozechner packages are now aliased in vitest.config.ts
+// Import after mocking - the OriginOS adapter is aliased in vitest.config.ts.
 import { OriginOSAgent, createOriginOSAgent } from "../agent";
 import type { OriginOSAgentConfig, OriginOSAgentState } from "../../types";
 import type { ProjectContext } from "../../system/config";
@@ -171,8 +171,10 @@ describe("OriginOSAgent", () => {
 			const internalAgent = (agent as any).agent;
 			const receivedEvents: any[] = [];
 			agent.subscribe((event) => receivedEvents.push(event));
+			const promptSpy = vi.spyOn(internalAgent, "prompt");
+			const continueSpy = vi.spyOn(internalAgent, "continue");
 
-			internalAgent.prompt.mockImplementationOnce(async () => {
+			promptSpy.mockImplementationOnce(async () => {
 				internalAgent.emit({
 					type: "tool_execution_end",
 					toolName: "execute_command",
@@ -199,7 +201,7 @@ describe("OriginOSAgent", () => {
 					"好的，我会先读取岗位模型和候选人简历，提取关键信息，然后按 Job Model 评分标准生成完整评估报告。",
 				);
 			});
-				internalAgent.prompt.mockImplementationOnce(async (message: any) => {
+				promptSpy.mockImplementationOnce(async (message: any) => {
 					internalAgent.emit({ type: "message_start", message });
 					internalAgent.emit({ type: "message_end", message });
 					internalAgent.emit({
@@ -217,8 +219,8 @@ describe("OriginOSAgent", () => {
 
 			await agent.prompt("读取上传文件");
 
-				expect(internalAgent.prompt).toHaveBeenCalledTimes(2);
-				expect(internalAgent.continue).not.toHaveBeenCalled();
+				expect(promptSpy).toHaveBeenCalledTimes(2);
+				expect(continueSpy).not.toHaveBeenCalled();
 				const visible = JSON.stringify(receivedEvents);
 				expect(visible).toContain("好的，我会先读取");
 				expect(visible).not.toContain("Internal Completion Recovery");
@@ -226,7 +228,7 @@ describe("OriginOSAgent", () => {
 			const accepted = receivedEvents.find((event) => event.type === "completion_accepted");
 			expect(accepted?.content).toBe("处理完成，已使用 PowerShell 命令读取文件。");
 			expect(receivedEvents.filter((event) => event.type === "agent_end")).toHaveLength(1);
-			const recoveryMessage = internalAgent.prompt.mock.calls[1]?.[0];
+			const recoveryMessage = promptSpy.mock.calls[1]?.[0];
 			expect(recoveryMessage?.role).toBe("user");
 			expect(recoveryMessage?.content?.[0]?.text).toContain("Runtime Environment");
 			expect(recoveryMessage?.content?.[0]?.text).toContain("execute_command");
@@ -238,8 +240,10 @@ describe("OriginOSAgent", () => {
 			const receivedEvents: any[] = [];
 			agent.subscribe((event) => receivedEvents.push(event));
 			const promiseText = "接下来我会换一种方法继续处理。";
+			const promptSpy = vi.spyOn(internalAgent, "prompt");
+			const continueSpy = vi.spyOn(internalAgent, "continue");
 
-			internalAgent.prompt.mockImplementationOnce(async () => {
+			promptSpy.mockImplementationOnce(async () => {
 				internalAgent.emit({
 					type: "tool_execution_end",
 					toolName: "execute_command",
@@ -263,7 +267,7 @@ describe("OriginOSAgent", () => {
 				});
 				emitAssistantStop(internalAgent, promiseText);
 			});
-			internalAgent.prompt.mockImplementation(async (message: any) => {
+			promptSpy.mockImplementation(async (message: any) => {
 				internalAgent.emit({ type: "message_start", message });
 				internalAgent.emit({ type: "message_end", message });
 				emitAssistantStop(internalAgent, promiseText);
@@ -271,8 +275,8 @@ describe("OriginOSAgent", () => {
 
 			await agent.prompt("完成任务");
 
-			expect(internalAgent.prompt).toHaveBeenCalledTimes(3);
-			expect(internalAgent.continue).not.toHaveBeenCalled();
+			expect(promptSpy).toHaveBeenCalledTimes(3);
+			expect(continueSpy).not.toHaveBeenCalled();
 			const visible = JSON.stringify(receivedEvents);
 			expect(visible).toContain(promiseText);
 			expect(visible).toContain("自动恢复次数已耗尽");
@@ -289,7 +293,7 @@ describe("OriginOSAgent", () => {
 			const internalAgent = (agent as any).agent;
 			const receivedEvents: any[] = [];
 			agent.subscribe((event) => receivedEvents.push(event));
-			internalAgent.prompt.mockImplementationOnce(async () => {
+			vi.spyOn(internalAgent, "prompt").mockImplementationOnce(async () => {
 				const message = {
 					role: "assistant",
 					content: [],
@@ -740,17 +744,18 @@ describe("OriginOSAgent", () => {
 
 			await agent.prompt("continue");
 
-			expect(internalAgent.replaceMessages).toHaveBeenCalledTimes(1);
-			const compressedMessages = internalAgent.replaceMessages.mock.calls[0]?.[0];
+			const compressedMessages = internalAgent.state.messages;
 			expect(compressedMessages.length).toBeLessThan(longHistory.length);
 			expect(compressedMessages.some((message: any) => JSON.stringify(message.content).includes("user-16"))).toBe(true);
 			expect(compressedMessages.some((message: any) => JSON.stringify(message.content).includes("plan-before-tool"))).toBe(true);
 			expect(compressedMessages.some((message: any) => JSON.stringify(message.content).includes("read_file"))).toBe(true);
 			expect(compressedMessages.some((message: any) => JSON.stringify(message.content).includes("Memory contents"))).toBe(true);
 			expect(compressedMessages.some((message: any) => JSON.stringify(message.content).includes("do not repeat"))).toBe(true);
-			expect(internalAgent.appendMessage).toHaveBeenCalled();
-			expect(internalAgent.appendMessage.mock.calls.some((call: any[]) => JSON.stringify(call[0]?.content).includes("[Working Summary]"))).toBe(true);
-			expect(internalAgent.appendMessage.mock.calls[0]?.[0]?.role).toBe("system");
+			const workingSummary = compressedMessages.find((message: any) =>
+				JSON.stringify(message.content).includes("[Working Summary]")
+			);
+			expect(workingSummary).toBeDefined();
+			expect(workingSummary?.role).toBe("system");
 		});
 	});
 
@@ -824,8 +829,8 @@ describe("OriginOSAgent", () => {
 				});
 			}
 
-			expect(internalAgent.appendMessage).toHaveBeenCalledTimes(1);
-			const appendedMessage = internalAgent.appendMessage.mock.calls[0]?.[0];
+			expect(internalAgent.state.messages).toHaveLength(3);
+			const appendedMessage = internalAgent.state.messages[2];
 			expect(appendedMessage?.role).toBe("system");
 			expect(appendedMessage?.content?.[0]?.type).toBe("text");
 			expect(appendedMessage?.content?.[0]?.text).toContain("可能陷入循环");

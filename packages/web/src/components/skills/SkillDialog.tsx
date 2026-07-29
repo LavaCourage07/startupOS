@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Loader2, Info, Play, X, Clock, Plus, FolderOpen } from 'lucide-react';
 import { usePiAgent } from '@originos/core/lib/integrations/pi-agent/hooks';
-import { normalizeRuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent';
+import { normalizeRuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent/client';
 import { useSettingsStore } from '@/store/settingsStore';
 import { ChatMessageList } from '@/components/ui/chat';
 import { v4 as uuidv4 } from 'uuid';

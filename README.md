@@ -78,7 +78,7 @@ Solution design can be executed by a multi-agent runtime with visible tasks, pro
 
 ## Run from Source
 
-Requirements: Node.js **22.19+**, pnpm **9+**, and Git.
+Requirements: Node.js **24+**, pnpm **9+**, and Git.
 
 ```bash
 git clone https://github.com/NeuralNexusPro/startupOS.git

@@ -3,7 +3,7 @@
  */
 
 import { usePiAgentStore } from '../../../lib/integrations/pi-agent/store';
-import type { AgentEvent } from '@mariozechner/agent';
+import type { AgentEvent } from '@originos/pi-agent-adapter';
 
 export class AgentHostIntegration {
   private piAgentStore = usePiAgentStore.getState();

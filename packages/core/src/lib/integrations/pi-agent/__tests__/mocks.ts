@@ -3,8 +3,8 @@
  * This file provides mock implementations that work with the test runner
  */
 
-// Mock @mariozechner/agent module
-vi.mock("@mariozechner/agent", () => {
+// Mock @originos/pi-agent-adapter module
+vi.mock("@originos/pi-agent-adapter", () => {
 	class MockAgent {
 		constructor(config?: unknown) {
 			this._listeners = new Set<(event: any) => void>();
@@ -86,8 +86,8 @@ vi.mock("@mariozechner/agent", () => {
 	return { Agent: MockAgent };
 });
 
-// Mock @mariozechner/pi-ai module
-vi.mock("@mariozechner/pi-ai", () => ({
+// Mock @originos/pi-agent-adapter/ai module
+vi.mock("@originos/pi-agent-adapter/ai", () => ({
 	getModel: vi.fn((provider: string, id: string) => ({
 		provider,
 		id,
@@ -102,4 +102,4 @@ vi.mock("@mariozechner/pi-ai", () => ({
 }));
 
 // Re-export MockAgent type for use in tests
-export type { MockAgent } from "@mariozechner/agent";
+export type { MockAgent } from "@originos/pi-agent-adapter";

@@ -47,9 +47,12 @@ function verifyApp(appPath) {
     'dist-electron/core/src/lib/features/services/launcher/skill.js',
     'dist-electron/desktop/src/main/main.js',
     'dist-electron/desktop/src/main/services/entry-export-service.js',
-    'node_modules/@mariozechner/agent/index.js',
-    'node_modules/@mariozechner/pi-agent-core/dist/index.js',
-    'node_modules/@mariozechner/pi-agent-core/package.json',
+    'node_modules/@originos/pi-agent-adapter/index.js',
+    'node_modules/@originos/pi-agent-adapter/ai.js',
+    'node_modules/@originos/pi-agent-adapter/goal.js',
+    'node_modules/@originos/pi-agent-adapter/dist/index.cjs',
+    'node_modules/@originos/pi-agent-adapter/dist/ai.cjs',
+    'node_modules/@originos/pi-agent-adapter/dist/goal.cjs',
     'node_modules/archiver/index.js',
   ];
 
@@ -64,8 +67,21 @@ function verifyApp(appPath) {
   try {
     asar.extractAll(asarPath, smokeDir);
     const smokeRequire = createRequire(path.join(smokeDir, 'package.json'));
-    smokeRequire.resolve('@mariozechner/agent');
-    smokeRequire.resolve('@mariozechner/pi-agent-core');
+    const piAgentRuntime = smokeRequire('@originos/pi-agent-adapter');
+    const piAiRuntime = smokeRequire('@originos/pi-agent-adapter/ai');
+    const goalExtension = smokeRequire('@originos/pi-agent-adapter/goal');
+    if (typeof piAgentRuntime.Agent !== 'function') {
+      fail('pi-agent adapter does not expose Agent');
+    }
+    if (
+      typeof piAiRuntime.streamSimple !== 'function' ||
+      typeof piAiRuntime.completeSimple !== 'function'
+    ) {
+      fail('pi-agent AI adapter does not expose compatibility stream functions');
+    }
+    if (typeof goalExtension !== 'function') {
+      fail('pi-agent goal adapter does not expose an extension function');
+    }
     const archiverRuntime = smokeRequire('archiver');
     if (typeof archiverRuntime.ZipArchive !== 'function') {
       fail('archiver runtime does not expose ZipArchive');

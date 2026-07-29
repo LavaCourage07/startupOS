@@ -5,7 +5,7 @@
 
 import { useEffect } from 'react';
 import { useAgentRegistryStore } from '@/store/agentRegistry';
-import { initializeDefaultAgents } from '@originos/core/lib/features/agent';
+import { initializeDefaultAgents } from '@originos/core/lib/features/agent/defaults';
 
 /**
  * AgentInitializer - Loads default agents into the registry

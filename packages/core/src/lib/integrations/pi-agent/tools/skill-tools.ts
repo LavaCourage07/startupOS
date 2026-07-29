@@ -5,7 +5,7 @@
 
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
-import type { AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/agent";
+import type { AgentToolResult, AgentToolUpdateCallback } from "@originos/pi-agent-adapter";
 import type { ToolRegistration } from "../types";
 import { loadSkills } from "../core/skills";
 import { existsSync, readFileSync, symlinkSync, mkdirSync } from "fs";

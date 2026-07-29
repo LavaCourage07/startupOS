@@ -42,7 +42,7 @@ Enhancement suggestions are tracked as GitHub issues. When creating an enhanceme
 
 ### Prerequisites
 
-- Node.js 22.19+ (required by the current Pi Agent and Electron toolchain)
+- Node.js 24+ (required by the current Pi Agent and Electron toolchain)
 - pnpm 9.x+
 - Read [AGENTS.md](AGENTS.md) before implementation
 
