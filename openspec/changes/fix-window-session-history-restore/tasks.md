@@ -28,12 +28,12 @@
 
 ## 3. Desktop 与窗体接线
 
-- [ ] 3.1 在独立 Git task worktree 中审计并补齐 Session Get/restore IPC ownership 和错误映射。
+- [ ] 3.1 在独立 Git task worktree 中审计并补齐 Session Get/restore 的 ownership、错误映射和 Pi Agent Runtime 历史重绑。
   - **依赖：** 2.1 的公开 contract commit。
-  - **写入范围：** `packages/desktop/src/main/services/agent-session-service.ts`、Core IPC protocol/service adapter 和相邻测试。
+  - **写入范围：** `packages/desktop/src/main/services/agent-session-service.ts`、`packages/web/src/app/api/agent/sessions/[sessionId]/route.ts`、`packages/core/src/lib/integrations/pi-agent/agent-manager.ts`、Core IPC protocol/service adapter 和相邻测试。
   - **负责角色：** Desktop Integration subagent。
   - **必需测试：** Story TC-I1、TC-I4；Electron/Web adapter contract。
-  - **完成证据：** Task branch commit、IPC 测试输出和错误码矩阵。
+  - **完成证据：** Task branch commit、IPC/Web 测试输出、错误码矩阵，以及恢复后首次 prompt 的历史消息计数证据。
   - **执行方式：** 2.1 后执行；与 3.2 同一 worktree 串行。
 
 - [ ] 3.2 接入 Skill、Agent 与 RoleAgent 窗体历史入口，修正 `isInitialized` 短路、welcome 重发、删除冒泡和 switching/error 状态。

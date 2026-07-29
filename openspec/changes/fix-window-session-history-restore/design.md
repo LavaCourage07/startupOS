@@ -87,7 +87,14 @@ restore request 携带 `sessionId` 与 `projectId`，必要时携带 entry scope
 
 服务端发送下一条消息时本就通过 StoredSession 配置调用
 `agentManager.getOrCreateAgent()`。恢复路径必须确保目标 Agent 实例使用目标
-Session 保存的 system prompt、Agent 类型、CWD、outputDir 和 LLM config。
+Session 保存的 system prompt、Agent 类型、CWD、outputDir、LLM config 和
+完整历史消息。历史注入必须发生在新的用户消息进入 Agent loop 之前，避免当前
+消息被持久化一次、又作为恢复历史重复注入一次。
+
+应用重启后目标 Agent Runtime 尚不存在时，Session Get/restore 必须通过公开
+`AgentManager` 能力完成重建或刷新；不能只把消息返回 renderer，否则会出现
+“界面显示历史、模型上下文为空”的假恢复。
+
 不得读取 Pi Runtime 私有 Session 文件；若公开 runtime 无法恢复某项，结果必须
 返回 `resumable=false` 或 warning，不能伪造。
 
@@ -103,7 +110,7 @@ Session 保存的 system prompt、Agent 类型、CWD、outputDir 和 LLM config�
 | 工作包 | 独占写入范围 |
 |---|---|
 | Core/client restore | `packages/core/src/lib/integrations/pi-agent/` 及相邻测试 |
-| Desktop/Web 接线 | `packages/desktop/src/main/services/`、两个 Dialog 和相邻测试 |
+| Desktop/Web 接线 | `packages/desktop/src/main/services/`、Session Web route、`agent-manager.ts`、两个 Dialog 和相邻测试 |
 | 集成验证 | Proposal worktree，仅合并、文档、测试和状态更新 |
 
 工作包使用独立 Git task branch/worktree，不能直接复制目录。若 Core contract
@@ -168,4 +175,3 @@ interface RestoreAgentSessionResult {
 无阻断问题。实施时需通过测试确认现有 `AgentSessionService.getSession()` 返回的
 StoredSession 是否已包含全部 display messages 和目标配置；若缺少字段，只能在
 Core 公共 DTO 中补齐，不得从 renderer 解析 runtime 私有 state。
-
