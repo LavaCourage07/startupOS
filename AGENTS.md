@@ -1,6 +1,6 @@
 # OriginOS 架构规约 (AGENTS.md)
 
-**版本：** 2.5.1
+**版本：** 2.5.2
 **日期：** 2026-07-29
 **状态：** 强制执行
 
@@ -855,6 +855,8 @@ Epic
 #### OpenSpec Proposal 门禁
 
 - 实施任何 Story Task 前，必须完成 OpenSpec 初始化，并遵循 `openspec/config.yaml`、当前 schema instructions/templates 和仓库生成的 OpenSpec agent skills。
+- OpenSpec 文档的标题、说明、需求、场景、设计、任务和验收正文必须使用中文。仅保留 schema/CLI 要求的固定关键字（如 `ADDED Requirements`、`Requirement`、`Scenario`、`WHEN`、`THEN`、`SHALL`、`MUST`）、代码标识、类型名、路径、命令、包名、协议名和无法准确翻译的专有名词。
+- 不得因为 OpenSpec CLI 返回英文模板而直接生成英文正文；生成后必须按上一条完成中文化，再执行 strict validation。
 - OpenSpec 1.4.x 的最小项目结构以 `openspec/config.yaml` 为入口；不得强制假设旧版 `openspec/AGENTS.md` 或 `openspec/project.md` 必然存在。
 - 开始 Proposal 前必须运行 `openspec list --json`、`openspec list --specs` 和 `openspec status --change {change-id} --json`（创建前可省略 status），并使用 CLI 返回的 `planningHome`、`changeRoot`、`artifactPaths` 和 `actionContext`，不得硬编码旧版目录推断。
 - 必须先检查现有 specs 和 active changes，避免重复 Proposal 或冲突能力定义。
@@ -1099,5 +1101,5 @@ git worktree add ../startupos-add-agent-task-runtime-task-2 \
 
 ---
 
-**最后更新：** 2026-07-29（v2.5.1：对齐 OpenSpec 1.4.x schema-driven 初始化结构，并将 OriginOS 项目上下文和 Proposal/Tasks 门禁写入 openspec/config.yaml）
+**最后更新：** 2026-07-29（v2.5.2：要求 OpenSpec 文档除规范关键字、代码标识和专有名词外统一使用中文）
 **下次审查：** 实施完成后
