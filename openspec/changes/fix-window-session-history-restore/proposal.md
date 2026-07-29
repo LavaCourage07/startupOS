@@ -85,4 +85,3 @@ runtime 重绑；已有初始化路径还会清空 renderer 消息，导致所�
 
 回滚 Proposal merge commit，恢复三个窗体原有初始化路径和 IPC contract。由于
 本变更不迁移或改写历史数据，回滚不需要数据修复；已有 Session 文件保持可用。
-

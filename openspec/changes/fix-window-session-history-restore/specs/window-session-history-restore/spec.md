@@ -106,4 +106,3 @@ restore 成功后，系统 MUST 将后续消息、工具调用和持久化更新
 #### Scenario: restore 日志
 - **WHEN** restore 成功或失败
 - **THEN** 日志只记录脱敏 Session identity、entry type、阶段、消息数、耗时和错误码
-
