@@ -181,6 +181,8 @@ export interface AgentMessage {
 export interface SessionProjectContext {
   projectId: string;
   projectName: string;
+  entryType?: 'skill' | 'agent' | 'role-agent';
+  entryId?: string;
   ontologyId?: string;
   currentPath?: string;
   outputDir?: string;

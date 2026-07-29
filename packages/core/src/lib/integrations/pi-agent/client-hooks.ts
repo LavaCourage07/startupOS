@@ -209,14 +209,30 @@ async function initializeSession(
 	projectContext: ProjectContext,
 	variables?: Record<string, string>,
 	llmConfig?: RuntimeLLMConfig
-): Promise<string> {
+): Promise<{ sessionId: string; projectContext: ProjectContext }> {
+	const agentType = variables?.['agentType'];
+	const entryType = projectContext.entryType
+		?? (agentType === 'skill'
+			? 'skill'
+			: agentType === 'role-agent'
+				? 'role-agent'
+				: 'agent');
+	const entryId = projectContext.entryId
+		?? (entryType === 'skill' && projectContext.projectId.startsWith('skill-')
+			? projectContext.projectId.slice('skill-'.length)
+			: projectContext.projectId);
+	const scopedProjectContext: ProjectContext = {
+		...projectContext,
+		entryType,
+		entryId,
+	};
 	const response = await createAgentSession({
 		sessionId,
-		projectId: projectContext.projectId,
-		projectName: projectContext.projectName || "Agent Session",
-		agentType: variables?.['agentType'],
+		projectId: scopedProjectContext.projectId,
+		projectName: scopedProjectContext.projectName || "Agent Session",
+		agentType,
 		systemPrompt: variables?.['systemPrompt'],
-		projectContext: projectContext as unknown as Record<string, unknown>,
+		projectContext: scopedProjectContext as unknown as Record<string, unknown>,
 		llmConfig,
 		agentBaseDir: variables?.['agentBaseDir'],
 		outputDir: variables?.['outputDir'],
@@ -226,7 +242,10 @@ async function initializeSession(
 		throw new Error(response.error?.message || 'Failed to initialize session');
 	}
 
-	return (response.data as { sessionId: string }).sessionId;
+	return {
+		sessionId: (response.data as { sessionId: string }).sessionId,
+		projectContext: scopedProjectContext,
+	};
 }
 
 /**
@@ -236,13 +255,15 @@ async function initializeSession(
 async function sendMessageToAgent(
 	sessionId: string,
 	message: string,
-	projectId?: string
+	projectContext?: ProjectContext,
 ): Promise<{ userMessage: { id: string; role: string; content: string; timestamp?: number }; assistantMessage?: { id: string; role: string; content: string; timestamp?: number } }> {
 	const response = await sendAgentMessage({
 		sessionId,
 		content: message,
 		role: "user",
-		projectId,
+		projectId: projectContext?.projectId,
+		entryType: projectContext?.entryType,
+		entryId: projectContext?.entryId,
 	});
 
 	if (!response.success) {
@@ -380,12 +401,17 @@ export function usePiAgent(): UseClientPiAgentState {
 
 			try {
 				// 获取服务器返回的真实 sessionId
-				const serverSessionId = await initializeSession(newSessionId, newProjectContext, variables, llmConfig);
+				const initializedSession = await initializeSession(
+					newSessionId,
+					newProjectContext,
+					variables,
+					llmConfig,
+				);
 				if (!isCurrentOperation()) return;
-				setSessionId(serverSessionId);  // 使用服务器的 sessionId
-				sessionIdRef.current = serverSessionId;
-				setProjectContext(newProjectContext);
-				projectContextRef.current = newProjectContext;
+				setSessionId(initializedSession.sessionId);
+				sessionIdRef.current = initializedSession.sessionId;
+				setProjectContext(initializedSession.projectContext);
+				projectContextRef.current = initializedSession.projectContext;
 				setRestoredSession(null);
 				setIsInitialized(true);
 				isInitializedRef.current = true;
@@ -433,7 +459,7 @@ export function usePiAgent(): UseClientPiAgentState {
 				&& restoreTargetRef.current === request.sessionId;
 
 			try {
-				const response = await getAgentSession(request.sessionId, request.projectId);
+				const response = await getAgentSession(request);
 				if (!isLatestRestore()) {
 					return null;
 				}
@@ -492,7 +518,7 @@ export function usePiAgent(): UseClientPiAgentState {
 			}
 
 			const operationSessionId = sessionIdRef.current;
-			const operationProjectId = projectContextRef.current?.projectId;
+			const operationProjectContext = projectContextRef.current ?? undefined;
 			const isCurrentOperation = () => sessionIdRef.current === operationSessionId;
 			console.log('[usePiAgent] sendMessage called with:', message?.slice(0, 50));
 			setErrorMessage(null);
@@ -520,7 +546,7 @@ export function usePiAgent(): UseClientPiAgentState {
 				const result = await sendMessageToAgent(
 					operationSessionId,
 					message,
-					operationProjectId,
+					operationProjectContext,
 				);
 				if (!isCurrentOperation()) return;
 				console.log('[usePiAgent] API result:', result);
@@ -580,7 +606,7 @@ export function usePiAgent(): UseClientPiAgentState {
 			}
 
 			const streamSessionId = sessionIdRef.current;
-			const streamProjectId = projectContextRef.current?.projectId;
+			const streamProjectContext = projectContextRef.current;
 			console.log('[usePiAgent] sendMessageStream called, sessionId:', streamSessionId, message?.slice(0, 50));
 			setErrorMessage(null);
 			setIsRunning(true);
@@ -807,7 +833,9 @@ export function usePiAgent(): UseClientPiAgentState {
 						sessionId: streamSessionId,
 						content: message,
 						role: "user",
-						projectId: streamProjectId,
+						projectId: streamProjectContext?.projectId,
+						entryType: streamProjectContext?.entryType,
+						entryId: streamProjectContext?.entryId,
 						streamId,
 					});
 
@@ -849,13 +877,23 @@ export function usePiAgent(): UseClientPiAgentState {
 					body: JSON.stringify({
 						role: "user",
 						content: message,
-						projectId: streamProjectId,
+						projectId: streamProjectContext?.projectId,
+						entryType: streamProjectContext?.entryType,
+						entryId: streamProjectContext?.entryId,
 					}),
 					signal: abortController.signal,
 				});
 
 				if (!response.ok) {
-					throw new Error(`Failed to send message: ${response.statusText}`);
+					const payload = await response.json().catch(() => null) as {
+						error?: { code?: string; message?: string };
+					} | null;
+					const code = payload?.error?.code;
+					const detail = payload?.error?.message;
+					throw new Error(
+						[code, detail].filter(Boolean).join(": ")
+							|| `Failed to send message: ${response.statusText}`,
+					);
 				}
 
 				const contentType = response.headers.get("content-type") || "";

@@ -10,6 +10,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { AppWindowManager } from '@/services/AppWindowManager';
 import { WorkspaceWindow } from '@/components/os/workspace';
 import { EntryExportButton } from '@/components/os/EntryExportButton';
+import {
+  createSessionTransitionGuard,
+  shouldAutoStartSession,
+} from '@/components/os/agent-dialog/session-transition-guard';
 import { useFileUpload, type UploadedFile } from '@/lib/hooks/use-file-upload';
 import { ChatInputBar } from '@/components/ui/chat-input-bar';
 import {
@@ -270,6 +274,14 @@ export function SkillDialog({
   const [showHistory, setShowHistory] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [switchingSessionId, setSwitchingSessionId] = useState<string | null>(null);
+  const transitionGuardRef = useRef(createSessionTransitionGuard());
+  const pendingNewSessionRef = useRef<{
+    target: string;
+    previous: string | null;
+    skill: string;
+  } | null>(null);
+  const restoredSessionIdRef = useRef<string | null>(null);
   const historyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   void historyTimeoutRef; // suppress unused warning
 
@@ -277,8 +289,12 @@ export function SkillDialog({
   const {
     isInitialized,
     isThinking,
+    isRestoring,
+    uiState,
+    sessionId: runtimeSessionId,
     messages: piMessages,
     initialize,
+    restoreSession,
     sendMessageStream,
     abort,
   } = usePiAgent();
@@ -313,43 +329,84 @@ export function SkillDialog({
   }, [skills.length, isLoadingSkillsList]);
 
   // 加载当前 Skill 的历史会话
-  useEffect(() => {
+  const loadSessionHistory = useCallback(async () => {
     if (!currentSkill) return;
-
-    const loadHistory = async () => {
-      setIsLoadingHistory(true);
-      try {
-        const data = await listAvailableSkillSessions({ skillName: currentSkill });
-        if (data.success && data.data?.sessions) {
-          setSessionHistory(data.data.sessions.map((s) => ({
-            sessionId: s.sessionId,
-            createdAt: s.createdAt,
-            updatedAt: s.updatedAt,
-            messageCount: s.messageCount,
-            summary: s.summary,
-          })));
-        }
-      } catch (error) {
-        console.error('Failed to load session history:', error);
-      } finally {
-        setIsLoadingHistory(false);
+    setIsLoadingHistory(true);
+    try {
+      const data = await listAvailableSkillSessions({ skillName: currentSkill });
+      if (data.success && data.data?.sessions) {
+        setSessionHistory(data.data.sessions.map((s) => ({
+          sessionId: s.sessionId,
+          createdAt: s.createdAt,
+          updatedAt: s.updatedAt,
+          messageCount: s.messageCount,
+          summary: s.summary,
+        })));
       }
-    };
-    loadHistory();
+    } catch (error) {
+      console.error('Failed to load session history:', error);
+    } finally {
+      setIsLoadingHistory(false);
+    }
   }, [currentSkill]);
+
+  useEffect(() => {
+    void loadSessionHistory();
+  }, [loadSessionHistory]);
 
   // 创建新会话
   const createNewSession = useCallback(() => {
     const newSessionId = uuidv4();
+    if (!currentSkill) return;
+    transitionGuardRef.current.invalidate();
+    pendingNewSessionRef.current = {
+      target: newSessionId,
+      previous: activeSessionId ?? stableSessionIdRef.current,
+      skill: currentSkill,
+    };
+    hasAutoStartedRef.current = false;
+    setSwitchingSessionId(newSessionId);
     setActiveSessionId(newSessionId);
     setShowHistory(false);
-  }, []);
+  }, [activeSessionId, currentSkill]);
 
   // 选择历史会话
-  const selectSession = useCallback((sessionSessionId: string) => {
-    setActiveSessionId(sessionSessionId);
-    setShowHistory(false);
-  }, []);
+  const selectSession = useCallback(async (selectedSessionId: string) => {
+    if (
+      !currentSkill
+      || selectedSessionId === activeSessionId
+      || selectedSessionId === runtimeSessionId
+    ) {
+      if (selectedSessionId === runtimeSessionId) {
+        setActiveSessionId(selectedSessionId);
+      }
+      setShowHistory(false);
+      return;
+    }
+
+    hasAutoStartedRef.current = true;
+    const restoreToken = transitionGuardRef.current.begin(`restore:${selectedSessionId}`);
+    pendingNewSessionRef.current = null;
+    setSwitchingSessionId(selectedSessionId);
+    try {
+      const restored = await restoreSession({
+        sessionId: selectedSessionId,
+        projectId: `skill-${currentSkill}`,
+        entryType: 'skill',
+        entryId: currentSkill,
+      });
+      if (!restored || !transitionGuardRef.current.isCurrent(restoreToken)) return;
+      restoredSessionIdRef.current = selectedSessionId;
+      lastInitRef.current = { skill: currentSkill, session: selectedSessionId };
+      setActiveSessionId(selectedSessionId);
+      setShowHistory(false);
+    } catch (error) {
+      console.error('[SkillDialog] Failed to restore session:', error);
+      await loadSessionHistory();
+    } finally {
+      setSwitchingSessionId((current) => current === selectedSessionId ? null : current);
+    }
+  }, [activeSessionId, currentSkill, loadSessionHistory, restoreSession, runtimeSessionId]);
 
   // 当 currentSkill 或 activeSessionId 变化时初始化 Agent
   useEffect(() => {
@@ -363,6 +420,10 @@ export function SkillDialog({
     const init = async () => {
       // 优先使用 activeSessionId（用户创建/选择的新会话），否则使用稳定 session ID
       const effectiveSessionId = activeSessionId || currentStableSessionId;
+      if (restoredSessionIdRef.current === effectiveSessionId) {
+        restoredSessionIdRef.current = null;
+        return;
+      }
 
       console.log('[SkillDialog] init() started for skill:', currentSkill, 'session:', effectiveSessionId, 'lastInit:', lastInitRef.current);
 
@@ -372,6 +433,9 @@ export function SkillDialog({
         return;
       }
       lastInitRef.current = { skill: currentSkill, session: effectiveSessionId };
+      const initializationToken = transitionGuardRef.current.begin(
+        `initialize:${currentSkill}:${effectiveSessionId}`,
+      );
 
       // 确保有有效的 skillName
       if (!currentSkill) {
@@ -432,25 +496,57 @@ export function SkillDialog({
           },
           llmConfig
         );
+        if (!transitionGuardRef.current.isCurrent(initializationToken)) {
+          return;
+        }
+        setActiveSessionId(effectiveSessionId);
+        const pendingNewSession = pendingNewSessionRef.current;
+        if (
+          pendingNewSession?.target === effectiveSessionId
+          && pendingNewSession.skill === currentSkill
+        ) {
+          pendingNewSessionRef.current = null;
+          setSwitchingSessionId((current) => current === effectiveSessionId ? null : current);
+        }
         console.log(`[SkillDialog] Initialized agent for skill: ${currentSkill}, session: ${effectiveSessionId}`);
       } catch (error) {
+        if (!transitionGuardRef.current.isCurrent(initializationToken)) {
+          return;
+        }
         console.error(`[SkillDialog] Failed to initialize skill session: ${currentSkill}`, error);
+        const pendingNewSession = pendingNewSessionRef.current;
+        if (
+          pendingNewSession?.target === effectiveSessionId
+          && pendingNewSession.skill === currentSkill
+        ) {
+          pendingNewSessionRef.current = null;
+          lastInitRef.current = {
+            skill: currentSkill,
+            session: pendingNewSession.previous ?? undefined,
+          };
+          setActiveSessionId(pendingNewSession.previous);
+          setSwitchingSessionId((current) => current === effectiveSessionId ? null : current);
+        }
       }
     };
 
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSkill]);
+  }, [currentSkill, activeSessionId]);
 
   // 发送初始消息
   useEffect(() => {
-    if (!initialMessage || !isInitialized || hasAutoStartedRef.current) {
-      return;
-    }
-
-    // 确保 Agent 已就绪且无历史消息
-    if ((piMessages?.length ?? 0) > 0 || isThinking) {
-      hasAutoStartedRef.current = true;
+    if (
+      !initialMessage
+      || !shouldAutoStartSession({
+        isInitialized,
+        isRestoring,
+        switchingSessionId,
+        hasAutoStarted: hasAutoStartedRef.current,
+        messageCount: piMessages?.length ?? 0,
+        isThinking,
+      })
+    ) {
       return;
     }
 
@@ -464,7 +560,15 @@ export function SkillDialog({
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isInitialized]);
+  }, [
+    initialMessage,
+    isInitialized,
+    isRestoring,
+    isThinking,
+    piMessages?.length,
+    sendMessageStream,
+    switchingSessionId,
+  ]);
 
   // 转换 Pi Agent 消息为 SkillMessage 格式
   const skillMessages = useMemo<SkillMessage[]>(() => {
@@ -489,7 +593,7 @@ export function SkillDialog({
 
   // 发送消息
   const handleSendMessage = useCallback(async (content: string) => {
-    if (!content.trim() || isThinking || !isInitialized) return;
+    if (!content.trim() || isThinking || isRestoring || switchingSessionId || !isInitialized) return;
 
     const startTime = Date.now();
 
@@ -523,7 +627,7 @@ export function SkillDialog({
         }).catch(() => {}); // fire-and-forget
       }
     }
-  }, [isThinking, isInitialized, onMessage, sendMessageStream, currentSkill, activeSessionId, piMessages]);
+  }, [isThinking, isRestoring, switchingSessionId, isInitialized, onMessage, sendMessageStream, currentSkill, activeSessionId, piMessages]);
 
   // 停止生成
   const handleStop = useCallback(() => {
@@ -536,7 +640,13 @@ export function SkillDialog({
   }, [handleSendMessage]);
 
   const handleSkillSelect = (skillName: string) => {
+    transitionGuardRef.current.invalidate();
+    pendingNewSessionRef.current = null;
+    setSwitchingSessionId(null);
     setCurrentSkillSystemManaged(null);
+    setActiveSessionId(null);
+    hasAutoStartedRef.current = false;
+    lastInitRef.current = { skill: undefined, session: undefined };
     setCurrentSkill(skillName);
     setShowSkillList(false);
     onSkillChange?.(skillName);
@@ -709,6 +819,7 @@ export function SkillDialog({
                   {/* 新建会话按钮 */}
                   <button
                     onClick={createNewSession}
+                    disabled={Boolean(switchingSessionId) || isRestoring}
                     className="w-full text-left px-3 py-2.5 rounded-lg bg-primary/5 hover:bg-primary/10 text-primary transition-colors border border-primary/20 mb-1"
                   >
                     <div className="flex items-center gap-2">
@@ -734,7 +845,8 @@ export function SkillDialog({
                     sessionHistory.map((session) => (
                       <button
                         key={session.sessionId}
-                        onClick={() => selectSession(session.sessionId)}
+                        onClick={() => void selectSession(session.sessionId)}
+                        disabled={Boolean(switchingSessionId) || isRestoring}
                         className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors mb-1 ${
                           session.sessionId === activeSessionId
                             ? 'bg-primary/10 text-primary'
@@ -745,9 +857,13 @@ export function SkillDialog({
                           <span className="font-medium text-sm truncate max-w-[60%]">
                             {session.summary?.split('...')[0] || session.summary || `会话 ${session.sessionId.slice(0, 8)}`}
                           </span>
-                          <span className="text-xs text-gray-400">
-                            {session.messageCount} 条消息
-                          </span>
+                          {switchingSessionId === session.sessionId ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                          ) : (
+                            <span className="text-xs text-gray-400">
+                              {session.messageCount} 条消息
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center justify-between mt-1">
                           <span className="text-xs text-gray-400">
@@ -832,7 +948,7 @@ export function SkillDialog({
       {/* Input Area */}
       <ChatInputBar
         onSubmit={wrappedSendMessage}
-        disabled={!isInitialized}
+        disabled={!isInitialized || isThinking || isRestoring || Boolean(switchingSessionId)}
         placeholder="输入你的指令..."
         onUpload={handleUpload}
         onStop={isThinking ? handleStop : undefined}
@@ -844,6 +960,11 @@ export function SkillDialog({
         uploadError={skillUploadError}
         uploading={skillUploading}
       />
+      {uiState.errorMessage && (
+        <div className="px-4 py-2 text-sm text-red-500 bg-red-50">
+          {uiState.errorMessage}
+        </div>
+      )}
     </div>
   );
 }

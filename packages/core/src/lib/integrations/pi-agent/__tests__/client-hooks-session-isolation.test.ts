@@ -111,9 +111,18 @@ describe('usePiAgent stream isolation', () => {
       data: { sessionId: request.sessionId },
       timestamp: new Date().toISOString(),
     }));
-    getAgentSessionMock.mockImplementation(async (sessionId: string, projectId: string) => ({
+    getAgentSessionMock.mockImplementation(async (request: {
+      sessionId: string;
+      projectId: string;
+      entryType: string;
+      entryId: string;
+    }) => ({
       success: true,
-      data: createStoredSession(sessionId, projectId, `${sessionId} history`),
+      data: createStoredSession(
+        request.sessionId,
+        request.projectId,
+        `${request.sessionId} history`,
+      ),
       timestamp: new Date().toISOString(),
     }));
 
@@ -131,6 +140,37 @@ describe('usePiAgent stream isolation', () => {
 
   afterEach(() => {
     listeners.clear();
+  });
+
+  it('persists and sends the normalized entry ownership scope', async () => {
+    const { result } = renderHook(() => usePiAgent());
+
+    await act(async () => {
+      await result.current.initialize(
+        'skill-session-scope',
+        {
+          projectId: 'skill-scope',
+          projectName: 'Scope',
+        },
+        { agentType: 'skill' },
+      );
+      void result.current.sendMessageStream('scoped message');
+    });
+
+    await waitFor(() => {
+      expect(sendAgentMessageStreamMock).toHaveBeenCalledTimes(1);
+    });
+    expect(createAgentSessionMock).toHaveBeenCalledWith(expect.objectContaining({
+      projectContext: expect.objectContaining({
+        entryType: 'skill',
+        entryId: 'scope',
+      }),
+    }));
+    expect(sendAgentMessageStreamMock).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: 'skill-scope',
+      entryType: 'skill',
+      entryId: 'scope',
+    }));
   });
 
   it('does not deliver project-level AGENT_EVENT payloads into another session stream', async () => {
@@ -379,6 +419,26 @@ describe('usePiAgent stream isolation', () => {
     expect(result.current.isRestoring).toBe(false);
   });
 
+  it('forwards project and entry ownership scope before receiving session content', async () => {
+    const { result } = renderHook(() => usePiAgent());
+
+    await act(async () => {
+      await result.current.restoreSession({
+        sessionId: 'session-scope',
+        projectId: 'skill-scope',
+        entryType: 'skill',
+        entryId: 'scope',
+      });
+    });
+
+    expect(getAgentSessionMock).toHaveBeenCalledWith({
+      sessionId: 'session-scope',
+      projectId: 'skill-scope',
+      entryType: 'skill',
+      entryId: 'scope',
+    });
+  });
+
   it('TC-U3 shares one operation epoch so a late initialize cannot overwrite restore B', async () => {
     const initializeA = deferred<{
       success: boolean;
@@ -437,6 +497,8 @@ describe('usePiAgent stream isolation', () => {
       outcome = await result.current.restoreSession({
         sessionId: 'session-current',
         projectId: 'project-1',
+        entryType: 'agent',
+        entryId: 'project-1',
       });
     });
 

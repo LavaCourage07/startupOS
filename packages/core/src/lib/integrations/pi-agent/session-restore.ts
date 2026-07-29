@@ -15,6 +15,13 @@ export type RestoreAgentSessionErrorCode =
 export interface RestoreAgentSessionRequest {
   sessionId: string;
   projectId: string;
+  entryType: RestoreAgentEntryType;
+  entryId: string;
+}
+
+export interface AgentSessionMessageScope {
+  sessionId: string;
+  projectId?: string;
   entryType?: RestoreAgentEntryType;
   entryId?: string;
 }
@@ -42,6 +49,11 @@ export interface RestoreAgentSessionResult {
   };
 }
 
+export interface RestoreSessionBoundaryDependencies<TSession> {
+  getSession: (sessionId: string, projectId: string) => Promise<TSession | null>;
+  hydrateRuntime: (session: TSession) => Promise<void>;
+}
+
 export class RestoreAgentSessionError extends Error {
   readonly code: RestoreAgentSessionErrorCode;
 
@@ -59,6 +71,11 @@ const DISPLAY_ROLES = new Set<RestoreDisplayMessage['role']>([
   'assistant',
   'tool',
   'toolResult',
+]);
+const RESTORE_ENTRY_TYPES = new Set<RestoreAgentEntryType>([
+  'skill',
+  'agent',
+  'role-agent',
 ]);
 
 const SUPPORTED_AGENT_TYPES: Record<Exclude<RestoreAgentEntryType, 'agent'>, ReadonlySet<string>> = {
@@ -168,13 +185,10 @@ export function mapSessionDisplayMessages(messages: unknown): RestoreDisplayMess
 }
 
 function expectedProjectId(request: RestoreAgentSessionRequest): string {
-  if (request.entryType === 'skill' && request.entryId) {
+  if (request.entryType === 'skill') {
     return `skill-${request.entryId}`;
   }
-  if (
-    (request.entryType === 'agent' || request.entryType === 'role-agent')
-    && request.entryId
-  ) {
+  if (request.entryType === 'agent' || request.entryType === 'role-agent') {
     return request.entryId;
   }
   return request.projectId;
@@ -184,6 +198,12 @@ export function assertSessionOwnership(
   session: unknown,
   request: RestoreAgentSessionRequest,
 ): asserts session is UnknownRecord {
+  if (!RESTORE_ENTRY_TYPES.has(request.entryType)) {
+    throw new RestoreAgentSessionError(
+      'OWNERSHIP_MISMATCH',
+      'Session entry type is invalid.',
+    );
+  }
   if (!isRecord(session)) {
     throw new RestoreAgentSessionError('CORRUPT_SESSION', 'Session payload is invalid.');
   }
@@ -214,40 +234,95 @@ export function assertSessionOwnership(
 
   const explicitEntryType = projectContext['entryType'];
   const explicitEntryId = projectContext['entryId'];
-  if (
-    request.entryType
-    && explicitEntryType !== undefined
-    && explicitEntryType !== request.entryType
-  ) {
+  if (explicitEntryType !== undefined && explicitEntryType !== request.entryType) {
     throw new RestoreAgentSessionError(
       'OWNERSHIP_MISMATCH',
       'Session does not belong to the requested entry type.',
     );
   }
-  if (
-    request.entryId
-    && explicitEntryId !== undefined
-    && explicitEntryId !== request.entryId
-  ) {
+  if (explicitEntryId !== undefined && explicitEntryId !== request.entryId) {
     throw new RestoreAgentSessionError(
       'OWNERSHIP_MISMATCH',
       'Session does not belong to the requested entry.',
     );
   }
 
-  if (request.entryType) {
-    const agentType = session['agentType'];
-    const agentTypeMatches = request.entryType === 'agent'
-      ? typeof agentType === 'string' && agentType !== 'skill' && agentType !== 'role-agent'
-      : typeof agentType === 'string' && SUPPORTED_AGENT_TYPES[request.entryType].has(agentType);
-    if (
-      !agentTypeMatches
-    ) {
+  const agentType = session['agentType'];
+  const agentTypeMatches = request.entryType === 'agent'
+    ? typeof agentType === 'string' && agentType !== 'skill' && agentType !== 'role-agent'
+    : typeof agentType === 'string' && SUPPORTED_AGENT_TYPES[request.entryType].has(agentType);
+  if (!agentTypeMatches) {
+    throw new RestoreAgentSessionError(
+      'OWNERSHIP_MISMATCH',
+      'Session Agent type does not match the requested entry.',
+    );
+  }
+}
+
+export function assertSessionMessageOwnership(
+  session: unknown,
+  scope: AgentSessionMessageScope,
+): void {
+  if (!isRecord(session)) {
+    throw new RestoreAgentSessionError('CORRUPT_SESSION', 'Session payload is invalid.');
+  }
+  const projectContext = session['projectContext'];
+  if (!isRecord(projectContext)) {
+    throw new RestoreAgentSessionError(
+      'CORRUPT_SESSION',
+      'Session project context is missing.',
+    );
+  }
+  const storedSessionId = readRequiredString(
+    session,
+    'sessionId',
+    'Session identity is missing.',
+  );
+  if (storedSessionId !== scope.sessionId) {
+    throw new RestoreAgentSessionError(
+      'OWNERSHIP_MISMATCH',
+      'Session identity does not match the message request.',
+    );
+  }
+
+  const hasPersistedEntryIdentity =
+    typeof projectContext['entryType'] === 'string'
+    || typeof projectContext['entryId'] === 'string';
+  const hasRequestedEntryIdentity = Boolean(scope.entryType && scope.entryId);
+
+  if (hasPersistedEntryIdentity && !hasRequestedEntryIdentity) {
+    throw new RestoreAgentSessionError(
+      'OWNERSHIP_MISMATCH',
+      'Session entry identity is required to send a message.',
+    );
+  }
+
+  if (hasRequestedEntryIdentity) {
+    if (!scope.projectId) {
       throw new RestoreAgentSessionError(
         'OWNERSHIP_MISMATCH',
-        'Session Agent type does not match the requested entry.',
+        'Session project identity is required to send a message.',
       );
     }
+    assertSessionOwnership(session, {
+      sessionId: scope.sessionId,
+      projectId: scope.projectId,
+      entryType: scope.entryType as RestoreAgentEntryType,
+      entryId: scope.entryId as string,
+    });
+    return;
+  }
+
+  const sessionProjectId = readRequiredString(
+    projectContext,
+    'projectId',
+    'Session project identity is missing.',
+  );
+  if (scope.projectId && scope.projectId !== sessionProjectId) {
+    throw new RestoreAgentSessionError(
+      'OWNERSHIP_MISMATCH',
+      'Session does not belong to the requested project.',
+    );
   }
 }
 
@@ -294,6 +369,10 @@ function readProjectContext(session: UnknownRecord): ProjectContext {
 
   return {
     projectId,
+    ...(optionalString('entryType')
+      ? { entryType: optionalString('entryType') as RestoreAgentEntryType }
+      : {}),
+    ...(optionalString('entryId') ? { entryId: optionalString('entryId') } : {}),
     ...(optionalString('ontologyId') ? { ontologyId: optionalString('ontologyId') } : {}),
     ...(optionalString('currentPath') ? { currentPath: optionalString('currentPath') } : {}),
     ...(optionalString('projectName') ? { projectName: optionalString('projectName') } : {}),
@@ -329,7 +408,11 @@ export function createRestoreAgentSessionResult(
     );
   }
 
-  const projectContext = readProjectContext(session);
+  const projectContext = {
+    ...readProjectContext(session),
+    entryType: request.entryType,
+    entryId: request.entryId,
+  };
   const messages = mapSessionDisplayMessages(session['messages']);
   const agentType = session['agentType'];
   if (agentType !== undefined && typeof agentType !== 'string') {
@@ -379,4 +462,39 @@ export function toRestoreAgentSessionError(error: unknown): RestoreAgentSessionE
   }
 
   return new RestoreAgentSessionError('RESTORE_FAILED', 'Session restore failed.');
+}
+
+export async function restoreSessionAtBoundary<TSession>(
+  request: RestoreAgentSessionRequest,
+  dependencies: RestoreSessionBoundaryDependencies<TSession>,
+): Promise<TSession> {
+  if (
+    !request.sessionId
+    || !request.projectId
+    || !request.entryType
+    || !request.entryId
+  ) {
+    throw new RestoreAgentSessionError(
+      'RESTORE_FAILED',
+      'Session restore scope is incomplete.',
+    );
+  }
+
+  const session = await dependencies.getSession(request.sessionId, request.projectId);
+  if (!session) {
+    throw new RestoreAgentSessionError('NOT_FOUND', 'Session was not found.');
+  }
+
+  // Validate the complete persisted contract before mutating an in-process Runtime.
+  // The renderer projects the same DTO again after transport, but that second check
+  // must not be the first point where corrupt history is detected.
+  createRestoreAgentSessionResult(session, request);
+
+  try {
+    await dependencies.hydrateRuntime(session);
+  } catch (error) {
+    throw toRestoreAgentSessionError(error);
+  }
+
+  return session;
 }

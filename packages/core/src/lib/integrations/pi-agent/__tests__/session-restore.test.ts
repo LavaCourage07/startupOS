@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   RestoreAgentSessionError,
+  assertSessionMessageOwnership,
   assertSessionOwnership,
   createRestoreAgentSessionResult,
   mapSessionDisplayMessages,
+  restoreSessionAtBoundary,
 } from '../session-restore';
 
 function createStoredSession(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -161,6 +163,38 @@ describe('Session restore contract', () => {
     expect(() => assertSessionOwnership(createStoredSession(), restoreRequest)).not.toThrow();
   });
 
+  it('TC-U2 requires matching entry scope when persisted identity exists', () => {
+    expect(() => assertSessionMessageOwnership(createStoredSession(), restoreRequest)).not.toThrow();
+    expectRestoreError(
+      () => assertSessionMessageOwnership(createStoredSession(), {
+        sessionId: restoreRequest.sessionId,
+        projectId: restoreRequest.projectId,
+      }),
+      'OWNERSHIP_MISMATCH',
+    );
+  });
+
+  it('TC-U2 keeps a project-only compatibility path for legacy sessions', () => {
+    const legacySession = createStoredSession({
+      projectContext: {
+        projectId: restoreRequest.projectId,
+        projectName: '候选人评估',
+      },
+    });
+
+    expect(() => assertSessionMessageOwnership(legacySession, {
+      sessionId: restoreRequest.sessionId,
+      projectId: restoreRequest.projectId,
+    })).not.toThrow();
+    expectRestoreError(
+      () => assertSessionMessageOwnership(legacySession, {
+        sessionId: restoreRequest.sessionId,
+        projectId: 'skill-other',
+      }),
+      'OWNERSHIP_MISMATCH',
+    );
+  });
+
   it.each([
     {
       name: 'another Skill',
@@ -175,8 +209,8 @@ describe('Session restore contract', () => {
       request: {
         ...restoreRequest,
         projectId: 'project-other',
-        entryType: undefined,
-        entryId: undefined,
+        entryType: 'agent' as const,
+        entryId: 'project-other',
       },
     },
     {
@@ -200,5 +234,78 @@ describe('Session restore contract', () => {
       () => createRestoreAgentSessionResult(createStoredSession(), request),
       'OWNERSHIP_MISMATCH',
     );
+  });
+
+  it('TC-I2 rejects ownership before Runtime hydration or body return', async () => {
+    const hydrateRuntime = vi.fn().mockResolvedValue(undefined);
+
+    await expect(restoreSessionAtBoundary(
+      {
+        ...restoreRequest,
+        projectId: 'skill-other',
+        entryId: 'other',
+      },
+      {
+        getSession: vi.fn().mockResolvedValue(createStoredSession()),
+        hydrateRuntime,
+      },
+    )).rejects.toMatchObject({ code: 'OWNERSHIP_MISMATCH' });
+
+    expect(hydrateRuntime).not.toHaveBeenCalled();
+  });
+
+  it('TC-I4 rejects corrupt history before Runtime hydration', async () => {
+    const hydrateRuntime = vi.fn().mockResolvedValue(undefined);
+
+    await expect(restoreSessionAtBoundary(
+      restoreRequest,
+      {
+        getSession: vi.fn().mockResolvedValue(
+          createStoredSession({
+            messages: [{ role: 'assistant', content: { text: 'invalid' } }],
+          }),
+        ),
+        hydrateRuntime,
+      },
+    )).rejects.toMatchObject({ code: 'CORRUPT_SESSION' });
+
+    expect(hydrateRuntime).not.toHaveBeenCalled();
+  });
+
+  it('TC-I1 waits for Runtime hydration before returning stored message content', async () => {
+    let releaseHydration: (() => void) | undefined;
+    const hydration = new Promise<void>((resolve) => {
+      releaseHydration = resolve;
+    });
+    const restore = restoreSessionAtBoundary(restoreRequest, {
+      getSession: vi.fn().mockResolvedValue(createStoredSession()),
+      hydrateRuntime: vi.fn(() => hydration),
+    });
+    let settled = false;
+    void restore.then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    releaseHydration?.();
+    const session = await restore;
+    expect(settled).toBe(true);
+    expect(session).toMatchObject({
+      messages: expect.arrayContaining([
+        expect.objectContaining({ content: '请继续分析' }),
+      ]),
+    });
+  });
+
+  it('TC-I2 maps Runtime hydration failures to RESTORE_FAILED', async () => {
+    await expect(restoreSessionAtBoundary(restoreRequest, {
+      getSession: vi.fn().mockResolvedValue(createStoredSession()),
+      hydrateRuntime: vi.fn().mockRejectedValue(new Error('private runtime failure')),
+    })).rejects.toMatchObject({
+      code: 'RESTORE_FAILED',
+      message: 'Session restore failed.',
+    });
   });
 });
