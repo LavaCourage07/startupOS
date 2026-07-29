@@ -11,6 +11,8 @@
 
 **English** | [简体中文](./README_CN.md)
 
+> [Watch the OriginOS product philosophy video](./docs/assets/readme/originos-product-philosophy.mp4)
+
 </div>
 
 ## What is OriginOS CE?
