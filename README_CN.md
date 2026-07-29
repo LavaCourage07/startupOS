@@ -11,11 +11,11 @@
 
 [English](./README.md) | **简体中文**
 
-![OriginOS 产品理念](./docs/assets/readme/originos-product-philosophy.webp)
-
 </div>
 
 ## OriginOS CE 是什么？
+
+![OriginOS 产品理念](./docs/assets/readme/originos-product-philosophy.webp)
 
 OriginOS CE 是一个面向个人与小团队的 AI Native 工作系统。它不从固定的软件菜单出发，而是从你要解决的问题出发，把项目、Agent、角色、技能、文件、知识、通知和定时任务组织在同一个桌面中。
 
