@@ -27,6 +27,30 @@ Use it to:
 - design a solution and coordinate multiple Agents for longer-running work;
 - keep work artifacts and context on your own machine.
 
+## How OriginOS Works
+
+OriginOS connects business understanding, solution design, and AI execution in one continuous loop:
+
+### 1. Project interview: understand the business
+
+Start with a business objective rather than a blank workflow. The Project Agent interviews the user, reads supporting files, clarifies roles, entities, rules, actions, and constraints, then turns that context into a visible business model and ontology.
+
+**Output:** a project workspace with shared context, source files, business facts, and an ontology that later Agents can reference.
+
+### 2. AI solution: design how the work will be done
+
+Use the business model to design an executable solution. Define which Agents, RoleAgents, and skills participate; how work is divided; what contracts and checkpoints apply; and which results require human review.
+
+**Output:** a solution that connects business goals to tasks, responsibilities, tools, acceptance criteria, and expected artifacts.
+
+### 3. AI runs the business: execute, review, and accumulate knowledge
+
+Run the solution in the Agent or multi-agent runtime. Agents execute tasks against project facts and constraints, use skills and tools, expose progress and review points, and write results back to the workspace. Completed work can become reusable skills, knowledge, and operating patterns.
+
+**Output:** traceable execution, reviewable decisions, business artifacts, and reusable organizational knowledge.
+
+> **Project interview → Business model and ontology → AI solution → Agent execution → Artifacts and knowledge**
+
 ## Download and Install
 
 Download the newest build from [GitHub Releases](https://github.com/NeuralNexusPro/startupOS/releases/latest).
@@ -80,7 +104,7 @@ Solution design can be executed by a multi-agent runtime with visible tasks, pro
 
 ## Run from Source
 
-Requirements: Node.js **22.19+**, pnpm **9+**, and Git.
+Requirements: Node.js **24+**, pnpm **9+**, and Git.
 
 ```bash
 git clone https://github.com/NeuralNexusPro/startupOS.git
