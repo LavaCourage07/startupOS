@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/readme/originos-banner.png" alt="OriginOS CE" />
+<img src="docs/assets/readme/originos-banner.png" alt="OriginOS CE" width="960" />
 
 <p>
   <a href="https://github.com/NeuralNexusPro/startupOS/releases/latest"><img src="https://img.shields.io/github/v/release/NeuralNexusPro/startupOS?style=flat-square&label=最新版本" alt="最新版本" /></a>
