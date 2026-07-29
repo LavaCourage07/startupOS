@@ -13,6 +13,11 @@ export {
 	type UseClientPiAgentState,
 	type ClientAgentEvent,
 } from "./client-hooks";
+export type {
+	RestoreAgentSessionRequest,
+	RestoreAgentSessionResult,
+	RestoreDisplayMessage,
+} from "./session-restore";
 
 // Re-export types
 export type { ProjectContext, OriginOSAgentState } from "./types";
