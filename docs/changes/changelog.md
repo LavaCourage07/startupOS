@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-07-30 — fix：恢复窗体历史会话与执行上下文
+
+**类型**：fix
+**影响模块**：`packages/core/src/lib/integrations/pi-agent/`, `packages/desktop/src/main/services/agent-session-service.ts`, `packages/web/src/components/skills/SkillDialog.tsx`, `packages/web/src/components/os/agent-dialog/AgentDialogContent.tsx`
+**摘要**：将 OriginOS CE 桌面版本更新到 `0.1.46`。Skill、Agent 和 RoleAgent 窗体现在可以恢复历史 Session 的可见消息与执行上下文；增加 ownership 校验、并发切换 epoch、旧 stream 隔离和结构化错误，并修复删除冒泡、欢迎语重发及 Core package export 缺口。
+
 ## 2026-07-25 — fix：mac 自动更新元数据使用 zip
 
 **类型**：fix

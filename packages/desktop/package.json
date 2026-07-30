@@ -1,6 +1,6 @@
 {
   "name": "@originos/desktop",
-  "version": "0.1.45",
+  "version": "0.1.46",
   "private": true,
   "main": "dist-electron/desktop/src/main/main.js",
   "scripts": {
