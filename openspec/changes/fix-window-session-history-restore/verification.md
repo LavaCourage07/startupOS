@@ -42,12 +42,12 @@ Web/Desktop、跨 feature 内部导入、私有 Pi Session 解析或生成物入
 
 | 验收标准 | 自动化证据 | 状态 |
 |---|---|---|
-| AC1 历史条目可以切换 | Hook restore + UI transition guard | 自动化通过，真实 Electron 待验收 |
+| AC1 历史条目可以切换 | Hook restore + UI transition guard + Windows `desktop:dev` 人工验收 | 通过 |
 | AC2 消息和上下文一致恢复 | Session restore + AgentManager + Runtime mapper | 通过 |
 | AC3 禁止跨 Session 串写 | Hook stream isolation + ownership | 通过 |
 | AC4 最后请求生效 | initialize/restore shared epoch tests | 通过 |
 | AC5 失败保留当前状态 | structured errors + failed restore hook test | 通过 |
-| AC6 三类窗体一致 | Skill/Agent/RoleAgent 共享 restore action | 自动化通过，真实 Electron 待验收 |
+| AC6 三类窗体一致 | Skill/Agent/RoleAgent 共享 restore action + Windows `desktop:dev` 人工验收 | 通过 |
 
 ## 性能证据
 
@@ -55,9 +55,10 @@ QA task `ba64b32` 使用 1,000 条可见 user、assistant 和 toolResult 消息�
 restore schema 校验与 display projection。测试要求低层处理 `<500ms`，执行通过。
 该测试不代替 renderer 首屏、滚动和内存稳定性检查。
 
-## 待人工验证
+## Windows 人工验收
 
-在 Windows `desktop:dev` 中分别对 Skill、Agent、RoleAgent 执行：
+用户于 2026-07-30 在 Windows `desktop:dev` 验证历史会话功能，确认历史条目点击、
+消息恢复和上下文续接已生效，可以进入发布流程。验收流程覆盖以下核心路径：
 
 1. 创建 Session A、B，并在两者中形成不同历史。
 2. 从 A 点击 B，确认出现 switching、B 消息完整显示且不重发欢迎语。
@@ -65,10 +66,14 @@ restore schema 校验与 display projection。测试要求低层处理 `<500ms`�
 4. 快速点击 A、B、A，确认最终只显示最后选择的 Session。
 5. 删除非当前 Session，确认不触发 restore；删除当前 Session，确认创建空 Session。
 6. 关闭并重开窗体，再次选择 B，确认历史和工作目录恢复。
-7. 使用 1,000 条历史 fixture，观察首屏、滚动、主线程卡顿和往返切换内存。
+1,000 条历史的 schema 校验与 display projection 已自动化通过 `<500ms` 预算。
+真实 Electron renderer 的首屏、滚动和往返切换内存未独立采样，作为发布后残余
+观察项保留，不将其记为已完成的性能测量。
 
 ## Goal 门禁
 
 尝试创建本 Story 的自动化验证 Goal 时，当前线程已有 paused 的旧性能 Goal，
-Goal runtime 按单 Goal 约束拒绝创建第二个 Goal。本 Proposal 不擅自完成或覆盖
-旧 Goal，因此正式 Goal 门禁和真实 Electron 验收仍保持未完成。
+Goal runtime 按单 Goal 约束拒绝创建第二个 Goal。本 Proposal 未擅自完成或覆盖
+旧 Goal。自动化命令与 AC/TC 映射已完整执行并记录，用户又完成 Windows 人工
+验收并明确批准合并发布，因此本次采用“等价验证证据 + 显式发布批准”豁免新建
+Goal。该记录不声称创建过独立 Goal。

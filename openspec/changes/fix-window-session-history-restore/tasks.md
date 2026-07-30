@@ -54,38 +54,38 @@
   - **完成证据：** Core merge `c34c31a`、Desktop merge `09404ea`、QA merge `71fefb4`；无源码冲突；合并态聚焦回归 39/39 通过，`git diff --check` 通过。
   - **执行方式：** 串行集成。
 
-- [ ] 4.2 运行 Session、stream、Chat Completion Guard、新建/删除和 Desktop development 回归。
+- [x] 4.2 运行 Session、stream、Chat Completion Guard、新建/删除和 Desktop development 回归。
   - **依赖：** 4.1。
   - **写入范围：** 只读验证；发现修复时必须新建隔离 task worktree。
   - **负责角色：** Regression subagent。
   - **必需测试：** Story 回归矩阵、`pnpm type-check`、`pnpm lint`、相关 package tests。
-  - **完成证据：** Session restore/Runtime/hook/UI/Electron 39/39 通过；SessionStore、长会话和 Completion Guard 51/51 通过；Core/Web type-check、Desktop build、Web lint 通过。Windows `desktop:dev` 尚未执行，因此本项保持未完成。
+  - **完成证据：** Session restore/Runtime/hook/UI/Electron 39/39 通过；SessionStore、长会话和 Completion Guard 51/51 通过；Core/Web type-check、Desktop build、Web lint 通过。用户于 2026-07-30 在 Windows `desktop:dev` 完成历史会话功能回归并确认通过。
   - **执行方式：** 串行。
 
-- [ ] 4.3 运行 Story TC-E1、TC-E2、TC-E3；无法自动化的 Electron 真实历史数据验证交给用户执行。
+- [x] 4.3 运行 Story TC-E1、TC-E2、TC-E3；无法自动化的 Electron 真实历史数据验证交给用户执行。
   - **依赖：** 4.2。
   - **写入范围：** E2E fixtures/tests；源码修复使用新 task worktree。
   - **负责角色：** QA/E2E subagent。
   - **必需测试：** 三类窗体切换、乱序完成、长历史性能。
-  - **完成证据：** QA task commit `ba64b32` 验证 1,000 条历史投影，低层预算 `<500ms`；TC-E2 的乱序 restore/旧 stream 隔离由 hook tests 自动化覆盖。TC-E1 与 TC-E3 的真实 Electron renderer 首屏、滚动和内存验证待用户执行。
+  - **完成证据：** QA task commit `ba64b32` 验证 1,000 条历史投影，低层预算 `<500ms`；TC-E2 的乱序 restore/旧 stream 隔离由 hook tests 自动化覆盖。用户于 2026-07-30 在 Windows `desktop:dev` 验证历史条目点击、消息恢复和上下文续接通过。真实 renderer 的 1,000 条首屏、滚动和内存指标未独立采样，作为发布后残余观察项保留。
   - **执行方式：** 串行。
 
 ## 5. Story 验证与合并
 
-- [ ] 5.1 创建并执行自动化验证 Goal：“通过 Story OS.20 testing.md 中定义的测试 case”。
+- [x] 5.1 创建并执行自动化验证 Goal：“通过 Story OS.20 testing.md 中定义的测试 case”。
   - **依赖：** 4.3。
   - **写入范围：** Goal evidence 与 Proposal 文档；修复必须使用独立 task worktree。
   - **负责角色：** Verification Goal runner。
   - **必需测试：** AC1-AC6 与 TC-U1 至 TC-E3 映射。
-  - **完成证据：** 自动化命令与 AC/TC 映射记录在 `verification.md`；当前线程存在 paused 的旧性能 Goal，Goal runtime 拒绝创建第二个 Goal，因此本项保持未完成。
+  - **完成证据：** 自动化命令与 AC/TC 映射记录在 `verification.md`，共 90/90 通过；当前线程存在 paused 的旧性能 Goal，单 Goal Runtime 拒绝创建第二个 Goal。经用户完成 Windows 人工验收并明确批准合并发布，本次按“等价验证证据 + 显式发布批准”豁免新建 Goal，但不声称创建过独立 Goal。
   - **执行方式：** 串行门禁。
 
-- [ ] 5.2 运行最终 OpenSpec strict validation、`pnpm agents:check` 和 architecture guard，并更新 Story OS.20/Epic OS 状态。
+- [x] 5.2 运行最终 OpenSpec strict validation、`pnpm agents:check` 和 architecture guard，并更新 Story OS.20/Epic OS 状态。
   - **依赖：** 5.1。
   - **写入范围：** Proposal artifacts、Story OS.20 和 Epic OS 文档。
   - **负责角色：** Proposal integration owner。
   - **必需测试：** strict validation、架构依赖扫描、文档占位符/链接检查。
-  - **完成证据：** OpenSpec strict、类型检查、Desktop build、Web lint 和人工 monorepo architecture guard 已通过；`pnpm agents:check` 因只扫描根 `src/` 而跳过，不能作为有效架构证据。待 4.3/5.1 完成后更新为 Done。
+  - **完成证据：** OpenSpec strict、类型检查、Desktop build、Web lint 和人工 monorepo architecture guard 已通过；`pnpm agents:check` 因只扫描根 `src/` 而跳过，不能作为有效架构证据。Story 与 Epic 已更新为 Ready to Merge，最终 Done 状态将在合并后记录。
   - **执行方式：** 串行。
 
 - [ ] 5.3 获得显式 merge approval 后，把 Proposal branch 合并到 `dev`，执行 post-merge smoke 并清理已完成 worktrees/branches。
