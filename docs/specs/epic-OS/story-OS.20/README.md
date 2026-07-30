@@ -1,11 +1,11 @@
 # Story OS.20：窗体会话历史切换与上下文恢复
 
 **Epic：** OS - Phase 0 OS 交互基础  
-**状态：** Planning  
+**状态：** Ready to Merge
 **优先级：** High  
 **Owner：** Agent Runtime / Desktop UX  
 **创建日期：** 2026-07-29  
-**最后更新：** 2026-07-29
+**最后更新：** 2026-07-30
 
 ## User Story
 
@@ -26,14 +26,14 @@
 
 ## 简要验收标准
 
-- [ ] Skill、Agent、RoleAgent 窗体中的历史条目均可点击并切换。
-- [ ] 切换期间显示明确加载状态，禁止向旧 Session 发送新消息。
-- [ ] 成功后恢复所选 Session 的完整可见消息、project context、Agent 类型、
+- [x] Skill、Agent、RoleAgent 窗体中的历史条目均可点击并切换。
+- [x] 切换期间显示明确加载状态，禁止向旧 Session 发送新消息。
+- [x] 成功后恢复所选 Session 的完整可见消息、project context、Agent 类型、
   CWD/outputDir、模型配置及可公开恢复的 runtime branch/context。
-- [ ] 切换后发送的下一条消息追加到所选历史 Session，并由恢复后的上下文处理。
-- [ ] 快速连续切换只接受最后一次请求，迟到响应不能覆盖当前 Session。
-- [ ] 历史 Session 缺失、损坏或恢复失败时保留当前会话并显示可见错误。
-- [ ] 新建会话、删除会话及普通实时流式消息行为不回归。
+- [x] 切换后发送的下一条消息追加到所选历史 Session，并由恢复后的上下文处理。
+- [x] 快速连续切换只接受最后一次请求，迟到响应不能覆盖当前 Session。
+- [x] 历史 Session 缺失、损坏或恢复失败时保留当前会话并显示可见错误。
+- [x] 新建会话、删除会话及普通实时流式消息行为不回归。
 
 ## 文档导航
 
@@ -49,4 +49,5 @@
 | 日期 | 变更 |
 |---|---|
 | 2026-07-29 | 创建 Story，记录窗体历史点击失效与上下文恢复缺失问题 |
-
+| 2026-07-29 | 完成 Proposal 实施与 90 项自动化验证，进入 Windows Electron 人工验收 |
+| 2026-07-30 | 用户完成 Windows `desktop:dev` 人工验收，进入合并发布 |

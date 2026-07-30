@@ -75,7 +75,7 @@
 | OS.17 | 无项目首页与 Agent 思考内容显示优化 | 📋 Planning | High | 2026-07-22 | 1-2 天 |
 | OS.18 | Windows 内置模板技能加载修复 | ✅ Complete | High | 2026-07-23 | 1-2 天 |
 | OS.19 | Skill、Agent 与 RoleAgent 目录导出 ZIP | ✅ Complete | High | 2026-07-26 | 1-2 天 |
-| OS.20 | 窗体会话历史切换与上下文恢复 | 📋 Planning | High | TBD | 2-3 天 |
+| OS.20 | 窗体会话历史切换与上下文恢复 | 🚀 Ready to Merge | High | Agent Runtime / Desktop UX | 2-3 天 |
 
 ---
 

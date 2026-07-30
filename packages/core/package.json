@@ -54,6 +54,7 @@
     "./lib/integrations/*/client-hooks": "./src/lib/integrations/*/client-hooks.ts",
     "./lib/integrations/pi-agent/client": "./src/lib/integrations/pi-agent/client.ts",
     "./lib/integrations/pi-agent/server": "./src/lib/integrations/pi-agent/server.ts",
+    "./lib/integrations/pi-agent/session-restore": "./src/lib/integrations/pi-agent/session-restore.ts",
     "./lib/integrations/*/hooks": "./src/lib/integrations/*/hooks.ts",
     "./lib/integrations/*/services/*": "./src/lib/integrations/*/services/*.ts",
     "./lib/integrations/pi-agent/display-content": "./src/lib/integrations/pi-agent/display-content.ts",

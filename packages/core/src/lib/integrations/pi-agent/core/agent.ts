@@ -50,6 +50,11 @@ import {
 	type SemanticCompletionDecision,
 } from "./completion-judge";
 import { getToolEventStatus } from "./tool-event-status";
+import {
+	mapPersistedMessagesForRuntime,
+	toRestorableRuntimeModel,
+	type PersistedRuntimeMessage,
+} from "./runtime-history";
 
 // ============================================================================
 // Event Emitter
@@ -1317,6 +1322,21 @@ export class OriginOSAgent {
 			throw new Error("Agent 未初始化");
 		}
 		this.agent.state.messages = messages;
+	}
+
+	/**
+	 * 使用当前 Runtime model 的公开元数据恢复持久化消息。
+	 */
+	replacePersistedMessages(messages: readonly PersistedRuntimeMessage[]): number {
+		if (!this.agent) {
+			throw new Error("Agent 未初始化");
+		}
+		const runtimeMessages = mapPersistedMessagesForRuntime(
+			messages,
+			toRestorableRuntimeModel(this.agent.state.model),
+		);
+		this.agent.state.messages = runtimeMessages;
+		return runtimeMessages.length;
 	}
 
 	/**

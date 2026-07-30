@@ -28,6 +28,10 @@ import StatusIndicator from './StatusIndicator';
 import { AppWindowManager } from '@/services/AppWindowManager';
 import { WorkspaceWindow } from '@/components/os/workspace';
 import { EntryExportButton } from '@/components/os/EntryExportButton';
+import {
+  createSessionTransitionGuard,
+  shouldAutoStartSession,
+} from './session-transition-guard';
 
 interface SessionHistoryItem {
   sessionId: string;
@@ -64,6 +68,11 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
   const [showHistory, setShowHistory] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [switchingSessionId, setSwitchingSessionId] = useState<string | null>(null);
+  const transitionGuardRef = useRef(createSessionTransitionGuard());
+  const pendingNewSessionRef = useRef<{ target: string; previous: string | null } | null>(null);
+  const initializedSessionRef = useRef<string | null>(null);
+  const isInitializingSessionRef = useRef<string | null>(null);
 
   // Generate a stable sessionId (survives StrictMode double-mount)
   const fallbackSessionIdRef = useRef<string | null>(null);
@@ -78,10 +87,12 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
     isInitialized,
     isRunning,
     isThinking,
+    isRestoring,
     uiState,
     messages: agentMessages,
     abort,
     subscribe,
+    restoreSession,
   } = usePiAgent();
 
   const getEffectiveConfig = useSettingsStore((s) => s.getEffectiveConfig);
@@ -141,44 +152,81 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
   const displayMessages: Message[] = messages;
 
   // Load session history for this agent
-  useEffect(() => {
-    const loadHistory = async () => {
-      setIsLoadingHistory(true);
-      try {
-        const result = await listAgentSessions(agentId);
-        if (result.success && (result.data as { sessions?: unknown[] })?.sessions) {
-          const sessions = (result.data as { sessions: Array<{ sessionId: string; createdAt: number; updatedAt: number; messageCount: number; summary?: string }> }).sessions;
-          setSessionHistory(sessions.map((s) => ({
-            sessionId: s.sessionId,
-            createdAt: s.createdAt,
-            updatedAt: s.updatedAt,
-            messageCount: s.messageCount,
-            summary: s.summary,
-          })));
-        }
-      } catch (error) {
-        console.error('Failed to load session history:', error);
-      } finally {
-        setIsLoadingHistory(false);
+  const loadSessionHistory = useCallback(async () => {
+    setIsLoadingHistory(true);
+    try {
+      const result = await listAgentSessions(agentId);
+      if (result.success && (result.data as { sessions?: unknown[] })?.sessions) {
+        const sessions = (result.data as { sessions: Array<{ sessionId: string; createdAt: number; updatedAt: number; messageCount: number; summary?: string }> }).sessions;
+        setSessionHistory(sessions.map((s) => ({
+          sessionId: s.sessionId,
+          createdAt: s.createdAt,
+          updatedAt: s.updatedAt,
+          messageCount: s.messageCount,
+          summary: s.summary,
+        })));
       }
-    };
-    loadHistory();
+    } catch (error) {
+      console.error('Failed to load session history:', error);
+    } finally {
+      setIsLoadingHistory(false);
+    }
   }, [agentId]);
+
+  useEffect(() => {
+    void loadSessionHistory();
+  }, [loadSessionHistory]);
 
   // Create a new session: always start fresh
   const createNewSession = useCallback(() => {
     const newId = `agent-${agentId}-${Date.now()}`;
+    transitionGuardRef.current.invalidate();
+    pendingNewSessionRef.current = {
+      target: newId,
+      previous: activeSessionId ?? initializedSessionRef.current,
+    };
+    setSwitchingSessionId(newId);
     setActiveSessionId(newId);
     setShowHistory(false);
     hasAutoStartedRef.current = false;
-  }, [agentId]);
+  }, [activeSessionId, agentId]);
 
   // Select an existing session
-  const selectSession = useCallback((selectedSessionId: string) => {
-    setActiveSessionId(selectedSessionId);
-    setShowHistory(false);
-    hasAutoStartedRef.current = true; // Don't auto-send welcome for existing sessions
-  }, []);
+  const selectSession = useCallback(async (selectedSessionId: string) => {
+    if (selectedSessionId === activeSessionId) {
+      setShowHistory(false);
+      return;
+    }
+
+    hasAutoStartedRef.current = true;
+    const restoreToken = transitionGuardRef.current.begin(`restore:${selectedSessionId}`);
+    pendingNewSessionRef.current = null;
+    isInitializingSessionRef.current = null;
+    setSwitchingSessionId(selectedSessionId);
+    try {
+      const entryType = resolvedAgentType === 'role-agent'
+        ? 'role-agent'
+        : resolvedAgentType === 'skill'
+          ? 'skill'
+          : 'agent';
+      const restored = await restoreSession({
+        sessionId: selectedSessionId,
+        projectId: agentId,
+        entryType,
+        entryId: agentId,
+      });
+      if (!restored || !transitionGuardRef.current.isCurrent(restoreToken)) return;
+      initializedSessionRef.current = selectedSessionId;
+      setActiveSessionId(selectedSessionId);
+      setShowHistory(false);
+      setToolExecutions([]);
+    } catch (error) {
+      console.error('[AgentDialogContent] Failed to restore session:', error);
+      await loadSessionHistory();
+    } finally {
+      setSwitchingSessionId((current) => current === selectedSessionId ? null : current);
+    }
+  }, [activeSessionId, agentId, loadSessionHistory, resolvedAgentType, restoreSession]);
 
   // Delete a session
   const deleteSession = useCallback(async (e: React.MouseEvent, sessionIdToDelete: string) => {
@@ -199,11 +247,14 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
   }, [agentId, activeSessionId, createNewSession]);
 
   // Initialize agent via Launcher API
-  const isInitializingRef = useRef(false);
-
   useEffect(() => {
-    if (!sessionId || isInitialized || isInitializingRef.current) return;
-    isInitializingRef.current = true;
+    if (
+      !sessionId
+      || isInitializingSessionRef.current === sessionId
+      || (isInitialized && initializedSessionRef.current === sessionId)
+    ) return;
+    isInitializingSessionRef.current = sessionId;
+    const initializationToken = transitionGuardRef.current.begin(`initialize:${sessionId}`);
 
     const initAgent = async () => {
       try {
@@ -246,22 +297,50 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
           },
           llmConfig
         );
+        if (!transitionGuardRef.current.isCurrent(initializationToken)) {
+          return;
+        }
+        initializedSessionRef.current = sessionId;
+        setActiveSessionId(sessionId);
+        const pendingNewSession = pendingNewSessionRef.current;
+        if (pendingNewSession?.target === sessionId) {
+          pendingNewSessionRef.current = null;
+          setSwitchingSessionId((current) => current === sessionId ? null : current);
+        }
       } catch (error) {
+        if (!transitionGuardRef.current.isCurrent(initializationToken)) {
+          return;
+        }
         console.error('[AgentDialogContent] Failed to initialize agent:', error);
         setAgentStatus(agentId, AgentStatus.ERROR);
+        const pendingNewSession = pendingNewSessionRef.current;
+        if (pendingNewSession?.target === sessionId) {
+          pendingNewSessionRef.current = null;
+          setActiveSessionId(pendingNewSession.previous);
+          setSwitchingSessionId((current) => current === sessionId ? null : current);
+        }
+      } finally {
+        if (transitionGuardRef.current.isCurrent(initializationToken)) {
+          isInitializingSessionRef.current = null;
+        }
       }
     };
 
     initAgent();
-  }, [sessionId, isInitialized, initialize, setAgentStatus, agentId, resolvedAgentType, displayName]);
+  }, [sessionId, isInitialized, initialize, setAgentStatus, agentId, resolvedAgentType, displayName, getEffectiveConfig]);
 
   useEffect(() => {
-    if (!initialMessage?.trim() || !isInitialized || hasAutoStartedRef.current) return;
-
-    if (messages.length > 0 || isThinking) {
-      hasAutoStartedRef.current = true;
-      return;
-    }
+    if (
+      !initialMessage?.trim()
+      || !shouldAutoStartSession({
+        isInitialized,
+        isRestoring,
+        switchingSessionId,
+        hasAutoStarted: hasAutoStartedRef.current,
+        messageCount: messages.length,
+        isThinking,
+      })
+    ) return;
 
     hasAutoStartedRef.current = true;
     const sendInitialMessage = async () => {
@@ -273,11 +352,30 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
     };
 
     sendInitialMessage();
-  }, [initialMessage, isInitialized, isThinking, messages.length, sendMessageStream]);
+  }, [
+    initialMessage,
+    isInitialized,
+    isRestoring,
+    isThinking,
+    messages.length,
+    sendMessageStream,
+    switchingSessionId,
+  ]);
 
   // For role agents with no history, trigger dynamic welcome message generation
   useEffect(() => {
-    if (initialMessage?.trim() || !isInitialized || resolvedAgentType !== 'role-agent' || messages.length > 0 || hasAutoStartedRef.current) return;
+    if (
+      initialMessage?.trim()
+      || resolvedAgentType !== 'role-agent'
+      || !shouldAutoStartSession({
+        isInitialized,
+        isRestoring,
+        switchingSessionId,
+        hasAutoStarted: hasAutoStartedRef.current,
+        messageCount: messages.length,
+        isThinking,
+      })
+    ) return;
 
     hasAutoStartedRef.current = true;
 
@@ -292,19 +390,28 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
     };
 
     generateWelcome();
-  }, [isInitialized, resolvedAgentType, messages.length, sendMessageStream]);
+  }, [
+    initialMessage,
+    isInitialized,
+    isRestoring,
+    isThinking,
+    messages.length,
+    resolvedAgentType,
+    sendMessageStream,
+    switchingSessionId,
+  ]);
 
   const handleSendMessage = useCallback(
     async (content: string) => {
       setToolExecutions([]);
-      if (!isInitialized || !content.trim()) return;
+      if (!isInitialized || switchingSessionId || isRestoring || !content.trim()) return;
       try {
         await sendMessageStream(content);
       } catch (error) {
         console.error('[AgentDialogContent] Failed to send message:', error);
       }
     },
-    [isInitialized, sendMessageStream]
+    [isInitialized, isRestoring, sendMessageStream, switchingSessionId]
   );
 
   const [agentUploadedFiles, setAgentUploadedFiles] = useState<UploadedFileDisplay[]>([]);
@@ -437,6 +544,7 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
                       {/* New session button */}
                       <button
                         onClick={createNewSession}
+                        disabled={Boolean(switchingSessionId) || isRestoring}
                         className="w-full text-left px-3 py-2.5 rounded-lg bg-primary/5 hover:bg-primary/10 text-primary transition-colors border border-primary/20 mb-1"
                       >
                         <div className="flex items-center gap-2">
@@ -465,7 +573,8 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
                             className="group flex items-center gap-1"
                           >
                             <button
-                              onClick={() => selectSession(session.sessionId)}
+                              onClick={() => void selectSession(session.sessionId)}
+                              disabled={Boolean(switchingSessionId) || isRestoring}
                               className={`flex-1 text-left px-3 py-2.5 rounded-lg transition-colors mb-1 ${
                                 session.sessionId === activeSessionId
                                   ? 'bg-primary/10 text-primary'
@@ -476,9 +585,13 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
                                 <span className="font-medium text-sm truncate max-w-[60%]">
                                   {session.summary?.split('...')[0] || session.summary || `会话 ${session.sessionId.slice(0, 8)}`}
                                 </span>
-                                <span className="text-xs text-gray-400">
-                                  {session.messageCount} 条消息
-                                </span>
+                                {switchingSessionId === session.sessionId ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                                ) : (
+                                  <span className="text-xs text-gray-400">
+                                    {session.messageCount} 条消息
+                                  </span>
+                                )}
                               </div>
                               <div className="flex items-center justify-between mt-1">
                                 <span className="text-xs text-gray-400">
@@ -518,7 +631,7 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
 
       <ChatInputBar
         onSubmit={wrappedSendMessage}
-        disabled={!isInitialized || isRunning}
+        disabled={!isInitialized || isRunning || isRestoring || Boolean(switchingSessionId)}
         placeholder={`向 ${displayName} 发送消息...`}
         onUpload={handleUpload}
         onStop={abort}

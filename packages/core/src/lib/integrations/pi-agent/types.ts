@@ -252,9 +252,20 @@ export interface ProjectContext {
 	currentPath?: string;
 
 	/**
+	 * 当前 Session 的产物输出目录
+	 */
+	outputDir?: string;
+
+	/**
 	 * 项目名称
 	 */
 	projectName?: string;
+
+	/**
+	 * 当前会话所属入口。新会话必须持久化；旧会话恢复时由已校验的请求补齐。
+	 */
+	entryType?: "skill" | "agent" | "role-agent";
+	entryId?: string;
 
 	/**
 	 * 用户ID
