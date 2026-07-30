@@ -85,7 +85,7 @@
   - **写入范围：** Proposal artifacts、Story OS.20 和 Epic OS 文档。
   - **负责角色：** Proposal integration owner。
   - **必需测试：** strict validation、架构依赖扫描、文档占位符/链接检查。
-  - **完成证据：** OpenSpec strict、类型检查、Desktop build、Web lint 和人工 monorepo architecture guard 已通过；`pnpm agents:check` 因只扫描根 `src/` 而跳过，不能作为有效架构证据。Story 与 Epic 已更新为 Ready to Merge，最终 Done 状态将在合并后记录。
+  - **完成证据：** OpenSpec strict、Core/Web 类型检查、Desktop build、Web lint 和人工 monorepo architecture guard 已通过；发布前 Web type-check 发现 `session-restore` 缺少显式 package export，已由独立 task commit `36771bb` 修复并重跑 90/90 回归。`pnpm agents:check` 因只扫描根 `src/` 而跳过，不能作为有效架构证据。Story 与 Epic 已更新为 Ready to Merge，最终 Done 状态将在合并后记录。
   - **执行方式：** 串行。
 
 - [ ] 5.3 获得显式 merge approval 后，把 Proposal branch 合并到 `dev`，执行 post-merge smoke 并清理已完成 worktrees/branches。

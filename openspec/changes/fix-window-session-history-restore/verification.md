@@ -33,6 +33,11 @@ RoleAgent 窗体可以恢复历史 Session 的消息和执行上下文，且不�
 | `openspec validate fix-window-session-history-restore --strict` | PASS |
 | `git diff --check dev...HEAD` | PASS |
 
+发布前复跑 Web type-check 时发现 `session-restore` 虽已从 Core 源码入口导出，但
+缺少稳定的 package subpath export。独立 task commit `36771bb` 补充
+`@originos/core/lib/integrations/pi-agent/session-restore` 显式导出；修复后 Web
+type-check 与 90/90 聚焦回归再次通过。
+
 `pnpm agents:check` 返回 0，但脚本只扫描根目录 `src/`，本仓库源码实际位于
 `packages/*/src/`，因此其输出为“src/ 目录不存在，跳过检查”，不计作有效证据。
 架构依赖已按 `AGENTS.md` 对全部变更文件执行人工检查，未发现 Core 反向依赖
