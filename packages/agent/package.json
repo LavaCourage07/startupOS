@@ -1,27 +1,55 @@
 {
-  "name": "@mariozechner/agent",
-  "version": "0.1.0",
+  "name": "@originos/pi-agent-adapter",
+  "version": "0.80.10",
   "private": true,
   "main": "./index.js",
   "types": "./index.d.ts",
+  "scripts": {
+    "build": "node build-runtime.js",
+    "prepare": "node build-runtime.js",
+    "test": "node scripts/verify-runtime.js"
+  },
   "exports": {
     ".": {
       "types": "./index.d.ts",
       "require": "./index.js",
       "default": "./index.js"
     },
-    "./dist/index.js": {
-      "types": "./index.d.ts",
-      "require": "./dist/index.js",
-      "default": "./dist/index.js"
+    "./ai": {
+      "types": "./ai.d.ts",
+      "require": "./ai.js",
+      "default": "./ai.js"
     },
-    "./dist/types.js": {
-      "types": "./dist/types.d.ts",
-      "require": "./dist/types.js",
-      "default": "./dist/types.js"
+    "./coding-agent": {
+      "types": "./coding-agent.d.ts",
+      "require": "./coding-agent.js",
+      "default": "./coding-agent.js"
+    },
+    "./goal": {
+      "types": "./goal.d.ts",
+      "require": "./goal.js",
+      "default": "./goal.js"
     }
   },
   "dependencies": {
-    "@mariozechner/pi-agent-core": "0.55.3"
+    "@anthropic-ai/sdk": "0.91.1",
+    "@aws-sdk/client-bedrock-runtime": "3.1048.0",
+    "@earendil-works/pi-agent-core": "0.80.10",
+    "@earendil-works/pi-ai": "0.80.10",
+    "@earendil-works/pi-coding-agent": "0.80.10",
+    "@earendil-works/pi-tui": "0.80.10",
+    "@google/genai": "1.52.0",
+    "@mistralai/mistralai": "2.2.6",
+    "@opentelemetry/api": "1.9.0",
+    "@smithy/node-http-handler": "4.7.3",
+    "http-proxy-agent": "7.0.2",
+    "https-proxy-agent": "7.0.6",
+    "jiti": "2.7.0",
+    "openai": "6.26.0",
+    "pi-agent-goal": "2026.7.18",
+    "typebox": "1.1.38"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
   }
 }

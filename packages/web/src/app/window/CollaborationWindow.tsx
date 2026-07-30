@@ -6,7 +6,7 @@ import { MarkdownContent, AskUserQuestionComponent, parseAskUserQuestion, remove
 import { ChatInputBar } from '@/components/ui/chat-input-bar';
 import { useFileUpload } from '@/lib/hooks/use-file-upload';
 import { useSettingsStore } from '@/store/settingsStore';
-import { normalizeRuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent';
+import { normalizeRuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent/client';
 
 interface CollaborationWindowProps {
   projectId: string;

@@ -11,9 +11,14 @@ import { agentSessionService } from '@originos/core/lib/features/agent';
 import { agentManager } from '@originos/core/lib/integrations/pi-agent/agent-manager';
 import { sanitizeAgentDisplayContent } from '@originos/core/lib/integrations/pi-agent/display-content';
 import { getVisibleStreamDelta, reconcileFinalStreamContent } from '@originos/core/lib/integrations/pi-agent/stream-dedupe';
+import {
+  assertSessionMessageOwnership,
+  toRestoreAgentSessionError,
+  type RestoreAgentEntryType,
+} from '@originos/core/lib/integrations/pi-agent/session-restore';
 import type { ApiResponse } from '@originos/core/types';
 import type { AgentMessage } from '@originos/core/types';
-import type { AgentEvent } from '@mariozechner/agent';
+import type { AgentEvent } from '@originos/pi-agent-adapter';
 
 /**
  * Response message format for streaming
@@ -83,6 +88,31 @@ export async function POST(
       );
     }
 
+    try {
+      assertSessionMessageOwnership(session, {
+        sessionId,
+        projectId,
+        entryType: body.entryType as RestoreAgentEntryType | undefined,
+        entryId: body.entryId,
+      });
+    } catch (error) {
+      const ownershipError = toRestoreAgentSessionError(error);
+      return NextResponse.json<ApiResponse<unknown>>(
+        {
+          success: false,
+          error: {
+            code: ownershipError.code,
+            message: ownershipError.message,
+          },
+          timestamp: new Date().toISOString(),
+        },
+        { status: ownershipError.code === 'OWNERSHIP_MISMATCH' ? 403 : 422 },
+      );
+    }
+
+    // Runtime 必须先恢复持久化历史，再提交当前新消息，避免新消息被重复注入。
+    const agent = await agentManager.getOrRestoreAgentRuntime(session);
+
     // Add user message to session
     session = await agentSessionService.addMessage(sessionId, {
       role: body.role || 'user',
@@ -111,18 +141,6 @@ export async function POST(
     // Check if streaming is requested
     const acceptHeader = _request.headers.get('accept') || '';
     const wantsStreaming = acceptHeader.includes('text/event-stream');
-
-    // Get or create agent for this session, restoring working directory from session context
-    const agent = await agentManager.getOrCreateAgent(
-      sessionId,
-      session.projectContext.projectId,
-      {
-        systemPrompt: session.systemPrompt || undefined,
-        agentType: session.agentType,
-        agentBaseDir: session.projectContext.currentPath, // restore working directory
-        llmConfig: session.llmConfig,
-      }
-    );
 
     if (wantsStreaming) {
       // Return SSE stream

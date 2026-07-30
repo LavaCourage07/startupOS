@@ -1,3 +1,3 @@
 'use strict';
 
-module.exports = require('@mariozechner/pi-agent-core');
+module.exports = require('./dist/index.cjs');

@@ -7,9 +7,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { handleSkillEvolution } from '@originos/core/lib/integrations/pi-agent';
+import { handleSkillEvolution } from '@originos/core/lib/integrations/pi-agent/server';
 import type { ApiResponse } from '@originos/core/types';
-import type { EvolutionResult, SkillEvolutionRequest } from '@originos/core/lib/integrations/pi-agent';
+import type { EvolutionResult, SkillEvolutionRequest } from '@originos/core/lib/integrations/pi-agent/server';
 
 export async function POST(request: NextRequest) {
   try {

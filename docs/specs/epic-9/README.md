@@ -3,7 +3,7 @@
 **Epic 编号:** 9
 **Epic 名称:** Multi-Agent 协作运行时 (Multi-Agent Collaboration Runtime)
 **优先级:** 🔴 Critical
-**状态:** ✅ Complete
+**状态:** 🔄 In Progress（Phase 1/2 已完成，Phase 3 持续实施）
 **创建日期:** 2026-05-12
 **设计文档:** [multi-agent-runtime.md](../../design/multi-agent-runtime.md) | [process-isolation.md](../../design/process-isolation.md)
 
@@ -103,15 +103,24 @@
 | **9.23** | 共识投票机制（BFT/Raft/Quorum） | Low | Phase 3 | ⬜ Pending |
 | **9.24** | PID 孤儿会话回收 | Medium | Phase 3 | ✅ Complete |
 | **9.25** | DAG 执行链路修复（路径/上下文/工具注入） | Critical | Phase 3 | ✅ Complete |
-| **9.27** | 架构治理与 HITL 链路修复（Phase 3 门禁）| Critical | Phase 3 | ⬜ Pending |
+| **9.27** | 架构治理与 HITL 链路修复（Phase 3 门禁）| Critical | Phase 3 | ✅ Complete |
 | **9.28** | Swarm/Supervisor 模式生产接线 | High | Phase 3 | ✅ Complete |
-| **9.29** | Supervisor 模式协调能力修复（HITL/任务化转写/Artifact 流转） | Critical | Phase 3 | ⬜ Pending |
-| **9.30** | Supervisor Agent 化（Supervisor as Real Agent，PR-A） | Critical | Phase 3 | ⬜ Pending |
+| **9.29** | Supervisor 模式协调能力修复（HITL/任务化转写/Artifact 流转） | Critical | Phase 3 | 📋 Planning |
+| **9.30** | Supervisor Agent 化（Supervisor as Real Agent，PR-A） | Critical | Phase 3 | 📋 Planning |
 | **9.31** | 单前台 Agent 契约（Worker 工具白名单收紧 + 直连拒绝） | Critical | Phase 3 | 📋 Planning |
 | **9.32** | Worker 结构化阻塞契约（`report_block` + `WorkerBlock` 类型） | Critical | Phase 3 | 📋 Planning |
 | **9.33** | Supervisor HITL 决策器（四路径 + 强制 mergedContext） | Critical | Phase 3 | 📋 Planning |
 | **9.34** | 用户回复路由收敛到 Supervisor | Critical | Phase 3 | 📋 Planning |
 | **9.35** | Workflow 模式 Lightweight Supervisor 兜底 | High | Phase 3 | 📋 Planning |
+| **9.36** | Supervisor/Worker 模式架构改进 | High | Phase 3 | 📋 Planning |
+| **9.37** | HITL 直连与协作链路扁平化 | High | Phase 3 | 🔄 In Progress |
+| **9.38** | 协作运行时目录收敛 | High | Phase 3 | 📋 Planning |
+| **9.39** | collaboration-runtime-bridge 残留清理 | High | Phase 3 | 📋 Planning |
+| **9.40** | 协作 UI：多 HITL 并发与消息流对齐 | Medium | Phase 3 | 📋 Planning |
+| **9.41** | Agent/RoleAgent 任务入口与 pi-tasks 直接执行 | High | Phase 3 | 📋 Planning |
+| **9.42** | 多 Agent 任务与解决方案执行契约对齐 | High | Phase 3 | 📋 Planning |
+
+> **当前进度（2026-07-28）：** Epic 9 主运行时已具备 Workflow、Supervisor、黑板、协议和基础 UI，但 Phase 3 的 HITL 收敛、链路治理、任务入口、`pi-tasks` 任务契约对齐及高级协作能力尚未完成，因此 Epic 保持 In Progress，不能按整体 Complete 归档。
 
 > **2026-05-22 重大更新**：基于 [PRD-collaboration-product.md](./PRD-collaboration-product.md) 的"单前台 Agent"产品强约束，新增 9.31–9.35 五个 Story，把 Supervisor 从"协调器（建议）"升级为协作会话期间用户唯一的对话伙伴。9.30 PR-B 范围转移到 9.31–9.34；9.29 SUP-01 验收同步调整。
 
@@ -315,7 +324,7 @@ src/lib/integrations/pi-agent/agent-worker.ts                  # 子进程入口
 
 **迁移约束（来自设计文档 §2.1.1）：**
 
-- `PersistentAgent`, `OriginOSAgent`, `@mariozechner/agent`, `@mariozechner/pi-ai` → Agent 子进程
+- `PersistentAgent`, `OriginOSAgent`, `@originos/pi-agent-adapter` → Agent 子进程
 - `CognitiveManager`, `PracticeLogger`, `KnowledgeProvider`, `PatternProvider` → Agent 子进程
 - 文件加载 + prompt 构建 → Agent 子进程
 - prompt 构建逻辑和 agent loop **完全不变**，仅执行位置改变
@@ -605,7 +614,9 @@ CapabilityMatcher — 根据任务需求（domain, skill, capability, 当前负�
 
 ---
 
-### Phase 3: 生产加固（Phase 3）✅ Complete（Docker/PostgreSQL 需外部基础设施）
+### Phase 3: 生产加固与持续演进（Phase 3）🔄 In Progress
+
+基础可观测性、资源配额和部分运行时加固已经完成；HITL 收敛、任务入口、链路治理、任务证据契约及高级协作能力仍按 Story 9.29-9.42 持续实施。Docker/PostgreSQL 项受外部基础设施和当前架构规约约束，不计为当前完成条件。
 
 #### Story 9.18: 生产加固
 
@@ -995,7 +1006,7 @@ src/app/api/collaboration/sessions/[id]/execute/route.ts         # MODIFY: 接�
 |------|------|
 | **LLM 调用位置** | Agent 子进程中执行，不在 Next.js 或 Runtime 中 |
 | **Prompt 构建** | 子进程 bootstrap 阶段自行读取 Agent.md 等文件构建 |
-| **Agent loop** | `@mariozechner/agent` 在子进程中原样运行 |
+| **Agent loop** | `@originos/pi-agent-adapter` 封装的 Pi Runtime 在子进程中运行 |
 | **CognitiveManager** | 在子进程中运行，hooks 不变 |
 | **Session 持久化** | 子进程无法直连 → 通过 stdio 发事件 → Runtime 中转 |
 

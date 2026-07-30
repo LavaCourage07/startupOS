@@ -15,7 +15,7 @@ import { readFile, mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { getDataRoot } from '../../../lib/paths';
 
-import { streamSimple as _streamSimpleRaw } from "@mariozechner/pi-ai";
+import { streamSimple as _streamSimpleRaw } from "@originos/pi-agent-adapter/ai";
 
 import {
   parseTopology,

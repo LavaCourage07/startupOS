@@ -1,12 +1,12 @@
 /**
  * Pi Agent 服务端配置
- * 仅在服务端使用，包含 @mariozechner/pi-ai 的模型创建功能
+ * 仅在服务端使用，包含 @originos/pi-agent-adapter/ai 的模型创建功能
  *
  * 注意：此模块只能在服务端使用（API Routes, Server Components 等）
  */
 
-import type { Model } from "@mariozechner/pi-ai";
-import { getModel } from "@mariozechner/pi-ai";
+import type { Model } from "@originos/pi-agent-adapter/ai";
+import { getModel } from "@originos/pi-agent-adapter/ai";
 import {
 	getAnthropicApiKey,
 	getAnthropicApiKeySource,
@@ -55,7 +55,14 @@ export function createAnthropicModel(
 	const baseUrl = options?.baseUrl || getAnthropicBaseUrl();
 	const apiKey = options?.apiKey || getAnthropicApiKey();
 	const credentialSource = options?.credentialSource || (options?.apiKey ? "runtime.options.apiKey" : getAnthropicApiKeySource());
-	const baseModel = getModel("anthropic", actualModelId as any) as Model<"anthropic-messages">;
+	let baseModel: Model<"anthropic-messages"> | undefined;
+	try {
+		baseModel = getModel("anthropic", actualModelId as any) as Model<"anthropic-messages">;
+	} catch {
+		// Upstream 0.80 throws for registry misses. OriginOS supports custom model IDs,
+		// so a miss must continue through the existing custom-model fallback.
+		baseModel = undefined;
+	}
 
 	// 如果模型不在注册表中（自定义模型名如 GLM），创建自定义模型配置
 	if (!baseModel) {
@@ -172,7 +179,6 @@ export function createOpenAICompatibleModel(
 			requiresToolResultName: false,
 			requiresAssistantAfterToolResult: false,
 			requiresThinkingAsText: false,
-			requiresMistralToolIds: false,
 			thinkingFormat: "openai",
 		},
 	};

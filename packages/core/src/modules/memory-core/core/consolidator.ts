@@ -120,8 +120,8 @@ Respond in the same language as the conversation (Chinese if conversation is in 
 
     try {
       const factory = this.modelFactory ?? (await import('../../../lib/integrations/pi-agent/server-config'));
-      const model = factory.createAutoModel() as unknown as import('@mariozechner/pi-ai').Model<any>;
-      const { complete } = await import('@mariozechner/pi-ai');
+      const model = factory.createAutoModel() as unknown as import('@originos/pi-agent-adapter/ai').Model<any>;
+      const { complete } = await import('@originos/pi-agent-adapter/ai');
       const result = await complete(model, {
         messages: [{ role: 'user', content: prompt, timestamp: Date.now() }],
       });

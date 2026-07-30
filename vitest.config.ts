@@ -5,24 +5,31 @@ import path from "path";
 export default defineConfig({
 	plugins: [react()],
 	resolve: {
-		alias: {
-			"@": path.resolve(__dirname, "./src"),
-			"@/components": path.resolve(__dirname, "./src/components"),
-			"@/lib": path.resolve(__dirname, "./src/lib"),
-			"@/types": path.resolve(__dirname, "./src/types"),
-			"@/modules": path.resolve(__dirname, "./src/modules"),
+		alias: [
 			// Mock workspace packages for testing
-			"@mariozechner/agent": path.resolve(__dirname, "./src/__tests__/mocks/@mariozechner/agent.ts"),
-			"@mariozechner/pi-ai": path.resolve(__dirname, "./src/__tests__/mocks/@mariozechner/pi-ai.ts"),
+			{
+				find: /^@originos\/pi-agent-adapter\/ai$/,
+				replacement: path.resolve(__dirname, "./tests/mocks/@originos/pi-agent-adapter/ai.ts"),
+			},
+			{
+				find: /^@originos\/pi-agent-adapter$/,
+				replacement: path.resolve(__dirname, "./tests/mocks/@originos/pi-agent-adapter/index.ts"),
+			},
 			// Mock optional native deps
-			"onnxruntime-node": path.resolve(__dirname, "./src/__tests__/mocks/onnxruntime-node.ts"),
-		},
+			{
+				find: /^onnxruntime-node$/,
+				replacement: path.resolve(__dirname, "./tests/mocks/onnxruntime-node.ts"),
+			},
+			{
+				find: /^@\//,
+				replacement: `${path.resolve(__dirname, "./packages/core/src")}/`,
+			},
+		],
 	},
 	// Mock Next.js modules globally
 	test: {
 		globals: true,
 		environment: "jsdom",
-		setupFiles: ["./src/__tests__/setup.ts"],
 		testTimeout: 30000, // 30 seconds for API calls
 		include: ["src/**/*.{test,spec}.{ts,tsx}", "packages/**/src/**/*.{test,spec}.{ts,tsx}"],
 		exclude: [
@@ -74,4 +81,3 @@ export default defineConfig({
 		__NEXT_PUBLIC_API_URL: '"http://localhost:3000/api"',
 	},
 });
-

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentMessage } from '@mariozechner/agent';
+import type { AgentMessage } from '@originos/pi-agent-adapter';
 import { createWorkingSummaryMessage } from '../runtime-working-summary';
 import { compressRecentTrace } from '../recent-trace-compression';
 import { buildAgentSystemPrompt } from '@/lib/features/services/launcher/base';

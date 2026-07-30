@@ -52,7 +52,7 @@ import { HOME_APPS } from '@/config/homeApps';
 import { getIpcRenderer, isElectron } from '@originos/core/lib/integrations/electron/env';
 import { IPC_CHANNELS } from '@originos/core/lib/integrations/electron/ipc-protocol';
 import { subscribeToNativeWindowClosed } from '@originos/core/lib/integrations/electron/window';
-import { normalizeRuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent';
+import { normalizeRuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent/client';
 import { useProjects } from '@/lib/hooks/use-projects';
 import { cn } from '@originos/core/lib/utils';
 import { MultiAgentLauncher } from '@originos/core/modules/collaboration-runtime/ui/MultiAgentLauncher';

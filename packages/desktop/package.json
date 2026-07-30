@@ -1,13 +1,13 @@
 {
   "name": "@originos/desktop",
-  "version": "0.1.45",
+  "version": "0.1.46",
   "private": true,
   "main": "dist-electron/desktop/src/main/main.js",
   "scripts": {
     "test": "vitest run",
-    "dev": "concurrently \"pnpm --filter @originos/web exec next dev -p 3100\" \"tsc -p tsconfig.json --watch\" \"wait-on tcp:3100 ../../dist-electron/desktop/src/main/main.js && electron ../../dist-electron/desktop/src/main/main.js --renderer-url=http://localhost:3100\"",
+    "dev": "pnpm --filter @originos/pi-agent-adapter build && concurrently \"pnpm --filter @originos/web exec next dev -p 3100\" \"tsc -p tsconfig.json --watch\" \"wait-on tcp:3100 ../../dist-electron/desktop/src/main/main.js && electron ../../dist-electron/desktop/src/main/main.js --renderer-url=http://localhost:3100\"",
     "build": "tsc -p tsconfig.json",
-    "build:app": "rm -rf ../web/.next ../../dist-electron && pnpm --filter @originos/web build && node scripts/prepare-web-standalone.js && node scripts/prepare-pi-ai-runtime-deps.js && pnpm build && node ../../scripts/check-root-build-artifacts.js && node scripts/verify-agent-worker-runtime.js && rm -rf dist-electron && mkdir -p dist-electron && cp -R ../../dist-electron/. dist-electron/ && node ../../scripts/check-root-build-artifacts.js",
+    "build:app": "rm -rf ../web/.next ../../dist-electron && pnpm --filter @originos/pi-agent-adapter build && pnpm --filter @originos/web build && node scripts/prepare-web-standalone.js && node scripts/prepare-pi-ai-runtime-deps.js && pnpm build && node ../../scripts/check-root-build-artifacts.js && node scripts/verify-agent-worker-runtime.js && rm -rf dist-electron && mkdir -p dist-electron && cp -R ../../dist-electron/. dist-electron/ && node ../../scripts/check-root-build-artifacts.js",
     "pack": "pnpm build:app && electron-builder --config electron-builder.yml --dir",
     "dist": "pnpm build:app && electron-builder --config electron-builder.yml --publish never",
     "dist:win:local": "node scripts/build-windows-local.js",
@@ -34,9 +34,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "^0.0.51",
-    "@mariozechner/agent": "workspace:*",
-    "@mariozechner/pi-agent-core": "0.55.3",
-    "@mariozechner/pi-ai": "0.55.3",
+    "@originos/pi-agent-adapter": "workspace:*",
     "@sinclair/typebox": "^0.34.0",
     "archiver": "^8.0.0",
     "dotenv": "^16.6.1",

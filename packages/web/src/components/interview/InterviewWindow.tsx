@@ -5,8 +5,10 @@ import { X, FolderOpen, LayoutDashboard } from 'lucide-react';
 import { ResizableLayout } from './ResizableLayout';
 import { CUIDialogPanel } from './CUIDialogPanel';
 import { ArtifactDisplayPanel } from './ArtifactDisplayPanel';
-import { usePersistentAgent } from '@originos/core/lib/integrations/pi-agent';
-import { normalizeRuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent';
+import {
+  normalizeRuntimeLLMConfig,
+  usePersistentAgent,
+} from '@originos/core/lib/integrations/pi-agent/client';
 import { useSettingsStore } from '@/store/settingsStore';
 import { AppWindowManager } from '@/services/AppWindowManager';
 import { ProjectWorkspace, WorkspaceWindow } from '@/components/os/workspace';

@@ -16,7 +16,7 @@ import { detectCorrections } from './cognitive/pattern/correction-detector';
 import { SleepComputeScheduler } from './cognitive/sleep-compute';
 import { createRuntimeModel } from './server-config';
 import type { RuntimeLLMConfig } from './llm-config';
-import type { AgentTool } from '@mariozechner/agent';
+import type { AgentTool } from '@originos/pi-agent-adapter';
 import fs from 'fs/promises';
 import path from 'path';
 

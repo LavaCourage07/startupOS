@@ -90,7 +90,8 @@ function parseDocxTables(documentXml: string): DocumentTable[] {
   const tables: DocumentTable[] = [];
   const tableMatches = documentXml.match(/<w:tbl[\s\S]*?<\/w:tbl>/g) ?? [];
 
-  tableMatches.forEach((tableXml, tableIndex) => {
+  for (let tableIndex = 0; tableIndex < tableMatches.length; tableIndex += 1) {
+    const tableXml = tableMatches[tableIndex] ?? '';
     const rows: string[][] = [];
     const rowMatches = tableXml.match(/<w:tr[\s\S]*?<\/w:tr>/g) ?? [];
     for (const rowXml of rowMatches) {
@@ -106,7 +107,7 @@ function parseDocxTables(documentXml: string): DocumentTable[] {
       rows.push(cells);
     }
     tables.push({ index: tableIndex, rows });
-  });
+  }
 
   return tables;
 }

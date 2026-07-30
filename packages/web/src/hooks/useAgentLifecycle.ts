@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react';
 import { AgentStatus } from '@originos/core/types';
 import { usePiAgentStore } from '@originos/core/lib/integrations/pi-agent/store';
-import { normalizeRuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent';
+import { normalizeRuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent/client';
 import { useSettingsStore } from '@/store/settingsStore';
 
 interface ProjectContext {

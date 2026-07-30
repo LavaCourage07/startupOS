@@ -1,7 +1,7 @@
 # OriginOS 架构规约 (AGENTS.md)
 
-**版本：** 2.3.0
-**日期：** 2026-07-20
+**版本：** 2.5.2
+**日期：** 2026-07-29
 **状态：** 强制执行
 
 ---
@@ -142,7 +142,7 @@ originos/
 │   │   ├── data/                 # 桌面开发态运行数据
 │   │   └── dist-electron/        # 编译产物（禁止作为源码修改入口）
 │   │
-│   ├── agent/                    # @mariozechner/agent workspace 包装/类型
+│   ├── agent/                    # @originos/pi-agent-adapter 运行时适配边界
 │   └── service/                  # 服务包（按 package 边界维护）
 │
 ├── docs/
@@ -830,6 +830,115 @@ docs/specs/
 - Story 状态变更必须同时更新 Epic README 的 Story 清单；完成 Story 时必须把测试结果写入 `testing.md`。
 - 架构围栏、数据路径、依赖层级或公共 API 发生变化时，必须同步更新 `AGENTS.md` 和 `docs/changes/`。
 
+### Story、OpenSpec Proposal 与 Worktree 隔离（强制）
+
+**核心原则：** Story 是产品需求与验收边界，OpenSpec Proposal 是代码实施与合并边界。Story 不直接对应 Git 分支；Story 中每个可独立实施、测试和验收的 Task 必须一对一创建 OpenSpec Proposal，Git 集成分支必须一对一对应 Proposal。
+
+#### 术语与映射
+
+```text
+Epic
+  -> Story（需求、交互、架构、验收）
+       -> Executable Task（可独立实施和验收的变更单元）
+            -> OpenSpec Proposal（1:1）
+                 -> proposal.md / design.md / tasks.md / spec deltas
+                 -> Proposal integration branch（1:1）
+                 -> Subagent work packages（1:N）
+                      -> Task branch + worktree（1:1）
+```
+
+- “每个 Task 一个 Proposal”中的 Task，指 Story 中可独立交付的实施单元。
+- OpenSpec `tasks.md` 中的 checklist item 是 Proposal 内部工作包，不递归创建新的 Proposal。
+- 一个 Story 可以对应一个或多个 Proposal；一个 Proposal 只能归属于一个 Story Task。
+- Proposal 必须记录 `epic-id`、`story-id` 和 `task-id`，保证需求、实施和变更可追溯。
+
+#### OpenSpec Proposal 门禁
+
+- 实施任何 Story Task 前，必须完成 OpenSpec 初始化，并遵循 `openspec/config.yaml`、当前 schema instructions/templates 和仓库生成的 OpenSpec agent skills。
+- OpenSpec 文档的标题、说明、需求、场景、设计、任务和验收正文必须使用中文。仅保留 schema/CLI 要求的固定关键字（如 `ADDED Requirements`、`Requirement`、`Scenario`、`WHEN`、`THEN`、`SHALL`、`MUST`）、代码标识、类型名、路径、命令、包名、协议名和无法准确翻译的专有名词。
+- 不得因为 OpenSpec CLI 返回英文模板而直接生成英文正文；生成后必须按上一条完成中文化，再执行 strict validation。
+- OpenSpec 1.4.x 的最小项目结构以 `openspec/config.yaml` 为入口；不得强制假设旧版 `openspec/AGENTS.md` 或 `openspec/project.md` 必然存在。
+- 开始 Proposal 前必须运行 `openspec list --json`、`openspec list --specs` 和 `openspec status --change {change-id} --json`（创建前可省略 status），并使用 CLI 返回的 `planningHome`、`changeRoot`、`artifactPaths` 和 `actionContext`，不得硬编码旧版目录推断。
+- 必须先检查现有 specs 和 active changes，避免重复 Proposal 或冲突能力定义。
+- Proposal change-id 必须唯一、kebab-case、动词开头，例如 `add-agent-task-runtime`。
+- 每个 Proposal 至少包含：
+  - `openspec/changes/{change-id}/proposal.md`
+  - `openspec/changes/{change-id}/tasks.md`
+  - 涉及跨模块、公共 API、数据结构、性能、安全或迁移时必须包含 `design.md`
+  - 对受影响 capability 的 spec delta 及规范化 Scenario
+- Proposal 必须运行 `openspec validate {change-id} --strict` 并通过。
+- Proposal 未完成审查和批准前，禁止创建实施 worktree、修改应用源码或启动 subagent 实施。
+- Story 文档与 Proposal 冲突时，必须先修订 Story 或 Proposal，使两者一致后再实施。
+- OpenSpec 生成的通用 `openspec-apply-change` skill 在本项目只作为 Proposal 选择、状态读取和任务编排入口；其中“直接实现 tasks”的通用指令不得覆盖本节规则，应用源码仍必须分派给独立 subagent Task worktree。
+
+#### Proposal 分支与 Worktree
+
+- `dev` 是 Proposal 的最终集成分支。
+- Proposal 集成分支从最新 `dev` 创建，命名为 `proposal/{change-id}`。
+- Proposal 主 worktree 使用仓库同级目录：`../startupos-proposal-{change-id}`。
+- Proposal 集成分支只承载该 Proposal 的规格、实现、测试和变更记录，不混入其他 Proposal。
+- 禁止直接在 `dev` 或 `main` 上实施 Proposal。
+
+```bash
+# 1. 同步 dev
+git switch dev
+git pull --ff-only
+
+# 2. 创建 Proposal 集成分支和主 worktree
+git worktree add ../startupos-proposal-add-agent-task-runtime \
+  -b proposal/add-agent-task-runtime dev
+
+# 3. 在主 worktree 编写、校验并审批 Proposal
+cd ../startupos-proposal-add-agent-task-runtime
+openspec validate add-agent-task-runtime --strict
+```
+
+#### Subagent 并行实施
+
+Proposal 获批后，应依据 `tasks.md` 的依赖关系拆分可并行工作包，并使用 subagents 在多个独立 worktree 中实施：
+
+- Proposal 至少必须创建一个 subagent Task 分支/worktree；应用源码不得直接在 Proposal 主 worktree 中实施。
+- Proposal 主 worktree 只用于 Proposal 文档、任务编排、Task 分支集成、冲突处理、完整回归和合并准备。
+- 每个 subagent 必须获得明确、互不重叠的写入范围和验收命令。
+- 每个 subagent 使用独立 Task 分支，命名为 `proposal-task/{change-id}-{task-id}-{short-slug}`。
+- 每个 Task 分支使用独立 worktree，建议命名为 `../startupos-{change-id}-task-{task-id}`。
+- 存在两个或以上无依赖且写入范围不重叠的工作包时，必须并行启动多个 subagents/worktrees。
+- 有依赖关系或写入范围重叠的工作包不得并行；必须按 `tasks.md` 顺序实施。
+- Subagent 不得直接合并到 `dev`，只能提交到自己的 Task 分支。
+- Subagent 完成后必须返回改动文件、测试结果、未解决问题和 commit。
+
+```bash
+# 在 Proposal 主 worktree 中，为可并行工作包创建独立分支/worktree
+git worktree add ../startupos-add-agent-task-runtime-task-1 \
+  -b proposal-task/add-agent-task-runtime-1-core \
+  proposal/add-agent-task-runtime
+
+git worktree add ../startupos-add-agent-task-runtime-task-2 \
+  -b proposal-task/add-agent-task-runtime-2-ui \
+  proposal/add-agent-task-runtime
+```
+
+#### 合并与完成
+
+1. 每个 subagent Task 分支先完成自身测试和审查。
+2. Task 分支逐个合并回 Proposal 集成分支；冲突必须在 Proposal 主 worktree 解决。
+3. 每次合并后运行受影响测试；全部工作包合并后运行 Proposal 的完整回归测试。
+4. 更新 `tasks.md`，只有真实完成并有 Evidence 的项目才能标记为 `[x]`。
+5. 再次运行 `openspec validate {change-id} --strict`、Story 测试验证 goal 和架构检查。
+6. Proposal 完整验证和审查通过后，才能将 `proposal/{change-id}` 合并到 `dev`。
+7. 合并后清理 Proposal/Task worktree 和已合并分支；部署完成后按 OpenSpec 流程归档 Proposal。
+
+#### 禁止与例外
+
+- 禁止以 Story 分支代替 Proposal 分支。
+- 禁止一个 Proposal 分支承载多个 Story Task。
+- 禁止多个 subagent 共用分支或 worktree。
+- 禁止未审查 Proposal 就修改应用源码。
+- 禁止在 Proposal 主 worktree 直接实施应用源码。
+- 禁止把 subagent Task 分支直接合并到 `dev` 或 `main`。
+- 多个 Proposal 存在共享前置能力时，必须先建立独立前置 Task/Proposal 并合并到 `dev`，后续 Proposal 再从更新后的 `dev` 创建或同步。
+- 紧急修复若无法遵循该流程，必须获得明确批准，并在 `docs/changes/` 记录原因、范围和补偿措施。
+
 ---
 
 ## 🚫 禁止事项清单
@@ -845,6 +954,12 @@ docs/specs/
 6. 使用数据库（MVP 阶段）
 7. 向 `.claude/skills/` 目录写入任何产物（只读定义目录）
 8. 系统内置技能在首页入口场景下将产物写入技能源目录
+9. 使用 Story 分支代替 OpenSpec Proposal 分支实施代码
+10. 在同一分支或 worktree 中混合实施多个 Proposal
+11. 未经批准 Proposal 就修改 Story 对应的应用源码
+12. 多个 subagent 共用分支或 worktree
+13. 将 subagent Task 分支直接合并到 `dev` 或 `main`
+14. 在 Proposal 主 worktree 直接实施应用源码
 
 ### 代码层面
 
@@ -879,6 +994,10 @@ docs/specs/
 - [ ] 若正在新建 Epic/Story，已使用 `docs/templates/story-spec-template/` 完整初始化文档
 - [ ] 若正在实施 Epic/Story，已确认 Story 文档包含功能测试 case；缺失时已先补齐
 - [ ] Story 文档中无模板占位符残留，Epic README 状态与 Story README 一致
+- [ ] 当前 Story Task 已一对一创建 OpenSpec Proposal，并记录 Epic/Story/Task ID
+- [ ] Proposal 已通过 `openspec validate {change-id} --strict`、审查和批准
+- [ ] 已从最新 `dev` 创建 Proposal 集成分支和主 worktree
+- [ ] 当前 worktree 不包含其他 Proposal 的未提交改动
 
 ### 实施过程中必须遵守
 
@@ -886,6 +1005,10 @@ docs/specs/
 - [ ] 每个功能必须有对应测试
 - [ ] Epic/Story 的实现必须对齐 Story 中定义的测试 case
 - [ ] 代码实现偏离 Story 设计时，已同步更新 requirements/architecture/implementation/testing
+- [ ] 当前分支、提交和 PR 只包含一个 Proposal 或其单个工作包的改动
+- [ ] 并行 subagent 具有互不重叠的写入范围和独立 Task 分支/worktree
+- [ ] 应用源码只在 subagent Task worktree 实施，Proposal 主 worktree 仅负责集成
+- [ ] 有依赖或写入冲突的工作包按 `tasks.md` 顺序实施
 - [ ] 每个性能指标必须验证
 - [ ] 每个集成必须通过抽象层
 - [ ] 每个数据文件必须符合格式约束
@@ -900,6 +1023,11 @@ docs/specs/
 - [ ] 无架构规约违反
 - [ ] Story `testing.md` 已记录自动化命令、结果、无法自动化项和剩余风险
 - [ ] Epic README 已同步 Story 状态和实施进度
+- [ ] 所有 subagent Task 分支已审查并合并回 Proposal 集成分支
+- [ ] Proposal 的 `tasks.md` 已按实际完成情况更新
+- [ ] Proposal 完整回归、OpenSpec strict validation 和 Story 测试验证 goal 已通过
+- [ ] Proposal 集成分支已完成审查并合并到 `dev`
+- [ ] Proposal 和 Task worktree 已在合并后清理
 - [ ] 文档已更新
 
 ---
@@ -973,5 +1101,5 @@ docs/specs/
 
 ---
 
-**最后更新：** 2026-07-20（v2.3.0：项目地图升级为 pnpm workspace 结构，并新增 Epic/Story 模板强制约束）
+**最后更新：** 2026-07-29（v2.5.2：要求 OpenSpec 文档除规范关键字、代码标识和专有名词外统一使用中文）
 **下次审查：** 实施完成后

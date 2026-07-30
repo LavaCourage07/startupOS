@@ -4,7 +4,7 @@
  */
 
 import type { TSchema } from "@sinclair/typebox";
-import type { AgentTool } from "@mariozechner/agent";
+import type { AgentTool } from "@originos/pi-agent-adapter";
 import type { ToolRegistration } from "../types";
 
 // ============================================================================

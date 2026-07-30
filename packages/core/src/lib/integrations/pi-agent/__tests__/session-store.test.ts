@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { SessionStore, sessionStore } from "../session-store";
-import type { AgentMessage } from "@mariozechner/agent";
+import type { AgentMessage } from "@originos/pi-agent-adapter";
 import type { ProjectContext } from "../types";
 
 // ============================================================================

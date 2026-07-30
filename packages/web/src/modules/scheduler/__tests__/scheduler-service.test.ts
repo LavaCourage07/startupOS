@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Type } from "@sinclair/typebox";
-import type { AgentToolResult } from "@mariozechner/agent";
+import type { AgentToolResult } from "@originos/pi-agent-adapter";
 import { SchedulerService, computeNextRunAt, DefaultSchedulerActionRunner, ScheduleStore } from "@originos/core/modules/scheduler";
 import type { ScheduledTask, ScheduledTaskRun } from "@originos/core/modules/scheduler";
 import type { ToolRegistration } from "../../../../../core/src/lib/integrations/pi-agent/types";

@@ -8,16 +8,16 @@ import type {
 	AgentMessage,
 	AgentTool,
 	AgentToolResult,
-} from "@mariozechner/agent";
-import type { Model } from "@mariozechner/pi-ai";
+} from "@originos/pi-agent-adapter";
+import type { Model } from "@originos/pi-agent-adapter/ai";
 import type { TSchema, Static } from "@sinclair/typebox";
-import type { AgentToolUpdateCallback } from "@mariozechner/agent";
+import type { AgentToolUpdateCallback } from "@originos/pi-agent-adapter";
 
 // ============================================================================
 // 扩展 pi-agent-core 的消息类型
 // ============================================================================
 
-declare module "@mariozechner/agent" {
+declare module "@originos/pi-agent-adapter" {
 	interface CustomAgentMessages {
 		// OriginOS 系统事件消息
 		system_event: SystemEventMessage;
@@ -252,9 +252,20 @@ export interface ProjectContext {
 	currentPath?: string;
 
 	/**
+	 * 当前 Session 的产物输出目录
+	 */
+	outputDir?: string;
+
+	/**
 	 * 项目名称
 	 */
 	projectName?: string;
+
+	/**
+	 * 当前会话所属入口。新会话必须持久化；旧会话恢复时由已校验的请求补齐。
+	 */
+	entryType?: "skill" | "agent" | "role-agent";
+	entryId?: string;
 
 	/**
 	 * 用户ID

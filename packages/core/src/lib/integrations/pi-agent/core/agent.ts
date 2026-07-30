@@ -9,10 +9,10 @@ import type {
 	AgentTool,
 	StreamFn,
 	ThinkingLevel,
-} from "@mariozechner/agent";
-import { Agent } from "@mariozechner/agent";
-import type { AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Message, Model } from "@mariozechner/pi-ai";
-import * as piAi from "@mariozechner/pi-ai";
+} from "@originos/pi-agent-adapter";
+import { Agent } from "@originos/pi-agent-adapter";
+import type { AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, Message, Model } from "@originos/pi-agent-adapter/ai";
+import * as piAi from "@originos/pi-agent-adapter/ai";
 import type {
 	OriginOSAgentConfig,
 	OriginOSAgentState,
@@ -50,6 +50,11 @@ import {
 	type SemanticCompletionDecision,
 } from "./completion-judge";
 import { getToolEventStatus } from "./tool-event-status";
+import {
+	mapPersistedMessagesForRuntime,
+	toRestorableRuntimeModel,
+	type PersistedRuntimeMessage,
+} from "./runtime-history";
 
 // ============================================================================
 // Event Emitter
@@ -808,7 +813,7 @@ export class OriginOSAgent {
 			stopReason: "stop",
 			completionFailure: true,
 		} as unknown as AgentMessage;
-		this.agent.appendMessage(message);
+		this.agent.state.messages = [...this.agent.state.messages, message];
 
 			const visibleMessages = this.getVisibleMessages();
 			const events = [
@@ -1103,7 +1108,10 @@ export class OriginOSAgent {
 			],
 		};
 
-		this.agent.appendMessage(warningMessage as unknown as AgentMessage);
+		this.agent.state.messages = [
+			...this.agent.state.messages,
+			warningMessage as unknown as AgentMessage,
+		];
 		console.warn(`[LLM LoopGuard] ${result.type} — ${result.toolName} x${result.count}`);
 	}
 
@@ -1145,7 +1153,7 @@ export class OriginOSAgent {
 		const historyBeforeCompression = this.agent.state.messages.length;
 		const compression = compressRecentTrace(this.agent.state.messages as AgentMessage[]);
 		if (compression.compressed) {
-			this.agent.replaceMessages(compression.messages);
+			this.agent.state.messages = compression.messages;
 			logInfo(
 				`[LLM] >>> Compressed message history: ${historyBeforeCompression} → ${compression.messages.length} | preservedTrace=${compression.preservedTraceCount}`
 			);
@@ -1153,7 +1161,10 @@ export class OriginOSAgent {
 
 		const workingSummary = createWorkingSummaryMessage(this.agent.state.messages as AgentMessage[]);
 		if (workingSummary) {
-			this.agent.appendMessage(workingSummary);
+			this.agent.state.messages = [
+				...this.agent.state.messages,
+				workingSummary,
+			];
 			logInfo(`[LLM] >>> Working summary injected before prompt`);
 		}
 
@@ -1235,8 +1246,9 @@ export class OriginOSAgent {
 		if (!this.agent) {
 			throw new Error("Agent 未初始化");
 		}
-		this.agent.setSystemPrompt(
-			appendRuntimeEnvironmentPrompt(prompt, this.runtimeEnvironment),
+		this.agent.state.systemPrompt = appendRuntimeEnvironmentPrompt(
+			prompt,
+			this.runtimeEnvironment,
 		);
 	}
 
@@ -1247,7 +1259,7 @@ export class OriginOSAgent {
 		if (!this.agent) {
 			throw new Error("Agent 未初始化");
 		}
-		(this.agent as any).setThinkingLevel?.(level);
+		this.agent.state.thinkingLevel = level;
 	}
 
 	/**
@@ -1257,7 +1269,7 @@ export class OriginOSAgent {
 		if (!this.agent) {
 			throw new Error("Agent 未初始化");
 		}
-		this.agent.setModel(model);
+		this.agent.state.model = model;
 	}
 
 	/**
@@ -1267,7 +1279,7 @@ export class OriginOSAgent {
 		if (!this.agent) {
 			throw new Error("Agent 未初始化");
 		}
-		this.agent.setTools(tools);
+		this.agent.state.tools = tools;
 	}
 
 	/**
@@ -1277,7 +1289,7 @@ export class OriginOSAgent {
 		if (!this.agent) {
 			throw new Error("Agent 未初始化");
 		}
-		this.agent.setTools([...this.agent.state.tools, tool]);
+		this.agent.state.tools = [...this.agent.state.tools, tool];
 	}
 
 	/**
@@ -1287,8 +1299,8 @@ export class OriginOSAgent {
 		if (!this.agent) {
 			throw new Error("Agent 未初始化");
 		}
-		this.agent.setTools(
-			this.agent.state.tools.filter((t) => t.name !== toolName)
+		this.agent.state.tools = this.agent.state.tools.filter(
+			(t) => t.name !== toolName,
 		);
 	}
 
@@ -1299,7 +1311,7 @@ export class OriginOSAgent {
 		if (!this.agent) {
 			throw new Error("Agent 未初始化");
 		}
-		this.agent.clearMessages();
+		this.agent.state.messages = [];
 	}
 
 	/**
@@ -1309,7 +1321,22 @@ export class OriginOSAgent {
 		if (!this.agent) {
 			throw new Error("Agent 未初始化");
 		}
-		this.agent.replaceMessages(messages);
+		this.agent.state.messages = messages;
+	}
+
+	/**
+	 * 使用当前 Runtime model 的公开元数据恢复持久化消息。
+	 */
+	replacePersistedMessages(messages: readonly PersistedRuntimeMessage[]): number {
+		if (!this.agent) {
+			throw new Error("Agent 未初始化");
+		}
+		const runtimeMessages = mapPersistedMessagesForRuntime(
+			messages,
+			toRestorableRuntimeModel(this.agent.state.model),
+		);
+		this.agent.state.messages = runtimeMessages;
+		return runtimeMessages.length;
 	}
 
 	/**
@@ -1319,7 +1346,7 @@ export class OriginOSAgent {
 		if (!this.agent) {
 			throw new Error("Agent 未初始化");
 		}
-		this.agent.appendMessage(message);
+		this.agent.state.messages = [...this.agent.state.messages, message];
 	}
 
 	/**

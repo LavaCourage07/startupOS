@@ -5,7 +5,7 @@
  * session flow, handling skill discovery, context injection, and invocation.
  */
 
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@originos/pi-agent-adapter/coding-agent";
 import type {
 	Skill,
 	SkillInvocationContext,

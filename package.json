@@ -1,6 +1,6 @@
 {
   "name": "originos",
-  "version": "0.1.45",
+  "version": "0.1.46",
   "private": true,
   "description": "An AI-native desktop OS prototype with Next.js, Electron, and multi-agent collaboration",
   "author": "Archersado <archersado@hotmail.com>",
@@ -24,7 +24,7 @@
     "pi-agent"
   ],
   "engines": {
-    "node": ">=22.12.0",
+    "node": ">=22.19.0",
     "pnpm": ">=9.0.0"
   },
   "scripts": {
@@ -55,6 +55,7 @@
     "build:check-root-artifacts": "node scripts/check-root-build-artifacts.js",
     "docs:init-story": "node scripts/init-story-spec.js",
     "docs:index": "node scripts/update-docs-index.js",
+    "deps:repair:native": "node scripts/repair-native-dependencies.js",
     "clean": "rm -rf dist-electron dist .tmp",
     "clean:all": "rm -rf dist-electron dist .tmp release packages/desktop/dist-electron packages/web/.next"
   },
@@ -63,8 +64,7 @@
     "@anthropic-ai/sandbox-runtime": "^0.0.51",
     "@dagrejs/dagre": "^3.0.0",
     "@dnd-kit/core": "^6.3.1",
-    "@mariozechner/agent": "workspace:*",
-    "@mariozechner/pi-ai": "0.55.3",
+    "@originos/pi-agent-adapter": "workspace:*",
     "@micro-zoe/micro-app": "^1.0.0-rc.29",
     "@neural-nexus/neural-channel": "^0.1.5",
     "@neural-nexus/view-manager": "^0.1.5",

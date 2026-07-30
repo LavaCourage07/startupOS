@@ -10,13 +10,15 @@ const outputNodeModules = path.join(desktopDir, '.packaging', 'pi-ai-runtime', '
 const rootRequire = createRequire(path.join(repoRoot, 'package.json'));
 
 const roots = [
+  '@anthropic-ai/sdk',
   '@aws-sdk/client-bedrock-runtime',
   '@google/genai',
   '@mistralai/mistralai',
-  'ajv',
-  'ajv-formats',
-  'proxy-agent',
-  'zod-to-json-schema',
+  '@opentelemetry/api',
+  '@smithy/node-http-handler',
+  'http-proxy-agent',
+  'https-proxy-agent',
+  'openai',
 ];
 
 function packageNameParts(packageName) {
@@ -91,7 +93,9 @@ function collect(packageName, fromRequire, seen, ordered) {
   }
 }
 
-const piAiPackageJson = findPackageJson('@mariozechner/pi-ai', rootRequire);
+const adapterPackageJson = findPackageJson('@originos/pi-agent-adapter', rootRequire);
+const adapterRequire = createRequire(adapterPackageJson);
+const piAiPackageJson = findPackageJson('@earendil-works/pi-ai', adapterRequire);
 const piAiRequire = createRequire(piAiPackageJson);
 
 fs.rmSync(outputNodeModules, { recursive: true, force: true });

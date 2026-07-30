@@ -26,7 +26,7 @@ function createModelFactory() {
   };
 }
 
-vi.mock('@mariozechner/pi-ai', () => ({
+vi.mock('@originos/pi-agent-adapter/ai', () => ({
   complete: vi.fn(async () => ({
     content: [{ type: 'text', text: completeResponse }],
   })),

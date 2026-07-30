@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import type { RuntimeLLMConfig } from "@originos/core/lib/integrations/pi-agent";
+import type { RuntimeLLMConfig } from "@originos/core/lib/integrations/pi-agent/server";
 import { persistRuntimeLLMConfig } from "@originos/core/lib/features/user-config";
 
 interface MessageRouteBody {

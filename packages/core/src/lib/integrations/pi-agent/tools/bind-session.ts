@@ -16,7 +16,7 @@
  * AgentManager and PersistentAgent must use it before calling agent.setTools().
  */
 
-import type { AgentTool } from "@mariozechner/agent";
+import type { AgentTool } from "@originos/pi-agent-adapter";
 import { getToolContext, getToolContextManager } from "./context";
 
 export function bindToolsToSession<T extends Pick<AgentTool<any>, "execute">>(

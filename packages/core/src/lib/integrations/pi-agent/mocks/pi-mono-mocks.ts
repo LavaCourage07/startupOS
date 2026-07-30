@@ -3,7 +3,7 @@
  * Used in unit tests to avoid dependency on external packages
  */
 
-vi.mock("@mariozechner/agent", () => ({
+vi.mock("@originos/pi-agent-adapter", () => ({
 	Agent: class MockAgent {
 		constructor(config: unknown) {
 			this.state = {
@@ -66,7 +66,7 @@ vi.mock("@mariozechner/agent", () => ({
 	},
 }));
 
-vi.mock("@mariozechner/pi-ai", () => ({
+vi.mock("@originos/pi-agent-adapter/ai", () => ({
 	getModel: vi.fn((provider: string, id: string) => ({
 		provider,
 		id,
@@ -78,7 +78,7 @@ vi.mock("@mariozechner/pi-ai", () => ({
 	})),
 }));
 
-vi.mock("@mariozechner/pi-ai", () => ({
+vi.mock("@originos/pi-agent-adapter/ai", () => ({
 	getModel: vi.fn((provider: string, id: string) => ({
 		provider,
 		id,

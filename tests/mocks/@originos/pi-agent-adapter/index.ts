@@ -1,5 +1,5 @@
 /**
- * Mock implementation of @mariozechner/agent package
+ * Mock implementation of @originos/pi-agent-adapter package.
  * Created for testing purposes since workspace packages may not be fully built
  */
 
@@ -169,6 +169,7 @@ export interface AgentOptions {
 
 export class MockAgent {
 	private listeners = new Set<(e: AgentEvent) => void>();
+	private streamFn?: AgentOptions["streamFn"];
 	_state: AgentState = {
 		systemPrompt: "",
 		model: { id: "mock-model", provider: "mock", api: "mock", baseUrl: "", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 8000 },
@@ -181,6 +182,7 @@ export class MockAgent {
 	};
 
 	constructor(opts: AgentOptions = {}) {
+		this.streamFn = opts.streamFn;
 		if (opts.initialState) {
 			this._state = { ...this._state, ...opts.initialState };
 		}
@@ -236,8 +238,16 @@ export class MockAgent {
 		this.emit({ type: "agent_start" });
 		this.emit({ type: "turn_start" });
 
-		// Simulate processing
-		await new Promise((resolve) => setTimeout(resolve, 10));
+		if (this.streamFn) {
+			const stream = this.streamFn(
+				this._state.model,
+				{ systemPrompt: this._state.systemPrompt, messages: this._state.messages, tools: this._state.tools },
+				{},
+			);
+			for await (const _event of stream) {
+				// Consuming the stream is sufficient for adapter contract tests.
+			}
+		}
 
 		this._state.isStreaming = false;
 		this.emit({ type: "agent_end", messages: this._state.messages });

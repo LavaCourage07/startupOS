@@ -14,6 +14,13 @@ import { existsSync, readFileSync } from 'fs';
 import { StreamEventBatcher } from './stream-event-batcher';
 import { applyAssistantMessageEnd } from './assistant-stream-state';
 import { processHealthMonitor } from './process-health-monitor';
+import {
+  assertSessionMessageOwnership,
+  restoreSessionAtBoundary,
+  toRestoreAgentSessionError,
+  type RestoreAgentEntryType,
+  type RestoreAgentSessionRequest,
+} from '../../../../core/src/lib/integrations/pi-agent/session-restore';
 
 function extractTextContent(content: unknown): string {
   return extractDisplayContent(content, { allowThinkingFallback: true });
@@ -174,30 +181,32 @@ export class AgentSessionService {
 
     ipcMain.handle(
       IPC_CHANNELS.AGENT_SESSION_GET,
-      async (_event, request: { sessionId: string; projectId?: string }): Promise<IpcResponse<unknown>> => {
+      async (_event, request: RestoreAgentSessionRequest): Promise<IpcResponse<unknown>> => {
         try {
-          if (!request.sessionId) {
+          if (!request.sessionId || !request.projectId || !request.entryType || !request.entryId) {
             return {
               success: false,
-              error: { code: 'INVALID_REQUEST', message: 'sessionId is required' },
+              error: {
+                code: 'RESTORE_FAILED',
+                message: 'sessionId, projectId, entryType, and entryId are required',
+              },
               timestamp: new Date().toISOString(),
             };
           }
-          const session = await agentSessionService.getSession(request.sessionId, request.projectId);
-          if (!session) {
-            return {
-              success: false,
-              error: { code: 'NOT_FOUND', message: 'Session not found' },
-              timestamp: new Date().toISOString(),
-            };
-          }
+          const session = await restoreSessionAtBoundary(request, {
+            getSession: (sessionId, projectId) =>
+              agentSessionService.getSession(sessionId, projectId),
+            hydrateRuntime: async (storedSession) => {
+              await agentManager.restoreAgentRuntime(storedSession);
+            },
+          });
           return {
             success: true,
             data: session,
             timestamp: new Date().toISOString(),
           };
         } catch (error) {
-          return this.toErrorResponse(error, '[AgentSessionService] Get session failed');
+          return this.toRestoreErrorResponse(error, '[AgentSessionService] Get session failed');
         }
       }
     );
@@ -393,6 +402,8 @@ export class AgentSessionService {
         content: string;
         role?: string;
         projectId?: string;
+        entryType?: RestoreAgentEntryType;
+        entryId?: string;
       }): Promise<IpcResponse<unknown>> => {
         try {
           if (!request.sessionId || !request.content) {
@@ -412,6 +423,9 @@ export class AgentSessionService {
             };
           }
 
+          assertSessionMessageOwnership(session, request);
+          const agent = await agentManager.getOrRestoreAgentRuntime(session);
+
           const updatedSession = await agentSessionService.addMessage(request.sessionId, {
             role: (request.role || 'user') as 'user' | 'assistant' | 'system' | 'tool' | 'toolResult',
             content: request.content,
@@ -426,18 +440,6 @@ export class AgentSessionService {
           }
 
           const userMessage = updatedSession.messages[updatedSession.messages.length - 1];
-
-          const agent = await agentManager.getOrCreateAgent(
-            request.sessionId,
-            session.projectContext.projectId,
-            {
-              systemPrompt: session.systemPrompt || undefined,
-              agentType: session.agentType,
-              agentBaseDir: session.projectContext.currentPath,
-              outputDir: session.projectContext.outputDir,
-              llmConfig: session.llmConfig,
-            }
-          );
 
           let assistantContent = '';
           let hasError = false;
@@ -545,6 +547,13 @@ export class AgentSessionService {
             timestamp: new Date().toISOString(),
           };
         } catch (error) {
+          const restoreError = toRestoreAgentSessionError(error);
+          if (restoreError.code === 'OWNERSHIP_MISMATCH' || restoreError.code === 'CORRUPT_SESSION') {
+            return this.toRestoreErrorResponse(
+              restoreError,
+              '[AgentSessionService] Message ownership failed',
+            );
+          }
           return this.toErrorResponse(error, '[AgentSessionService] Send message failed');
         }
       }
@@ -559,6 +568,8 @@ export class AgentSessionService {
         content: string;
         role?: string;
         projectId?: string;
+        entryType?: RestoreAgentEntryType;
+        entryId?: string;
         streamId?: string;
       }): Promise<IpcResponse<unknown>> => {
         console.log('[IPC] AGENT_SESSION_MESSAGE_STREAM', {
@@ -585,22 +596,13 @@ export class AgentSessionService {
             };
           }
 
+          assertSessionMessageOwnership(session, request);
+          const agent = await agentManager.getOrRestoreAgentRuntime(session);
+
           await agentSessionService.addMessage(request.sessionId, {
             role: (request.role || 'user') as 'user' | 'assistant' | 'system' | 'tool' | 'toolResult',
             content: request.content,
           }, request.projectId);
-
-          const agent = await agentManager.getOrCreateAgent(
-            request.sessionId,
-            session.projectContext.projectId,
-            {
-              systemPrompt: session.systemPrompt || undefined,
-              agentType: session.agentType,
-              agentBaseDir: session.projectContext.currentPath,
-              outputDir: session.projectContext.outputDir,
-              llmConfig: session.llmConfig,
-            }
-          );
 
           const sender = event.sender;
           const sendPayload = (payload: Record<string, unknown>) => {
@@ -801,6 +803,13 @@ export class AgentSessionService {
             timestamp: new Date().toISOString(),
           };
         } catch (error) {
+          const restoreError = toRestoreAgentSessionError(error);
+          if (restoreError.code === 'OWNERSHIP_MISMATCH' || restoreError.code === 'CORRUPT_SESSION') {
+            return this.toRestoreErrorResponse(
+              restoreError,
+              '[AgentSessionService] Stream message ownership failed',
+            );
+          }
           return this.toErrorResponse(error, '[AgentSessionService] Stream message failed');
         }
       }
@@ -924,6 +933,19 @@ export class AgentSessionService {
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Unknown error',
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  private toRestoreErrorResponse<T>(error: unknown, logMessage: string): IpcResponse<T> {
+    console.error(logMessage, error);
+    const restoreError = toRestoreAgentSessionError(error);
+    return {
+      success: false,
+      error: {
+        code: restoreError.code,
+        message: restoreError.message,
       },
       timestamp: new Date().toISOString(),
     };

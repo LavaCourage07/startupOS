@@ -6,7 +6,7 @@
 import { create } from "zustand";
 import type { OriginOSAgent } from "./core/agent";
 import { createOriginOSAgent } from "./core/agent";
-import type { AgentEvent, AgentTool } from "@mariozechner/agent";
+import type { AgentEvent, AgentTool } from "@originos/pi-agent-adapter";
 import type {
 	ProjectContext,
 } from "./types";

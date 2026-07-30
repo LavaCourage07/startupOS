@@ -5,8 +5,8 @@
 
 import type { Static } from "@sinclair/typebox";
 import { Type } from "@sinclair/typebox";
-import type { AgentToolResult } from "@mariozechner/agent";
-import type { AgentToolUpdateCallback } from "@mariozechner/agent";
+import type { AgentToolResult } from "@originos/pi-agent-adapter";
+import type { AgentToolUpdateCallback } from "@originos/pi-agent-adapter";
 import type { ToolRegistration } from "../types";
 
 const AskUserQuestionParamsSchema = Type.Object({
