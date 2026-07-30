@@ -75,6 +75,13 @@ restore schema 校验与 display projection。测试要求低层处理 `<500ms`�
 真实 Electron renderer 的首屏、滚动和往返切换内存未独立采样，作为发布后残余
 观察项保留，不将其记为已完成的性能测量。
 
+## 合并后验证
+
+Proposal 通过 merge commit `9667e19` 合并到 `dev`。合并后的
+`packages/` 源码与通过 90/90 聚焦回归、Core/Web type-check、Desktop build
+和 Web lint 的独立 task tree 完全一致；`dev` 上 OpenSpec strict 和 merge
+diff check 通过。两个用户未跟踪的 `resources/*.png` 文件未加入合并或发布提交。
+
 ## Goal 门禁
 
 尝试创建本 Story 的自动化验证 Goal 时，当前线程已有 paused 的旧性能 Goal，

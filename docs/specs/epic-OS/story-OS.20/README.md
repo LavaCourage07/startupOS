@@ -1,7 +1,7 @@
 # Story OS.20：窗体会话历史切换与上下文恢复
 
 **Epic：** OS - Phase 0 OS 交互基础  
-**状态：** Ready to Merge
+**状态：** Done
 **优先级：** High  
 **Owner：** Agent Runtime / Desktop UX  
 **创建日期：** 2026-07-29  
@@ -51,3 +51,4 @@
 | 2026-07-29 | 创建 Story，记录窗体历史点击失效与上下文恢复缺失问题 |
 | 2026-07-29 | 完成 Proposal 实施与 90 项自动化验证，进入 Windows Electron 人工验收 |
 | 2026-07-30 | 用户完成 Windows `desktop:dev` 人工验收，进入合并发布 |
+| 2026-07-30 | Proposal 合并到 `dev`，完成合并后验证 |

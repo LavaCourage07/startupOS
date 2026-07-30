@@ -88,10 +88,10 @@
   - **完成证据：** OpenSpec strict、Core/Web 类型检查、Desktop build、Web lint 和人工 monorepo architecture guard 已通过；发布前 Web type-check 发现 `session-restore` 缺少显式 package export，已由独立 task commit `36771bb` 修复并重跑 90/90 回归。`pnpm agents:check` 因只扫描根 `src/` 而跳过，不能作为有效架构证据。Story 与 Epic 已更新为 Ready to Merge，最终 Done 状态将在合并后记录。
   - **执行方式：** 串行。
 
-- [ ] 5.3 获得显式 merge approval 后，把 Proposal branch 合并到 `dev`，执行 post-merge smoke 并清理已完成 worktrees/branches。
+- [x] 5.3 获得显式 merge approval 后，把 Proposal branch 合并到 `dev`，执行 post-merge smoke 并清理已完成 worktrees/branches。
   - **依赖：** 5.2 和用户显式合并批准。
   - **写入范围：** Git integration 与 worktree metadata。
   - **负责角色：** Proposal integration owner。
   - **必需测试：** `dev` 上 strict validation 与聚焦 Session restore smoke。
-  - **完成证据：** `dev` merge commit、post-merge 输出和 cleanup record。
+  - **完成证据：** 用户于 2026-07-30 明确批准合并发布；Proposal 通过 merge commit `9667e19` 合并到 `dev`。`dev` 上 OpenSpec strict 与 merge diff check 通过，`packages/` 源码和已通过 90/90 回归、Core/Web type-check、Desktop build、Web lint 的 task tree 完全一致。worktree/branch 清理在发布完成后执行，避免移除仍用于发布审计的证据。
   - **执行方式：** 最终串行任务。
