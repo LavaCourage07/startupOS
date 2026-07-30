@@ -82,7 +82,6 @@ jobs:
             release/OriginOS CE-*-x64.exe
             release/OriginOS CE-*-x64.zip
             release/OriginOS CE-*-x64.exe.blockmap
-            release/OriginOS CE-*-x64.zip.blockmap
             release/latest-win.yml
             release/stable-win.yml
             release/latest.yml
@@ -275,8 +274,6 @@ jobs:
           cp -R .release-input/windows/. release/
           cp "release/OriginOS CE-${VERSION}-x64.zip" \
             "release/OriginOS CE-${VERSION}-windows-x64.zip"
-          cp "release/OriginOS CE-${VERSION}-x64.zip.blockmap" \
-            "release/OriginOS CE-${VERSION}-windows-x64.zip.blockmap"
 
           cp -R .release-input/macos-arm64/. release/
           cp -R .release-input/macos-x64/. release/
@@ -334,7 +331,6 @@ jobs:
           )
           SUPPORTING_ASSETS=(
             "release/OriginOS CE-${VERSION}-x64.exe.blockmap"
-            "release/OriginOS CE-${VERSION}-windows-x64.zip.blockmap"
             "release/OriginOS CE-${VERSION}-arm64.dmg.blockmap"
             "release/OriginOS CE-${VERSION}-x64.dmg.blockmap"
             "release/OriginOS CE-${VERSION}-arm64.zip.blockmap"

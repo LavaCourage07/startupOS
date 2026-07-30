@@ -328,12 +328,6 @@ function buildArtifacts(metadataFiles, metadataOnly, force) {
       pushOptionalArtifact(`${exe}.blockmap`);
     }
 
-    // Windows ZIP（electron-updater 需要）
-    const winZip = `OriginOS CE-${version}-x64.zip`;
-    if (hasReleasePackage(winZip)) {
-      pushArtifact(winZip);
-      pushOptionalArtifact(`${winZip}.blockmap`);
-    }
   }
 
   // 添加元数据文件
@@ -465,14 +459,13 @@ async function main() {
     hasReleasePackage(`OriginOS CE-${version}-arm64.zip`) &&
     hasReleasePackage(`OriginOS CE-${version}-x64.zip`);
   const hasWinExe = hasReleasePackage(`OriginOS CE-${version}-x64.exe`);
-  const hasWinZip = hasReleasePackage(`OriginOS CE-${version}-x64.zip`);
 
   console.log('[publish-qiniu-updates] generating update metadata');
   generateUpdateMetadataFiles();
 
   const metadataFiles = [
     hasMacUpdateMetadata ? path.join(releaseDir, 'latest-mac.yml') : null,
-    hasWinExe || hasWinZip ? path.join(releaseDir, 'latest-win.yml') : null,
+    hasWinExe ? path.join(releaseDir, 'latest-win.yml') : null,
   ].filter(Boolean);
 
   const artifacts = buildArtifacts(metadataFiles, metadataOnly, force);
@@ -502,7 +495,7 @@ async function main() {
     skipLocalPackageVerify,
     platforms: {
       mac: hasMacArm64 || hasMacX64,
-      windows: hasWinExe || hasWinZip,
+      windows: hasWinExe,
     },
   });
 
