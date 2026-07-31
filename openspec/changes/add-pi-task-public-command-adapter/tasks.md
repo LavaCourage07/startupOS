@@ -1,0 +1,33 @@
+## 1. Proposal 基线
+
+- [ ] 1.1 [串行] 校准 A-02 Proposal、Design、Spec 与 A-01 审计结论；依赖：A-01 merge `2a60160`；写入范围：本 Proposal artifacts；角色：Integration Owner；必需测试：`openspec validate add-pi-task-public-command-adapter --strict`；完成证据：strict validation 输出与 Proposal commit。
+- [ ] 1.2 [串行] 建立 runtime、受控 Task extension、Adapter 的精确兼容矩阵与回滚边界；依赖：1.1；写入范围：本 Proposal 与后续 ADR；角色：Agent Runtime Architect；必需测试：版本与 export 静态校验；完成证据：兼容矩阵包含 package、版本、patch hash 和 owner。
+
+## 2. Runtime 公共宿主调用
+
+- [ ] 2.1 [可并行] 在独立 Task branch/worktree 中为 `@earendil-works/pi-coding-agent@0.80.10` 增加最小 `AgentSession.invokeRegisteredTool()` 公共能力；依赖：1.1；写入范围：`patches/`、`pnpm-workspace.yaml` 与 runtime patch contract；角色：Runtime Patch Worker；必需测试：schema、permission、before/after hook、lifecycle event、error、busy、无孤立消息；完成证据：Task commit、patch hash 和测试输出。
+- [ ] 2.2 [串行] 验证 clean install 能稳定应用精确版本 patch，版本或 hash 不匹配时 Task capability fail closed 且普通聊天可加载；依赖：2.1；写入范围：runtime patch verification；角色：Runtime Patch Worker；必需测试：frozen install、CJS/ESM import、普通 Agent smoke；完成证据：安装与 smoke 输出。
+
+## 3. 受控 Task extension
+
+- [ ] 3.1 [可并行] 在独立 Task branch/worktree 中建立 `@originos/pi-tasks` workspace package，以 `pi-tasks@0.2.0` 为上游基线且保留上游 reducer 单一事实源；依赖：1.1；写入范围：`packages/pi-tasks/`；角色：Task Extension Worker；必需测试：公共 export、上游基线 fingerprint、v1 正常 replay；完成证据：Task commit 与差异清单。
+- [ ] 3.2 [串行] 实现 event envelope v2、revision/cursor、requestId/payloadHash 幂等、CAS、mutation receipt、state event v2 和 compaction replay；依赖：3.1；写入范围：`packages/pi-tasks/`；角色：Task Extension Worker；必需测试：成功 mutation、重复请求、冲突请求、revision/cursor 冲突、重启、分支、重复/乱序 entry、compaction；完成证据：测试输出和 schema snapshot。
+- [ ] 3.3 [串行] 从 schema、event 和 reducer 删除 `force_with_reason`，并将旧 v1 forced completion 标记为不可信；依赖：3.2；写入范围：`packages/pi-tasks/`；角色：Task Extension Worker；必需测试：缺 Step、缺 Evidence、失败 Evidence、未解决 Blocker、强制参数拒绝、合法完成、旧记录迁移；完成证据：Evidence Gate contract 全绿。
+
+## 4. OriginOS Adapter
+
+- [ ] 4.1 [可并行] 在独立 Task branch/worktree 中新增 `@originos/pi-agent-adapter/task-runtime` 公共 DTO、compatibility guard、allowlist 和 extension bridge；依赖：1.1；写入范围：`packages/agent/src/task-runtime/`、`packages/agent/package.json`、构建与 export 配置；角色：Adapter Worker；必需测试：类型、公开子路径、错误映射、敏感信息裁剪；完成证据：Task commit 与 package import 输出。
+- [ ] 4.2 [串行] 接入 runtime host invoke 与受控 Task extension receipt/state event，确保原 Session/current branch、busy、epoch 和 timeout 契约；依赖：2.2、3.3、4.1；写入范围：`packages/agent/src/task-runtime/`；角色：Adapter Worker；必需测试：同 Session/branch mutation、stale scope、busy、event timeout、reload epoch、无孤立消息；完成证据：Adapter integration tests。
+
+## 5. 契约与打包回归
+
+- [ ] 5.1 [可并行] 在独立 Task branch/worktree 中更新 A-01 Core contract harness，验证 TC-C1、TC-C2 和 A-02 所有成功、失败、边界 case；依赖：4.2；写入范围：`packages/core/src/lib/integrations/pi-agent/__tests__/pi-task-runtime-boundary/`；角色：Contract Worker；必需测试：Core Vitest contract suite；完成证据：测试 case 对照表和输出。
+- [ ] 5.2 [可并行] 在独立 Task branch/worktree 中更新 Desktop package verification 与 release workflow，验证 public export、patch、受控 package 和 transitive dependency；依赖：4.2；写入范围：`packages/desktop/scripts/`、`.github/workflows/desktop-release.yml`；角色：Packaging Worker；必需测试：Electron development smoke、Windows x64、macOS x64/arm64 package verification；完成证据：本地可执行证据及平台 workflow 证据。
+- [ ] 5.3 [串行] 执行 Adapter、Core、Desktop、lint、OpenSpec strict 和普通聊天回归，确认未启用产品 Task Runtime 时既有行为不变；依赖：5.1、5.2；写入范围：仅允许必要修复所在 Task worktree；角色：Verification Owner；必需测试：全部相关单元、集成、package smoke 与 `pnpm lint`；完成证据：回归矩阵。
+
+## 6. 决策闭环与合并
+
+- [ ] 6.1 [串行] 新建 superseding ADR，记录 host invoke、受控 fork、Evidence Gate、兼容矩阵、上游同步和回滚决策；依赖：5.3；写入范围：`docs/architecture/decisions/` 与 Story 9.41 状态文档；角色：Integration Owner；必需测试：文档链接和架构围栏检查；完成证据：ADR 与 Story traceability。
+- [ ] 6.2 [串行] 创建并执行 Story verification goal，目标为通过 A-02 与 Story 9.41 已定义测试 case；依赖：6.1；写入范围：测试证据与 Proposal tasks；角色：Verification Owner；必需测试：自动化矩阵，无法自动化的平台项需记录人工步骤和剩余风险；完成证据：goal 结论与证据索引。
+- [ ] 6.3 [串行] 按 Task commit 顺序合并到 Proposal integration branch，解决冲突后再次执行完整回归和 OpenSpec strict validation；依赖：6.2；写入范围：Proposal integration branch；角色：Integration Owner；必需测试：5.3 全量重跑；完成证据：integration commit 和测试输出。
+- [ ] 6.4 [串行] 仅在所有门禁通过后合并 Proposal 到 `dev`，归档 OpenSpec change，并按保留策略清理 Task worktree；依赖：6.3；写入范围：`dev`、OpenSpec archive、Git worktree metadata；角色：Integration Owner；必需测试：post-merge smoke 与 worktree 清单；完成证据：merge commit、archive commit 和清理记录。
