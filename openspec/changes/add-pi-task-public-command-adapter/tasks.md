@@ -1,6 +1,6 @@
 ## 1. Proposal 基线
 
-- [ ] 1.1 [串行] 校准 A-02 Proposal、Design、Spec 与 A-01 审计结论；依赖：A-01 merge `2a60160`；写入范围：本 Proposal artifacts；角色：Integration Owner；必需测试：`openspec validate add-pi-task-public-command-adapter --strict`；完成证据：strict validation 输出与 Proposal commit。
+- [x] 1.1 [串行] 校准 A-02 Proposal、Design、Spec 与 A-01 审计结论；依赖：A-01 merge `2a60160`；写入范围：本 Proposal artifacts；角色：Integration Owner；必需测试：`openspec validate add-pi-task-public-command-adapter --strict`；完成证据：strict validation 输出与 Proposal commit `747a10e`。
 - [ ] 1.2 [串行] 建立 runtime、受控 Task extension、Adapter 的精确兼容矩阵与回滚边界；依赖：1.1；写入范围：本 Proposal 与后续 ADR；角色：Agent Runtime Architect；必需测试：版本与 export 静态校验；完成证据：兼容矩阵包含 package、版本、patch hash 和 owner。
 
 ## 2. Runtime 公共宿主调用
