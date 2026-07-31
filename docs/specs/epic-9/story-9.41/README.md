@@ -1,7 +1,7 @@
 # Story 9.41: Agent/RoleAgent 任务入口与 pi-tasks 直接执行
 
 **Epic:** 9 - Multi-Agent 协作运行时
-**状态:** Planning
+**状态:** Blocked（A-01）
 **优先级:** High
 **Owner:** Product / Agent Runtime
 **创建日期:** 2026-07-28
@@ -51,6 +51,10 @@
 - 如果当前 Pi Runtime 不支持宿主安全调用已注册工具，必须选择“上游补充公共命令 API”或“维护受控 fork”，更新 ADR 后才能继续。
 - 禁止导入 `pi-tasks` 私有 reducer/store、解析其 Session 文件或直接修改 custom entry。
 
+**当前结果：** A-01 已于 2026-07-29 判定为 Rejected。stock Runtime
+缺少合格的公共宿主 mutation 边界和稳定 revision，Story 产品实施暂停，等待
+上游公共 API 或独立的受控 adapter/fork Proposal。
+
 ## 简要验收标准
 
 - [ ] Agent 与 RoleAgent 复用同一任务入口和消息区域任务卡片。
@@ -90,3 +94,4 @@
 | 2026-07-28 | 选型调整为 `pi-tasks`，增加证据门控和任务状态契约 |
 | 2026-07-28 | 移除 Workflow 和执行策略选择，多 Agent 接入迁移到 Story 9.42 |
 | 2026-07-29 | 根据审查修订 completion policy、创建协议、公开集成边界、持久化恢复和 evidence gate |
+| 2026-07-29 | A-01 判定 Rejected，Story 状态调整为 Blocked |

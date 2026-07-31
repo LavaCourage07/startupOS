@@ -117,7 +117,7 @@
 | **9.38** | 协作运行时目录收敛 | High | Phase 3 | 📋 Planning |
 | **9.39** | collaboration-runtime-bridge 残留清理 | High | Phase 3 | 📋 Planning |
 | **9.40** | 协作 UI：多 HITL 并发与消息流对齐 | Medium | Phase 3 | 📋 Planning |
-| **9.41** | Agent/RoleAgent 任务入口与 pi-tasks 直接执行 | High | Phase 3 | 📋 Planning |
+| **9.41** | Agent/RoleAgent 任务入口与 pi-tasks 直接执行 | High | Phase 3 | ⛔ Blocked（A-01） |
 | **9.42** | 多 Agent 任务与解决方案执行契约对齐 | High | Phase 3 | 📋 Planning |
 
 > **当前进度（2026-07-28）：** Epic 9 主运行时已具备 Workflow、Supervisor、黑板、协议和基础 UI，但 Phase 3 的 HITL 收敛、链路治理、任务入口、`pi-tasks` 任务契约对齐及高级协作能力尚未完成，因此 Epic 保持 In Progress，不能按整体 Complete 归档。
