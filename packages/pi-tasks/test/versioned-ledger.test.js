@@ -91,7 +91,15 @@ function resignCheckpoint(entry) {
   checkpoint.receiptWindow.maxRevision = checkpoint.receipts.at(-1)?.revisionAfter ?? null;
   checkpoint.receiptHash = sha256(checkpoint.receipts);
   const { checkpointHash: _checkpointHash, ...unsigned } = checkpoint;
-  checkpoint.checkpointHash = sha256(unsigned);
+  checkpoint.checkpointHash = sha256({
+    version: 2,
+    kind: 'snapshot',
+    revision: entry.data.revision,
+    ledgerParentCursor: entry.data.ledgerParentCursor,
+    parentCursor: entry.data.parentCursor,
+    event: entry.data.event,
+    checkpoint: unsigned,
+  });
   return entry;
 }
 
@@ -262,7 +270,7 @@ test('同 requestId 不能跨到不包含原 receipt 的 sibling branch 复用',
 
   assert.throws(
     () => store.mutate(request, taskCreated('cross-branch-retry'), siblingBranch),
-    (error) => error.code === 'IDEMPOTENCY_BRANCH_MISMATCH',
+    (error) => error.code === 'BRANCH_STATE_STALE',
   );
   assert.equal(siblingBranch.appendCount, 0);
 });
@@ -339,6 +347,66 @@ test('branch replay 只继承共同祖先，各自 revision/cursor 独立推进'
   assert.equal(rightStore.getMetadata().revision, 2);
   assert.notEqual(leftStore.getMetadata().cursor, rightStore.getMetadata().cursor);
   assert.equal(leftStore.getState().tasks.T1.nextAction, 'left');
+  assert.equal(rightStore.getState().tasks.T1.nextAction, 'right');
+});
+
+test('同 revision 的 stale store 不能在 sibling branch 写入或返回旧 receipt', () => {
+  const rootStore = createTaskRuntimeStore();
+  const rootPersistence = createPersistence([], 'root');
+  mutateCreated(rootStore, rootPersistence);
+  const common = structuredClone(rootPersistence.branch);
+
+  const leftStore = createTaskRuntimeStore();
+  leftStore.replay(common);
+  const left = createPersistence(common, 'left');
+  const leftRequest = mutationRequest({
+    requestId: 'request-left-stale',
+    command: 'task_update',
+    expectedRevision: 1,
+    expectedCursor: 'root-1',
+    input: { task_id: 'T1', next_action: 'left' },
+  });
+  leftStore.mutate(leftRequest, taskUpdated('left', 'event-left-stale'), left);
+
+  const rightStore = createTaskRuntimeStore();
+  rightStore.replay(common);
+  const right = createPersistence(common, 'right');
+  rightStore.mutate(
+    mutationRequest({
+      requestId: 'request-right-current',
+      command: 'task_update',
+      expectedRevision: 1,
+      expectedCursor: 'root-1',
+      input: { task_id: 'T1', next_action: 'right' },
+    }),
+    taskUpdated('right', 'event-right-current'),
+    right,
+  );
+  const appendCount = right.appendCount;
+
+  assert.throws(
+    () => leftStore.mutate(leftRequest, taskUpdated('unused', 'unused-left-replay'), right),
+    (error) => error.code === 'BRANCH_STATE_STALE',
+  );
+  assert.throws(
+    () => leftStore.mutate(
+      mutationRequest({
+        requestId: 'request-stale-new',
+        command: 'task_update',
+        expectedRevision: 2,
+        expectedCursor: right.branch.at(-1).id,
+        input: { task_id: 'T1', next_action: 'stale-new' },
+      }),
+      taskUpdated('stale-new', 'event-stale-new'),
+      right,
+    ),
+    (error) => error.code === 'BRANCH_STATE_STALE',
+  );
+  assert.throws(
+    () => leftStore.checkpoint(taskSnapshot(leftStore, 'snapshot-stale-branch'), right),
+    (error) => error.code === 'BRANCH_STATE_STALE',
+  );
+  assert.equal(right.appendCount, appendCount);
   assert.equal(rightStore.getState().tasks.T1.nextAction, 'right');
 });
 
@@ -516,6 +584,29 @@ test('checkpoint 拒绝伪造 receipt 的 revision、command/event 与重复 req
   }
 });
 
+test('checkpoint hash 覆盖 revision、parent、event 和 checkpoint 全包络', () => {
+  const store = createTaskRuntimeStore();
+  const persistence = createPersistence();
+  mutateCreated(store, persistence);
+  store.checkpoint(taskSnapshot(store), persistence);
+  const validSnapshot = persistence.branch.at(-1);
+  const tamperCases = [
+    (entry) => { entry.data.revision += 1; },
+    (entry) => { entry.data.ledgerParentCursor = 'forged-ledger-parent'; },
+    (entry) => { entry.data.parentCursor = 'forged-parent'; entry.parentId = 'forged-parent'; },
+    (entry) => { entry.data.event.id = 'forged-snapshot-event'; },
+  ];
+
+  for (const tamper of tamperCases) {
+    const entry = structuredClone(validSnapshot);
+    tamper(entry);
+    const replay = createTaskRuntimeStore().replay([entry]);
+    assert.equal(replay.metadata.revision, 0);
+    assert.equal(replay.metadata.requestCount, 0);
+    assert.match(replay.malformedEvents[0], /checkpoint hash validation/);
+  }
+});
+
 test('checkpoint receipt 必须与已 replay 的 request index 完全一致', () => {
   const store = createTaskRuntimeStore();
   const persistence = createPersistence();
@@ -587,6 +678,11 @@ test('replay 诊断有界去重且不进入业务 state、snapshot 或 stateHash
   assert.equal(dirtyReplay.metadata.stateHash, cleanReplay.metadata.stateHash);
   assert.deepEqual(dirtyReplay.state.warnings, cleanReplay.state.warnings);
   assert.equal(dirtyReplay.metadata.integrity.length, 2);
+  assert.equal(dirtyReplay.metadata.integrity.every((item) => !('message' in item)), true);
+  assert.equal(
+    dirtyReplay.metadata.integrity.every((item) => /^[a-f0-9]{64}$/.test(item.eventHash)),
+    true,
+  );
   assert.deepEqual(dirtyReplay.metadata.integrity, repeatedReplay.metadata.integrity);
   assert.equal(dirtyReplay.metadata.stateHash, repeatedReplay.metadata.stateHash);
 
@@ -597,6 +693,40 @@ test('replay 诊断有界去重且不进入业务 state、snapshot 或 stateHash
   const compacted = createTaskRuntimeStore().replay([snapshotEntry]);
   assert.equal(compacted.metadata.stateHash, cleanReplay.metadata.stateHash);
   assert.deepEqual(compacted.state.warnings, cleanReplay.state.warnings);
+});
+
+test('replay 诊断只持久化分类与 event hash，并裁剪敏感兼容消息', () => {
+  const secretTaskId = 'token=supersecret C:\\Users\\alice\\private';
+  const invalidEvent = taskUpdated('invalid', 'event-sensitive-diagnostic');
+  invalidEvent.taskId = secretTaskId;
+  const envelope = {
+    version: 2,
+    kind: 'mutation',
+    revision: 1,
+    ledgerParentCursor: null,
+    parentCursor: null,
+    requestId: 'request-sensitive-diagnostic',
+    command: 'task_update',
+    payloadHash: sha256({ taskId: secretTaskId }),
+    event: invalidEvent,
+  };
+  const entry = {
+    id: 'cursor-sensitive-diagnostic',
+    parentId: null,
+    type: 'custom',
+    customType: TASK_EVENT_CUSTOM_TYPE,
+    data: envelope,
+  };
+  const replay = createTaskRuntimeStore().replay([entry]);
+  const serializedMetadata = JSON.stringify(replay.metadata.integrity);
+
+  assert.equal(replay.metadata.integrity.length, 1);
+  assert.equal(serializedMetadata.includes('supersecret'), false);
+  assert.equal(serializedMetadata.includes('alice'), false);
+  assert.equal(serializedMetadata.includes('message'), false);
+  assert.equal(replay.malformedEvents[0].includes('supersecret'), false);
+  assert.equal(replay.malformedEvents[0].includes('alice'), false);
+  assert.ok(replay.malformedEvents[0].length <= 240);
 });
 
 test('replay 诊断 metadata 最多保留 64 条', () => {
@@ -649,6 +779,19 @@ test('200+ requests 的 checkpoint 保持 64KB 内并保留近期幂等窗口', 
   );
   assert.equal(retry.receipt.replayed, true);
   assert.equal(compactedPersistence.appendCount, 0);
+
+  const fullBranchPersistence = createPersistence(persistence.branch, 'full-branch');
+  const fullBranchStore = createTaskRuntimeStore();
+  const fullReplay = fullBranchStore.replay(fullBranchPersistence.branch);
+  assert.equal(fullReplay.metadata.revision, 221);
+  assert.equal(fullReplay.receipts.some((receipt) => receipt.requestId === 'request-create'), true);
+  const oldestRetry = fullBranchStore.mutate(
+    mutationRequest(),
+    taskCreated('unused-full-branch-retry'),
+    fullBranchPersistence,
+  );
+  assert.equal(oldestRetry.receipt.replayed, true);
+  assert.equal(fullBranchPersistence.appendCount, 0);
 });
 
 test('schema snapshot 固定 v2 envelope/state event 和 7 个 mutation tool reserved 参数', async () => {

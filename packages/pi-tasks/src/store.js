@@ -41,6 +41,12 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
             const normalized = assertMutationRequest(request);
             assertCommandEventPair(normalized.command, event);
             const branchBefore = readBranchContext(persistence);
+            assertStoreAlignedWithBranch(
+                branchBefore.branch,
+                metadata,
+                requestIndex,
+                legacyForcedCompletions,
+            );
             const previous = requestIndex.get(normalized.requestId);
             if (previous) {
                 if (previous.command !== normalized.command || previous.payloadHash !== normalized.payloadHash) {
@@ -112,6 +118,12 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
                 );
             }
             const branchBefore = readBranchContext(persistence);
+            assertStoreAlignedWithBranch(
+                branchBefore.branch,
+                metadata,
+                requestIndex,
+                legacyForcedCompletions,
+            );
             if (containsForcedCompletionField(event)) {
                 throw new PiTaskContractError(
                     "FORCE_COMPLETION_FORBIDDEN",
@@ -163,11 +175,11 @@ export function replayBranchEntries(entries) {
             continue;
         const entryCursor = normalizeEntryCursor(entry.id);
         if (!entryCursor) {
-            recordDiagnostic(malformedEvents, integrity, "MISSING_CURSOR", "Task ledger entry is missing a Session cursor");
+            recordDiagnostic(malformedEvents, integrity, "MISSING_CURSOR", "Task ledger entry is missing a Session cursor", undefined, entry.data);
             continue;
         }
         if (acceptedCursors.has(entryCursor)) {
-            recordDiagnostic(malformedEvents, integrity, "DUPLICATE_CURSOR", `Duplicate task ledger cursor ignored: ${entryCursor}`, entryCursor);
+            recordDiagnostic(malformedEvents, integrity, "DUPLICATE_CURSOR", `Duplicate task ledger cursor ignored: ${entryCursor}`, entryCursor, entry.data);
             continue;
         }
         const data = entry.data;
@@ -202,12 +214,12 @@ export function replayBranchEntries(entries) {
                 acceptedEntryCount += 1;
             }
             catch (error) {
-                recordDiagnostic(malformedEvents, integrity, "V1_REPLAY_REJECTED", `Entry ${entryCursor}: ${errorText(error)}`, entryCursor);
+                recordDiagnostic(malformedEvents, integrity, "V1_REPLAY_REJECTED", `Entry ${entryCursor}: ${errorText(error)}`, entryCursor, data);
             }
             continue;
         }
         if (!isV2Envelope(data)) {
-            recordDiagnostic(malformedEvents, integrity, "INVALID_ENVELOPE", `Entry ${entryCursor} is not a pi-tasks event`, entryCursor);
+            recordDiagnostic(malformedEvents, integrity, "INVALID_ENVELOPE", `Entry ${entryCursor} is not a pi-tasks event`, entryCursor, data);
             continue;
         }
         if (!entryParentMatches(entry, data.parentCursor)) {
@@ -217,6 +229,7 @@ export function replayBranchEntries(entries) {
                 "BRANCH_PARENT_MISMATCH",
                 `Entry ${entryCursor} parentId does not match envelope parentCursor`,
                 entryCursor,
+                data,
             );
             continue;
         }
@@ -232,7 +245,7 @@ export function replayBranchEntries(entries) {
                 allowBootstrap: acceptedEntryCount === 0,
             });
             if (replayed.error) {
-                recordDiagnostic(malformedEvents, integrity, replayed.code ?? "SNAPSHOT_REJECTED", replayed.error, entryCursor);
+                recordDiagnostic(malformedEvents, integrity, replayed.code ?? "SNAPSHOT_REJECTED", replayed.error, entryCursor, data);
                 continue;
             }
             state = replayed.state;
@@ -259,6 +272,7 @@ export function replayBranchEntries(entries) {
                     ? `Conflicting duplicate request ignored: ${data.requestId}`
                     : `Duplicate request entry ignored: ${data.requestId}`,
                 entryCursor,
+                data,
             );
             continue;
         }
@@ -269,6 +283,7 @@ export function replayBranchEntries(entries) {
                 "OUT_OF_ORDER_EVENT",
                 `Out-of-order task event ignored at ${entryCursor}: expected revision ${revision + 1} and ledger parent ${String(cursor)}`,
                 entryCursor,
+                data,
             );
             continue;
         }
@@ -302,7 +317,7 @@ export function replayBranchEntries(entries) {
             acceptedEntryCount += 1;
         }
         catch (error) {
-            recordDiagnostic(malformedEvents, integrity, "MUTATION_REPLAY_REJECTED", `Entry ${entryCursor}: ${errorText(error)}`, entryCursor);
+            recordDiagnostic(malformedEvents, integrity, "MUTATION_REPLAY_REJECTED", `Entry ${entryCursor}: ${errorText(error)}`, entryCursor, data);
         }
     }
     const metadata = buildMetadata(
@@ -415,7 +430,13 @@ function buildBoundedCheckpointEnvelope({
         };
         const checkpoint = Object.freeze({
             ...unsignedCheckpoint,
-            checkpointHash: sha256(unsignedCheckpoint),
+            checkpointHash: checkpointEnvelopeHash({
+                revision,
+                ledgerParentCursor,
+                parentCursor,
+                event,
+                checkpoint: unsignedCheckpoint,
+            }),
         });
         const envelope = Object.freeze({
             version: 2,
@@ -446,7 +467,13 @@ function validateCheckpointEnvelope(envelope, entryCursor, requestIndex) {
     }
     const checkpoint = envelope.checkpoint;
     const { checkpointHash, ...unsignedCheckpoint } = checkpoint;
-    if (sha256(unsignedCheckpoint) !== checkpointHash) {
+    if (checkpointEnvelopeHash({
+        revision: envelope.revision,
+        ledgerParentCursor: envelope.ledgerParentCursor,
+        parentCursor: envelope.parentCursor,
+        event: envelope.event,
+        checkpoint: unsignedCheckpoint,
+    }) !== checkpointHash) {
         throw new PiTaskContractError("CHECKPOINT_HASH_MISMATCH", `Snapshot entry ${entryCursor} failed checkpoint hash validation`);
     }
     if (sha256(checkpoint.receipts) !== checkpoint.receiptHash) {
@@ -493,6 +520,12 @@ function validateCheckpointEnvelope(envelope, entryCursor, requestIndex) {
     }
     if (latestReceipt && latestReceipt.revisionAfter === envelope.revision && latestReceipt.stateHash !== checkpoint.stateHash) {
         throw new PiTaskContractError("CHECKPOINT_RECEIPT_STATE_MISMATCH", "Latest checkpoint receipt does not match snapshot state hash");
+    }
+    if (latestReceipt && latestReceipt.revisionAfter !== envelope.revision) {
+        throw new PiTaskContractError(
+            "CHECKPOINT_RECEIPT_REVISION_MISMATCH",
+            "Latest checkpoint receipt must match the snapshot revision",
+        );
     }
 }
 
@@ -578,6 +611,35 @@ function readBranchContext(persistence) {
     return { branch, leaf: getBranchLeaf(branch) };
 }
 
+function assertStoreAlignedWithBranch(branch, metadata, requestIndex, legacyForcedCompletions) {
+    const replayed = replayBranchEntries(branch);
+    const localReceipts = [...requestIndex.values()]
+        .map(normalizeReceipt)
+        .sort(compareReceipts);
+    const branchReceipts = replayed.receipts
+        .map(normalizeReceipt)
+        .sort(compareReceipts);
+    const aligned = replayed.metadata.revision === metadata.revision &&
+        replayed.metadata.cursor === metadata.cursor &&
+        replayed.metadata.stateHash === metadata.stateHash &&
+        sha256(branchReceipts) === sha256(localReceipts) &&
+        sha256(replayed.legacyForcedCompletions) === sha256(legacyForcedCompletions);
+    if (!aligned) {
+        throw new PiTaskContractError(
+            "BRANCH_STATE_STALE",
+            "Task Runtime store is not aligned with the current Session branch",
+            {
+                expectedRevision: metadata.revision,
+                actualRevision: replayed.metadata.revision,
+                expectedCursor: metadata.cursor,
+                actualCursor: replayed.metadata.cursor,
+                expectedStateHash: metadata.stateHash,
+                actualStateHash: replayed.metadata.stateHash,
+            },
+        );
+    }
+}
+
 function branchContainsReceipt(branch, receipt) {
     return branch.some((entry) => {
         if (entry.type !== "custom" || entry.customType !== TASK_EVENT_CUSTOM_TYPE) return false;
@@ -603,7 +665,13 @@ function checkpointHashesAreValid(envelope) {
     const { checkpointHash, ...unsignedCheckpoint } = checkpoint;
     return byteLength(envelope) <= PI_TASK_CHECKPOINT_MAX_BYTES &&
         sha256(checkpoint.receipts) === checkpoint.receiptHash &&
-        sha256(unsignedCheckpoint) === checkpointHash;
+        checkpointEnvelopeHash({
+            revision: envelope.revision,
+            ledgerParentCursor: envelope.ledgerParentCursor,
+            parentCursor: envelope.parentCursor,
+            event: envelope.event,
+            checkpoint: unsignedCheckpoint,
+        }) === checkpointHash;
 }
 
 function getBranchLeaf(branch) {
@@ -687,12 +755,22 @@ function cloneMetadata(metadata) {
     };
 }
 
-function recordDiagnostic(malformedEvents, integrity, code, message, cursor) {
-    const key = `${code}:${cursor ?? ""}:${message}`;
+function recordDiagnostic(malformedEvents, integrity, code, message, cursor, event) {
+    const eventHash = sha256(event ?? { code, cursor: cursor ?? null });
+    const key = `${code}:${cursor ?? ""}:${eventHash}`;
     if (integrity.some((item) => item.key === key)) return;
     if (integrity.length >= PI_TASK_DIAGNOSTIC_LIMIT) return;
-    integrity.push(Object.freeze({ key, code, message, ...(cursor ? { cursor } : {}) }));
-    malformedEvents.push(message);
+    integrity.push(Object.freeze({ key, code, eventHash, ...(cursor ? { cursor } : {}) }));
+    malformedEvents.push(sanitizeDiagnosticMessage(message));
+}
+
+function sanitizeDiagnosticMessage(message) {
+    return String(message)
+        .replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "")
+        .replace(/\b(authorization|api[_-]?key|token|secret)\s*[:=]\s*\S+/gi, "$1=[REDACTED]")
+        .replace(/[A-Za-z]:\\Users\\[^\\\s]+/g, "[REDACTED_PATH]")
+        .replace(/\/home\/[^/\s]+/g, "/home/[REDACTED]")
+        .slice(0, 240);
 }
 
 function normalizeEntryCursor(value) {
@@ -919,6 +997,22 @@ function isMutationReceipt(value) {
 function normalizeReceipt(receipt) {
     const { replayed: _replayed, ...stable } = receipt;
     return { ...stable, replayed: false };
+}
+
+function compareReceipts(left, right) {
+    return left.revisionAfter - right.revisionAfter || left.requestId.localeCompare(right.requestId);
+}
+
+function checkpointEnvelopeHash({ revision, ledgerParentCursor, parentCursor, event, checkpoint }) {
+    return sha256({
+        version: 2,
+        kind: "snapshot",
+        revision,
+        ledgerParentCursor,
+        parentCursor,
+        event,
+        checkpoint,
+    });
 }
 
 function byteLength(value) {

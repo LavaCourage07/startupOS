@@ -19,8 +19,15 @@ mutation receipt 与不可绕过的 Evidence Gate。
 - `expectedCursor`、receipt 的 `cursorBefore` 和 envelope 的 `parentCursor` 都表示调用前真实 Session branch leaf。
 - receipt 的 `cursorAfter` 与 state-event scope cursor 表示新写入的 Task Session entry。
 - store metadata 的 `cursor` 只表示最近 Task ledger entry；Task revision/ledger cursor 负责 Task 事件顺序，不能替代 Session leaf CAS。
+- 每次 mutation/checkpoint 都会先将内存投影与当前 `SessionManager.getBranch()` 重放结果对齐；切换到 sibling branch 后，旧 store 即使 revision 相同也会以 `BRANCH_STATE_STALE` fail closed。
 - 已提交 request 的幂等重试先验证当前 branch 是否包含原 mutation receipt；跨 branch 不复用 receipt。
 
 ## Compaction 幂等窗口
 
-Checkpoint payload 上限为 64KB，receipt 使用 `latest_revision_window` 策略，最多保留最近 128 条，并在接近上限时继续从最旧记录开始缩减。仅从单个 checkpoint 恢复时，窗口内 requestId 保持幂等；已被窗口淘汰的旧 requestId 不再提供幂等保证。该边界由 `receiptWindow` 的 retained/omitted 数量和 revision 范围明确记录。
+Pi Session branch 是 append-only；正常 compaction 只裁剪发送给模型的上下文，不删除 branch 上已有的 Task custom entry。因此正常 restart/compaction 恢复必须重放完整 current branch，历史 requestId 继续由原 mutation envelope 提供幂等。
+
+Checkpoint payload 上限为 64KB，receipt 使用 `latest_revision_window` 策略，最多保留最近 128 条，并在接近上限时继续从最旧记录开始缩减。仅从单个 checkpoint 恢复属于降级路径：窗口内 requestId 保持幂等，已被窗口淘汰的旧 requestId 不再提供幂等保证。该边界由 `receiptWindow` 的 retained/omitted 数量和 revision 范围明确记录。
+
+如果 canonical Task state 自身已超过 64KB，checkpoint 会返回 `CHECKPOINT_TOO_LARGE`，不会写入部分 snapshot。状态分片或外部引用不属于当前受控 fork 范围。
+
+Checkpoint hash 覆盖 revision、ledger/session parent、snapshot event 和 checkpoint payload，用于发现意外损坏、部分写入和字段漂移。本地 Session JSONL 是可信 canonical storage；该 hash 不用于对抗能够任意修改本地文件并重新计算 hash 的攻击者。

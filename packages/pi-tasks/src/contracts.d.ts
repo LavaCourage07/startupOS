@@ -64,7 +64,7 @@ export interface PiTaskRuntimeMetadata {
 export interface PiTaskLedgerDiagnostic {
     key: string;
     code: string;
-    message: string;
+    eventHash: string;
     cursor?: string;
 }
 
