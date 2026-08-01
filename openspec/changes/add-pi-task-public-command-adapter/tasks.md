@@ -5,8 +5,8 @@
 
 ## 2. Runtime 公共宿主调用
 
-- [ ] 2.1 [可并行] 在独立 Task branch/worktree 中为 `@earendil-works/pi-coding-agent@0.80.10` 增加最小 `AgentSession.invokeRegisteredTool()` 公共能力；依赖：1.1；写入范围：`patches/`、`pnpm-workspace.yaml` 与 runtime patch contract；角色：Runtime Patch Worker；必需测试：schema、permission、before/after hook、lifecycle event、error、busy、无孤立消息；完成证据：Task commit、patch hash 和测试输出。
-- [ ] 2.2 [串行] 验证 clean install 能稳定应用精确版本 patch，版本或 hash 不匹配时 Task capability fail closed 且普通聊天可加载；依赖：2.1；写入范围：runtime patch verification；角色：Runtime Patch Worker；必需测试：frozen install、CJS/ESM import、普通 Agent smoke；完成证据：安装与 smoke 输出。
+- [x] 2.1 [可并行] 在独立 Task branch/worktree 中为 `@earendil-works/pi-coding-agent@0.80.10` 增加最小 `AgentSession.invokeRegisteredTool()` 公共能力；依赖：1.1；写入范围：`patches/`、根 `package.json`、`pnpm-lock.yaml` 与 runtime patch contract；角色：Runtime Patch Worker；必需测试：schema、permission、before/after hook、lifecycle event、error、busy、无孤立消息；完成证据：Task commit `76afdbc`，core patch SHA-256 `10bda90bbb3ff426f6057312464e2cdb470fe61acd4f9e37ffc8436755e644a6`，coding-agent patch SHA-256 `7d70e7b71db29280df41ddf1f8701c9ae56c98e9e48b85ee11700c4ca66c11b4`，Runtime contract 3/3 通过。
+- [x] 2.2 [串行] 验证 clean install 能稳定应用精确版本 patch，版本或 hash 不匹配时 Task capability fail closed 且普通聊天可加载；依赖：2.1；写入范围：runtime patch verification；角色：Runtime Patch Worker；必需测试：frozen install、CJS/ESM import、普通 Agent smoke；完成证据：`npx pnpm@9 install --offline --frozen-lockfile --ignore-scripts --filter @originos/pi-agent-adapter` 成功，ESM host export、CJS adapter、普通 Agent 初始化和 `verify-runtime.js` smoke 通过。
 
 ## 3. 受控 Task extension
 
