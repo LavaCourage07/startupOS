@@ -10,13 +10,13 @@
 
 ## 3. 受控 Task extension
 
-- [ ] 3.1 [可并行] 在独立 Task branch/worktree 中建立 `@originos/pi-tasks` workspace package，以 `pi-tasks@0.2.0` 为上游基线且保留上游 reducer 单一事实源；依赖：1.1；写入范围：`packages/pi-tasks/`；角色：Task Extension Worker；必需测试：公共 export、上游基线 fingerprint、v1 正常 replay；完成证据：Task commit 与差异清单。
+- [x] 3.1 [可并行] 在独立 Task branch/worktree 中建立 `@originos/pi-tasks` workspace package，以 `pi-tasks@0.2.0` 为上游基线且保留上游 reducer 单一事实源；依赖：1.1；写入范围：`packages/pi-tasks/`；角色：Task Extension Worker；必需测试：公共 export、上游基线 fingerprint、v1 正常 replay；完成证据：Task commit `8bdcc75`，upstream entry SHA-256 `3a99294bcc034cd63bc245132e7b3c429acf31fd0b2bd6058e4be85eb0b94136`，upstream reducer SHA-256 `53dc26325e818fec1841cb40a5736f67404adafd021171b7e0976ff7a1e5ea64`，baseline tests 2/2 通过。
 - [ ] 3.2 [串行] 实现 event envelope v2、revision/cursor、requestId/payloadHash 幂等、CAS、mutation receipt、state event v2 和 compaction replay；依赖：3.1；写入范围：`packages/pi-tasks/`；角色：Task Extension Worker；必需测试：成功 mutation、重复请求、冲突请求、revision/cursor 冲突、重启、分支、重复/乱序 entry、compaction；完成证据：测试输出和 schema snapshot。
 - [ ] 3.3 [串行] 从 schema、event 和 reducer 删除 `force_with_reason`，并将旧 v1 forced completion 标记为不可信；依赖：3.2；写入范围：`packages/pi-tasks/`；角色：Task Extension Worker；必需测试：缺 Step、缺 Evidence、失败 Evidence、未解决 Blocker、强制参数拒绝、合法完成、旧记录迁移；完成证据：Evidence Gate contract 全绿。
 
 ## 4. OriginOS Adapter
 
-- [ ] 4.1 [可并行] 在独立 Task branch/worktree 中新增 `@originos/pi-agent-adapter/task-runtime` 公共 DTO、compatibility guard、allowlist 和 extension bridge；依赖：1.1；写入范围：`packages/agent/src/task-runtime/`、`packages/agent/package.json`、构建与 export 配置；角色：Adapter Worker；必需测试：类型、公开子路径、错误映射、敏感信息裁剪；完成证据：Task commit 与 package import 输出。
+- [x] 4.1 [可并行] 在独立 Task branch/worktree 中新增 `@originos/pi-agent-adapter/task-runtime` 公共 DTO、compatibility guard、allowlist 和 extension bridge；依赖：1.1；写入范围：`packages/agent/src/task-runtime/`、`packages/agent/package.json`、构建与 export 配置；角色：Adapter Worker；必需测试：类型、公开子路径、错误映射、敏感信息裁剪；完成证据：Task commit `95fee79`，`node packages/agent/build-runtime.js` 与 CJS 公共子路径 import 通过，Adapter contract tests 5/5 通过。
 - [ ] 4.2 [串行] 接入 runtime host invoke 与受控 Task extension receipt/state event，确保原 Session/current branch、busy、epoch 和 timeout 契约；依赖：2.2、3.3、4.1；写入范围：`packages/agent/src/task-runtime/`；角色：Adapter Worker；必需测试：同 Session/branch mutation、stale scope、busy、event timeout、reload epoch、无孤立消息；完成证据：Adapter integration tests。
 
 ## 5. 契约与打包回归
