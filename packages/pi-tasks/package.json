@@ -27,6 +27,7 @@
     "index.js",
     "index.d.ts",
     "src/",
+    "upstream/",
     "LICENSE",
     "README.md",
     "UPSTREAM.md"

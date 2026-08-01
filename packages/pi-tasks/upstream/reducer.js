@@ -331,12 +331,17 @@ function completeTask(state, event) {
             criterion.note = result.note;
     }
     const completionEvidenceIds = unique(event.evidenceIds);
-    validateCompletion(task, completionEvidenceIds);
+    validateCompletion(task, completionEvidenceIds, event.forceWithReason);
     applyStatusChange(state, task, "done", event.createdAt);
     task.progress = 100;
     task.completedAt = event.createdAt;
     task.completionSummary = event.summary;
-    task.confidence = Math.max(task.confidence ?? 0, 90);
+    task.confidence = event.forceWithReason
+        ? Math.min(task.confidence ?? 60, 79)
+        : Math.max(task.confidence ?? 0, 90);
+    if (event.forceWithReason) {
+        task.warnings.push(`Forced completion: ${event.forceWithReason}`);
+    }
     task.updatedAt = event.createdAt;
     return state;
 }
@@ -624,30 +629,33 @@ function getActiveStep(task) {
 function getCurrentOpenStep(task) {
     return task.planSteps.find((step) => step.status !== "done" && step.status !== "skipped");
 }
-function validateCompletion(task, evidenceIds) {
+function validateCompletion(task, evidenceIds, forceReason) {
     const unresolvedBlockers = task.blockers.filter((blocker) => !blocker.resolvedAt);
-    if (unresolvedBlockers.length > 0) {
+    if (unresolvedBlockers.length > 0 && !forceReason) {
         throw new TaskTransitionError(`Task ${task.id} has unresolved blockers`);
     }
     const incompleteStep = task.planSteps.find((step) => step.status !== "done" && step.status !== "skipped");
-    if (incompleteStep) {
+    if (incompleteStep && !forceReason) {
         throw new TaskTransitionError(`Plan step ${incompleteStep.id} is not complete`);
     }
-    if (task.evidence.length === 0)
+    if (task.evidence.length === 0 && !forceReason)
         throw new TaskTransitionError(`Task ${task.id} has no evidence`);
     const unresolvedDriftWarning = task.warnings.find((warning) => /^(off_plan|scope_change):/.test(warning));
-    if (unresolvedDriftWarning) {
+    if (unresolvedDriftWarning && !forceReason) {
         throw new TaskTransitionError(`Task ${task.id} has unresolved scope drift warning: ${unresolvedDriftWarning}`);
     }
-    if (evidenceIds.length === 0)
+    const evidence = evidenceIds.length > 0
+        ? evidenceIds.map((id) => requireEvidence(task, id))
+        : task.evidence;
+    if (!forceReason && evidence.length === 0)
         throw new TaskTransitionError("Completion evidence IDs are required");
-    const evidence = evidenceIds.map((id) => requireEvidence(task, id));
-    if (evidence.every((item) => item.level === "not_verified")) {
+    if (!forceReason && evidence.every((item) => item.level === "not_verified")) {
         throw new TaskTransitionError("Completion requires verification stronger than not_verified");
     }
     for (const criterion of task.acceptanceCriteria) {
         if (criterion.status !== "satisfied" &&
-            criterion.status !== "skipped") {
+            criterion.status !== "skipped" &&
+            !forceReason) {
             throw new TaskTransitionError(`Criterion ${criterion.id} is not satisfied`);
         }
         if (criterion.status === "satisfied" &&
@@ -656,8 +664,7 @@ function validateCompletion(task, evidenceIds) {
         }
         for (const evidenceId of criterion.evidenceIds) {
             const criterionEvidence = requireEvidence(task, evidenceId);
-            validateEvidenceQualityScore(criterionEvidence);
-            if (criterionEvidence.passed !== true) {
+            if (criterionEvidence.passed === false && !forceReason) {
                 throw new TaskTransitionError(`Criterion ${criterion.id} has failing evidence ${evidenceId}`);
             }
         }
@@ -665,22 +672,21 @@ function validateCompletion(task, evidenceIds) {
     for (const step of task.planSteps) {
         if (step.evidenceRequired &&
             step.status === "done" &&
-            step.evidenceIds.length === 0) {
+            step.evidenceIds.length === 0 &&
+            !forceReason) {
             throw new TaskTransitionError(`Plan step ${step.id} is done without step evidence`);
         }
         for (const evidenceId of step.evidenceIds) {
             const stepEvidence = requireEvidence(task, evidenceId);
             validateEvidenceQualityScore(stepEvidence);
-            if (stepEvidence.passed !== true) {
+            if (stepEvidence.passed === false && !forceReason) {
                 throw new TaskTransitionError(`Plan step ${step.id} has failing evidence ${evidenceId}`);
             }
         }
     }
-    for (const evidenceItem of evidence) {
-        if (evidenceItem.passed !== true) {
-            throw new TaskTransitionError(`Completion evidence ${evidenceItem.id} did not pass`);
-        }
-        validateEvidenceQualityScore(evidenceItem);
+    if (!forceReason) {
+        for (const evidenceItem of evidence)
+            validateEvidenceQualityScore(evidenceItem);
     }
 }
 function validateStatusTransition(task, nextStatus, event) {
@@ -875,10 +881,6 @@ function validateEventEnvelope(event) {
         throw new TaskTransitionError("Event taskId is required");
     if (!event.createdAt.trim())
         throw new TaskTransitionError("Event createdAt is required");
-    if (event.type === "task.completed" &&
-        (Object.hasOwn(event, "forceWithReason") || Object.hasOwn(event, "force_with_reason"))) {
-        throw new TaskTransitionError("Forced task completion is not supported");
-    }
 }
 function requireTask(state, taskId) {
     const task = state.tasks[taskId];

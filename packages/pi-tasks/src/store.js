@@ -1,9 +1,11 @@
 import {
     assertMutationRequest,
+    containsForcedCompletionField,
     createMutationReceipt,
     PI_TASK_CHECKPOINT_MAX_BYTES,
     PI_TASK_CHECKPOINT_RECEIPT_LIMIT,
     PI_TASK_DIAGNOSTIC_LIMIT,
+    PI_TASK_LEGACY_FORCED_COMPLETION_CODE,
     PI_TASK_MUTATION_TOOLS,
     PiTaskContractError,
     sha256,
@@ -19,6 +21,7 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
     let state = initialState;
     let metadata = createEmptyMetadata(state);
     let requestIndex = new Map();
+    let legacyForcedCompletions = [];
     return {
         getState() {
             return state;
@@ -31,6 +34,7 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
             state = replayed.state;
             metadata = replayed.metadata;
             requestIndex = new Map(replayed.receipts.map((receipt) => [receipt.requestId, receipt]));
+            legacyForcedCompletions = [...replayed.legacyForcedCompletions];
             return replayed;
         },
         mutate(request, event, persistence) {
@@ -95,6 +99,7 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
                 receipt.cursorAfter,
                 requestIndex,
                 metadata.integrity,
+                legacyForcedCompletions,
                 receipt,
             );
             return { state, metadata: cloneMetadata(metadata), receipt };
@@ -107,6 +112,12 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
                 );
             }
             const branchBefore = readBranchContext(persistence);
+            if (containsForcedCompletionField(event)) {
+                throw new PiTaskContractError(
+                    "FORCE_COMPLETION_FORBIDDEN",
+                    "Forced task completion is not supported",
+                );
+            }
             const nextState = reduceTaskState(state, event);
             const envelope = buildBoundedCheckpointEnvelope({
                 revision: metadata.revision,
@@ -115,6 +126,7 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
                 event,
                 nextState,
                 receipts: [...requestIndex.values()],
+                legacyForcedCompletions,
             });
             const cursorAfter = appendAndReadCursor(envelope, persistence, branchBefore.leaf);
             state = nextState;
@@ -125,6 +137,7 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
                 cursorAfter,
                 requestIndex,
                 metadata.integrity,
+                legacyForcedCompletions,
                 metadata.latestReceipt,
             );
             return { state, metadata: cloneMetadata(metadata), envelope };
@@ -141,6 +154,7 @@ export function replayBranchEntries(entries) {
     const integrity = [];
     const acceptedCursors = new Set();
     const requestIndex = new Map();
+    const legacyForcedCompletions = [];
     let acceptedEntryCount = 0;
     const branchLeaf = getBranchLeaf(entries);
 
@@ -159,7 +173,29 @@ export function replayBranchEntries(entries) {
         const data = entry.data;
         if (isV1TaskEvent(data)) {
             try {
-                state = reduceTaskState(state, data);
+                if (isLegacyForcedCompletionEvent(data)) {
+                    const record = createLegacyForcedCompletionRecord({
+                        source: "v1_event",
+                        cursor: entryCursor,
+                        eventId: data.id,
+                        taskId: data.taskId,
+                        reason: data.forceWithReason,
+                        summary: data.summary,
+                        evidenceIds: data.evidenceIds,
+                    });
+                    state = retainLegacyForcedCompletionEvent(state, data, record);
+                    addLegacyForcedCompletion(legacyForcedCompletions, record);
+                }
+                else {
+                    const nextState = reduceTaskState(state, data);
+                    const migrated = data.type === "task.snapshot"
+                        ? migrateLegacyForcedSnapshot(nextState, entryCursor, data.id)
+                        : { state: nextState, records: [] };
+                    state = migrated.state;
+                    for (const record of migrated.records) {
+                        addLegacyForcedCompletion(legacyForcedCompletions, record);
+                    }
+                }
                 revision += 1;
                 cursor = entryCursor;
                 acceptedCursors.add(entryCursor);
@@ -192,6 +228,7 @@ export function replayBranchEntries(entries) {
                 revision,
                 cursor,
                 requestIndex,
+                legacyForcedCompletions,
                 allowBootstrap: acceptedEntryCount === 0,
             });
             if (replayed.error) {
@@ -202,6 +239,11 @@ export function replayBranchEntries(entries) {
             revision = replayed.revision;
             cursor = entryCursor;
             latestReceipt = replayed.latestReceipt ?? latestReceipt;
+            replaceLegacyForcedCompletions(
+                legacyForcedCompletions,
+                replayed.legacyForcedCompletions,
+                replayed.replaceLegacyForcedCompletions,
+            );
             acceptedCursors.add(entryCursor);
             acceptedEntryCount += 1;
             continue;
@@ -263,11 +305,21 @@ export function replayBranchEntries(entries) {
             recordDiagnostic(malformedEvents, integrity, "MUTATION_REPLAY_REJECTED", `Entry ${entryCursor}: ${errorText(error)}`, entryCursor);
         }
     }
-    const metadata = buildMetadata(state, revision, cursor, branchLeaf, requestIndex, integrity, latestReceipt);
+    const metadata = buildMetadata(
+        state,
+        revision,
+        cursor,
+        branchLeaf,
+        requestIndex,
+        integrity,
+        legacyForcedCompletions,
+        latestReceipt,
+    );
     return {
         state,
         metadata,
         receipts: [...requestIndex.values()],
+        legacyForcedCompletions: cloneLegacyForcedCompletions(legacyForcedCompletions),
         malformedEvents,
     };
 }
@@ -277,7 +329,16 @@ export function snapshotState(state) {
     return snapshot;
 }
 
-function replaySnapshotEnvelope({ envelope, entryCursor, state, revision, cursor, requestIndex, allowBootstrap }) {
+function replaySnapshotEnvelope({
+    envelope,
+    entryCursor,
+    state,
+    revision,
+    cursor,
+    requestIndex,
+    legacyForcedCompletions,
+    allowBootstrap,
+}) {
     if (!isV1TaskEvent(envelope.event) || envelope.event.type !== "task.snapshot") {
         return { code: "INVALID_SNAPSHOT_EVENT", error: `Snapshot entry ${entryCursor} has an invalid business event` };
     }
@@ -289,10 +350,20 @@ function replaySnapshotEnvelope({ envelope, entryCursor, state, revision, cursor
     }
     try {
         validateCheckpointEnvelope(envelope, entryCursor, requestIndex);
-        const nextState = reduceTaskState(state, envelope.event);
-        if (stateHash(nextState) !== envelope.checkpoint.stateHash) {
+        const replayedState = reduceTaskState(state, envelope.event);
+        if (stateHash(replayedState) !== envelope.checkpoint.stateHash) {
             return { code: "SNAPSHOT_STATE_HASH_MISMATCH", error: `Snapshot entry ${entryCursor} failed state hash validation` };
         }
+        const migrated = migrateLegacyForcedSnapshot(replayedState, entryCursor, envelope.event.id);
+        const checkpointLegacy = normalizeCheckpointLegacyCompletions(
+            envelope.checkpoint.legacyForcedCompletions,
+            entryCursor,
+        );
+        const restoredLegacy = mergeLegacyForcedCompletions(
+            allowBootstrap ? [] : legacyForcedCompletions,
+            checkpointLegacy,
+            migrated.records,
+        );
         if (allowBootstrap) requestIndex.clear();
         let latestReceipt;
         for (const receipt of envelope.checkpoint.receipts) {
@@ -303,9 +374,11 @@ function replaySnapshotEnvelope({ envelope, entryCursor, state, revision, cursor
             }
         }
         return {
-            state: nextState,
+            state: migrated.state,
             revision: allowBootstrap ? envelope.revision : revision,
             latestReceipt,
+            legacyForcedCompletions: restoredLegacy,
+            replaceLegacyForcedCompletions: allowBootstrap,
         };
     }
     catch (error) {
@@ -316,7 +389,15 @@ function replaySnapshotEnvelope({ envelope, entryCursor, state, revision, cursor
     }
 }
 
-function buildBoundedCheckpointEnvelope({ revision, ledgerParentCursor, parentCursor, event, nextState, receipts }) {
+function buildBoundedCheckpointEnvelope({
+    revision,
+    ledgerParentCursor,
+    parentCursor,
+    event,
+    nextState,
+    receipts,
+    legacyForcedCompletions,
+}) {
     const ordered = receipts
         .map((receipt) => ({ ...receipt, replayed: false }))
         .sort((left, right) => left.revisionAfter - right.revisionAfter);
@@ -330,6 +411,7 @@ function buildBoundedCheckpointEnvelope({ revision, ledgerParentCursor, parentCu
             receiptHash,
             receiptWindow,
             receipts: retained,
+            legacyForcedCompletions: cloneLegacyForcedCompletions(legacyForcedCompletions),
         };
         const checkpoint = Object.freeze({
             ...unsignedCheckpoint,
@@ -571,10 +653,19 @@ function assertCas(request, metadata, branchLeaf) {
 }
 
 function createEmptyMetadata(state) {
-    return buildMetadata(state, 0, null, null, new Map(), [], undefined);
+    return buildMetadata(state, 0, null, null, new Map(), [], [], undefined);
 }
 
-function buildMetadata(state, revision, cursor, branchLeaf, requestIndex, integrity, latestReceipt) {
+function buildMetadata(
+    state,
+    revision,
+    cursor,
+    branchLeaf,
+    requestIndex,
+    integrity,
+    legacyForcedCompletions,
+    latestReceipt,
+) {
     return Object.freeze({
         revision,
         cursor,
@@ -582,6 +673,7 @@ function buildMetadata(state, revision, cursor, branchLeaf, requestIndex, integr
         stateHash: stateHash(state),
         requestCount: requestIndex.size,
         integrity: Object.freeze(integrity.map((item) => Object.freeze({ ...item }))),
+        legacyForcedCompletions: Object.freeze(cloneLegacyForcedCompletions(legacyForcedCompletions)),
         ...(latestReceipt ? { latestReceipt } : {}),
     });
 }
@@ -590,6 +682,7 @@ function cloneMetadata(metadata) {
     return {
         ...metadata,
         integrity: metadata.integrity.map((item) => ({ ...item })),
+        legacyForcedCompletions: cloneLegacyForcedCompletions(metadata.legacyForcedCompletions),
         ...(metadata.latestReceipt ? { latestReceipt: { ...metadata.latestReceipt } } : {}),
     };
 }
@@ -626,14 +719,22 @@ function isV2Envelope(value) {
             typeof value.payloadHash === "string" &&
             HASH_PATTERN.test(value.payloadHash) &&
             PI_TASK_MUTATION_TOOLS.includes(value.command) &&
+            !containsForcedCompletionField(value.event) &&
             expectedEventType(value.command) === value.event.type;
     }
     return value.kind === "snapshot" && isCheckpoint(value.checkpoint);
 }
 
 function assertCommandEventPair(command, event) {
-    if (!isV1TaskEvent(event) || expectedEventType(command) !== event.type) {
-        throw new PiTaskContractError("COMMAND_EVENT_MISMATCH", `Task command ${command} cannot persist event ${String(event?.type)}`);
+    if (!isV1TaskEvent(event) ||
+        expectedEventType(command) !== event.type ||
+        containsForcedCompletionField(event)) {
+        throw new PiTaskContractError(
+            "COMMAND_EVENT_MISMATCH",
+            containsForcedCompletionField(event)
+                ? "Forced task completion is not supported"
+                : `Task command ${command} cannot persist event ${String(event?.type)}`,
+        );
     }
 }
 
@@ -658,7 +759,142 @@ function isCheckpoint(value) {
         typeof value.receiptHash === "string" && HASH_PATTERN.test(value.receiptHash) &&
         typeof value.checkpointHash === "string" && HASH_PATTERN.test(value.checkpointHash) &&
         value.receiptWindow && typeof value.receiptWindow === "object" &&
-        Array.isArray(value.receipts));
+        Array.isArray(value.receipts) &&
+        (value.legacyForcedCompletions === undefined || Array.isArray(value.legacyForcedCompletions)));
+}
+
+function isLegacyForcedCompletionEvent(event) {
+    return event.type === "task.completed" &&
+        typeof event.forceWithReason === "string" &&
+        event.forceWithReason.trim().length > 0;
+}
+
+function retainLegacyForcedCompletionEvent(state, event, record) {
+    const nextState = structuredClone(state);
+    nextState.events = [...state.events, structuredClone(event)];
+    nextState.lastUpdatedAt = event.createdAt;
+    const task = nextState.tasks[event.taskId];
+    if (task) {
+        task.warnings = uniqueStrings([
+            ...(task.warnings ?? []),
+            `${PI_TASK_LEGACY_FORCED_COMPLETION_CODE}:${record.eventId}`,
+        ]);
+        task.updatedAt = event.createdAt;
+    }
+    nextState.warnings = uniqueStrings([
+        ...nextState.warnings,
+        `${PI_TASK_LEGACY_FORCED_COMPLETION_CODE}:${record.eventId}`,
+    ]);
+    return nextState;
+}
+
+function migrateLegacyForcedSnapshot(state, cursor, eventId) {
+    const nextState = structuredClone(state);
+    const records = [];
+    for (const task of Object.values(nextState.tasks)) {
+        const warning = task.warnings?.find((value) => /^Forced completion:\s*/.test(value));
+        if (task.status !== "done" || !warning) continue;
+        const reason = warning.replace(/^Forced completion:\s*/, "").trim() || "Legacy forced completion";
+        const record = createLegacyForcedCompletionRecord({
+            source: "v1_snapshot",
+            cursor,
+            eventId,
+            taskId: task.id,
+            reason,
+            summary: task.completionSummary,
+            evidenceIds: task.evidence?.map((item) => item.id) ?? [],
+        });
+        records.push(record);
+        task.status = "review";
+        task.progress = Math.min(task.progress ?? 0, 99);
+        task.confidence = Math.min(task.confidence ?? 0, 79);
+        delete task.completedAt;
+        delete task.completionSummary;
+        task.warnings = uniqueStrings([
+            ...task.warnings.filter((value) => value !== warning),
+            `${PI_TASK_LEGACY_FORCED_COMPLETION_CODE}:${eventId}`,
+        ]);
+        if (!nextState.activeTaskId) nextState.activeTaskId = task.id;
+    }
+    if (records.length > 0) {
+        nextState.warnings = uniqueStrings([
+            ...nextState.warnings,
+            ...records.map((record) => `${PI_TASK_LEGACY_FORCED_COMPLETION_CODE}:${record.eventId}`),
+        ]);
+    }
+    return { state: nextState, records };
+}
+
+function createLegacyForcedCompletionRecord({ source, cursor, eventId, taskId, reason, summary, evidenceIds }) {
+    return Object.freeze({
+        code: PI_TASK_LEGACY_FORCED_COMPLETION_CODE,
+        trusted: false,
+        source,
+        cursor,
+        eventId,
+        taskId,
+        reason: String(reason).trim(),
+        ...(typeof summary === "string" && summary.length > 0 ? { summary } : {}),
+        evidenceIds: Object.freeze(Array.isArray(evidenceIds) ? [...evidenceIds] : []),
+    });
+}
+
+function normalizeCheckpointLegacyCompletions(records, cursor) {
+    if (records === undefined) return [];
+    return records.map((record) => {
+        if (!isLegacyForcedCompletionRecord(record)) {
+            throw new PiTaskContractError(
+                "INVALID_LEGACY_INTEGRITY_RECORD",
+                `Snapshot entry ${cursor} contains an invalid legacy completion audit record`,
+            );
+        }
+        return createLegacyForcedCompletionRecord(record);
+    });
+}
+
+function isLegacyForcedCompletionRecord(record) {
+    return Boolean(record &&
+        typeof record === "object" &&
+        record.code === PI_TASK_LEGACY_FORCED_COMPLETION_CODE &&
+        record.trusted === false &&
+        (record.source === "v1_event" || record.source === "v1_snapshot") &&
+        typeof record.cursor === "string" &&
+        typeof record.eventId === "string" &&
+        typeof record.taskId === "string" &&
+        typeof record.reason === "string" &&
+        Array.isArray(record.evidenceIds));
+}
+
+function addLegacyForcedCompletion(records, record) {
+    if (records.some((candidate) => legacyRecordKey(candidate) === legacyRecordKey(record))) return;
+    records.push(record);
+}
+
+function replaceLegacyForcedCompletions(target, incoming, replace) {
+    if (replace) target.splice(0, target.length);
+    for (const record of incoming ?? []) {
+        if (!target.some((candidate) => legacyRecordKey(candidate) === legacyRecordKey(record))) {
+            target.push(record);
+        }
+    }
+}
+
+function mergeLegacyForcedCompletions(...groups) {
+    const result = [];
+    for (const group of groups) replaceLegacyForcedCompletions(result, group, false);
+    return result;
+}
+
+function cloneLegacyForcedCompletions(records) {
+    return records.map((record) => ({ ...record, evidenceIds: [...record.evidenceIds] }));
+}
+
+function legacyRecordKey(record) {
+    return `${record.source}:${record.cursor}:${record.eventId}:${record.taskId}`;
+}
+
+function uniqueStrings(values) {
+    return [...new Set(values)];
 }
 
 function isMutationReceipt(value) {

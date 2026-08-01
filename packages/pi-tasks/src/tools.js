@@ -441,8 +441,8 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
         promptSnippet: "Complete a pi-tasks task only when acceptance criteria have evidence",
         promptGuidelines: [
             "Call task_complete only after task_evidence has recorded supporting evidence.",
-            "Unsupported completion is rejected unless force_with_reason documents the verification gap.",
-            "Forced completion must be reported as not fully verified.",
+            "Every completion evidence ID must reference passing, reproducible evidence.",
+            "Completion is rejected while any step, criterion, blocker, or evidence gate remains unresolved.",
         ],
         parameters: Type.Object({
             originos_command: Type.Optional(originosCommandSchema()),
@@ -455,17 +455,16 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 evidenceIds: Type.Optional(Type.Array(Type.String())),
                 note: Type.Optional(Type.String()),
             }))),
-            force_with_reason: Type.Optional(Type.String()),
         }),
         execute: async (toolCallId, params, _signal, _onUpdate, ctx) => {
+            if (Object.hasOwn(params, "force_with_reason") || Object.hasOwn(params, "forceWithReason")) {
+                return forbiddenForcedCompletion(store.getState());
+            }
             const event = baseEvent("task.completed", params.task_id, ctx, {
                 summary: params.summary,
                 evidenceIds: params.evidence_ids,
                 ...(params.criterion_results
                     ? { criterionResults: params.criterion_results }
-                    : {}),
-                ...(params.force_with_reason
-                    ? { forceWithReason: params.force_with_reason }
                     : {}),
             });
             return appendAndReport(pi, store, ctx, event, `Completed task ${params.task_id}`, buildMutationRequest("task_complete", toolCallId, params, store, ctx));
@@ -551,12 +550,9 @@ function appendAndReport(pi, store, ctx, event, success, request) {
             result.metadata,
             result.receipt.replayed ? undefined : result.receipt,
         );
-        const warning = event.type === "task.completed" && event.forceWithReason
-            ? `\nWarning: forced completion: ${event.forceWithReason}`
-            : "";
         const outcome = result.receipt.replayed
             ? `Idempotent replay: request ${result.receipt.requestId} already committed ${result.receipt.eventType} for task ${result.receipt.taskId}; no new task event was appended.`
-            : `${success}${warning}`;
+            : success;
         return textResult(`${outcome}\n\n${formatTaskResume(result.state)}`, {
             ...buildTaskResume(result.state),
             mutationReceipt: result.receipt,
@@ -580,6 +576,20 @@ function appendAndReport(pi, store, ctx, event, success, request) {
             isError: true,
         };
     }
+}
+
+function forbiddenForcedCompletion(state) {
+    return {
+        ...textResult([
+            "Error: forced task completion is not supported",
+            "",
+            formatTaskResume(state),
+        ].join("\n"), {
+            ...buildTaskResume(state),
+            code: "FORCE_COMPLETION_FORBIDDEN",
+        }),
+        isError: true,
+    };
 }
 function buildRejectionRecovery(error, state) {
     const resume = buildTaskResume(state);

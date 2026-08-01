@@ -227,7 +227,6 @@ export interface TaskCompletedEvent extends TaskEventBase {
         evidenceIds?: string[];
         note?: string;
     }>;
-    forceWithReason?: string;
 }
 export interface TaskCancelledEvent extends TaskEventBase {
     type: "task.cancelled";

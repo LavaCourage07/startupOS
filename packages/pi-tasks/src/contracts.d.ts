@@ -6,6 +6,7 @@ export declare const PI_TASK_PUBLIC_API_VERSION = 1;
 export declare const PI_TASK_CHECKPOINT_MAX_BYTES: number;
 export declare const PI_TASK_CHECKPOINT_RECEIPT_LIMIT = 128;
 export declare const PI_TASK_DIAGNOSTIC_LIMIT = 64;
+export declare const PI_TASK_LEGACY_FORCED_COMPLETION_CODE = "legacy_forced_completion";
 export declare const PI_TASKS_UPSTREAM_ENTRY_SHA256: string;
 export declare const PI_TASKS_UPSTREAM_REDUCER_SHA256: string;
 export declare const PI_TASK_MUTATION_TOOLS: readonly PiTaskMutationTool[];
@@ -56,6 +57,7 @@ export interface PiTaskRuntimeMetadata {
     stateHash: string;
     requestCount: number;
     integrity: PiTaskLedgerDiagnostic[];
+    legacyForcedCompletions: readonly PiTaskLegacyForcedCompletion[];
     latestReceipt?: PiTaskMutationReceipt;
 }
 
@@ -64,6 +66,18 @@ export interface PiTaskLedgerDiagnostic {
     code: string;
     message: string;
     cursor?: string;
+}
+
+export interface PiTaskLegacyForcedCompletion {
+    readonly code: "legacy_forced_completion";
+    readonly trusted: false;
+    readonly source: "v1_event" | "v1_snapshot";
+    readonly cursor: string;
+    readonly eventId: string;
+    readonly taskId: string;
+    readonly reason: string;
+    readonly summary?: string;
+    readonly evidenceIds: readonly string[];
 }
 
 export interface PiTaskMutationEventEnvelopeV2 {
@@ -98,6 +112,7 @@ export interface PiTaskSnapshotEventEnvelopeV2 {
             maxRevision: number | null;
         };
         receipts: PiTaskMutationReceipt[];
+        legacyForcedCompletions?: PiTaskLegacyForcedCompletion[];
     };
 }
 
@@ -120,6 +135,7 @@ export declare function assertMutationCommand(command: unknown): asserts command
 export declare function assertMutationRequest(request: PiTaskMutationRequest): PiTaskMutationRequest & {
     payloadHash: string;
 };
+export declare function containsForcedCompletionField(value: unknown): boolean;
 export declare function createMutationReceipt(input: {
     request: PiTaskMutationRequest & { payloadHash: string };
     revisionBefore: number;

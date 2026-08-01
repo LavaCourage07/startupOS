@@ -23,7 +23,7 @@ test('受控 package 保留可审计的 pi-tasks 0.2.0 上游 fingerprint', asyn
     PI_TASKS_UPSTREAM_ENTRY_SHA256,
   );
   assert.equal(
-    await fileSha256('../src/reducer.js'),
+    await fileSha256('../upstream/reducer.js'),
     PI_TASKS_UPSTREAM_REDUCER_SHA256,
   );
 });

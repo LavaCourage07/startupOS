@@ -3,8 +3,18 @@
     "id": "originos.pi-tasks.event-envelope.v2",
     "kinds": ["mutation", "snapshot"],
     "mutationRequired": ["version", "kind", "revision", "ledgerParentCursor", "parentCursor", "requestId", "payloadHash", "command", "event"],
+    "mutationEventNot": {
+      "anyOf": [
+        { "required": ["forceWithReason"] },
+        { "required": ["force_with_reason"] }
+      ]
+    },
     "snapshotRequired": ["version", "kind", "revision", "ledgerParentCursor", "parentCursor", "event", "checkpoint"],
     "checkpointRequired": ["version", "stateHash", "receiptHash", "checkpointHash", "receiptWindow", "receipts"],
+    "checkpointLegacyForcedCompletions": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
     "receiptWindow": {
       "type": "object",
       "additionalProperties": false,

@@ -8,6 +8,7 @@ export const PI_TASK_PUBLIC_API_VERSION = 1;
 export const PI_TASK_CHECKPOINT_MAX_BYTES = 64 * 1024;
 export const PI_TASK_CHECKPOINT_RECEIPT_LIMIT = 128;
 export const PI_TASK_DIAGNOSTIC_LIMIT = 64;
+export const PI_TASK_LEGACY_FORCED_COMPLETION_CODE = "legacy_forced_completion";
 export const PI_TASKS_UPSTREAM_ENTRY_SHA256 =
     "3a99294bcc034cd63bc245132e7b3c429acf31fd0b2bd6058e4be85eb0b94136";
 export const PI_TASKS_UPSTREAM_REDUCER_SHA256 =
@@ -52,7 +53,15 @@ export const PI_TASK_EVENT_V2_SCHEMA = Object.freeze({
                 requestId: { type: "string", minLength: 1 },
                 payloadHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
                 command: { enum: [...PI_TASK_MUTATION_TOOLS] },
-                event: { type: "object" },
+                event: {
+                    type: "object",
+                    not: {
+                        anyOf: [
+                            { required: ["forceWithReason"] },
+                            { required: ["force_with_reason"] },
+                        ],
+                    },
+                },
             },
         },
         {
@@ -109,6 +118,7 @@ export const PI_TASK_EVENT_V2_SCHEMA = Object.freeze({
                             },
                         },
                         receipts: { type: "array", items: { type: "object" } },
+                        legacyForcedCompletions: { type: "array", items: { type: "object" } },
                     },
                 },
             },
@@ -227,11 +237,25 @@ export function assertMutationRequest(request) {
     if (!request.input || typeof request.input !== "object" || Array.isArray(request.input)) {
         throw new PiTaskContractError("INVALID_INPUT", "input must be an object");
     }
+    if (containsForcedCompletionField(request.input)) {
+        throw new PiTaskContractError(
+            "FORCE_COMPLETION_FORBIDDEN",
+            "Forced task completion is not supported",
+        );
+    }
     return {
         ...request,
         requestId: request.requestId.trim(),
         payloadHash: mutationPayloadHash(request.command, request.input),
     };
+}
+
+export function containsForcedCompletionField(value) {
+    if (!value || typeof value !== "object") return false;
+    if (Object.hasOwn(value, "forceWithReason") || Object.hasOwn(value, "force_with_reason")) {
+        return true;
+    }
+    return Object.values(value).some(containsForcedCompletionField);
 }
 
 export function createMutationReceipt({

@@ -670,8 +670,11 @@ test('schema snapshot 固定 v2 envelope/state event 和 7 个 mutation tool res
       id: PI_TASK_EVENT_V2_SCHEMA.$id,
       kinds: PI_TASK_EVENT_V2_SCHEMA.oneOf.map((schema) => schema.properties.kind.const),
       mutationRequired: PI_TASK_EVENT_V2_SCHEMA.oneOf[0].required,
+      mutationEventNot: PI_TASK_EVENT_V2_SCHEMA.oneOf[0].properties.event.not,
       snapshotRequired: PI_TASK_EVENT_V2_SCHEMA.oneOf[1].required,
       checkpointRequired: PI_TASK_EVENT_V2_SCHEMA.oneOf[1].properties.checkpoint.required,
+      checkpointLegacyForcedCompletions: PI_TASK_EVENT_V2_SCHEMA.oneOf[1]
+        .properties.checkpoint.properties.legacyForcedCompletions,
       receiptWindow: PI_TASK_EVENT_V2_SCHEMA.oneOf[1]
         .properties.checkpoint.properties.receiptWindow,
     },

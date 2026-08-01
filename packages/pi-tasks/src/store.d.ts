@@ -2,6 +2,7 @@ import type {
     PiTaskMutationReceipt,
     PiTaskMutationRequest,
     PiTaskRuntimeMetadata,
+    PiTaskLegacyForcedCompletion,
 } from "./contracts.ts";
 import type { ReplayResult, TaskEvent, TaskState } from "./model.ts";
 
@@ -31,6 +32,7 @@ export interface TaskRuntimeStore {
     replay(branchEntries: BranchEntry[]): ReplayResult & {
         metadata: PiTaskRuntimeMetadata;
         receipts: PiTaskMutationReceipt[];
+        legacyForcedCompletions: PiTaskLegacyForcedCompletion[];
     };
     mutate(request: PiTaskMutationRequest, event: TaskEvent, persistence: TaskPersistence): TaskMutationResult;
     checkpoint(event: TaskEvent, persistence: TaskPersistence): {
@@ -44,6 +46,7 @@ export declare function createTaskRuntimeStore(initialState?: TaskState): TaskRu
 export declare function replayBranchEntries(entries: BranchEntry[]): ReplayResult & {
     metadata: PiTaskRuntimeMetadata;
     receipts: PiTaskMutationReceipt[];
+    legacyForcedCompletions: PiTaskLegacyForcedCompletion[];
 };
 export declare function snapshotState(state: TaskState): Omit<TaskState, "events">;
 export declare function errorText(error: unknown): string;

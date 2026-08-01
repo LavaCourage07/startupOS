@@ -7,6 +7,13 @@ mutation receipt 与不可绕过的 Evidence Gate。
 该 package 是 Task 领域状态的唯一事实源；OriginOS Adapter 不得复制 reducer 或直接读取
 其私有 store。
 
+## Evidence Gate
+
+- Task 只有在 Step 已完成、Criterion 已满足、Blocker 已解决，且关联 Evidence 明确通过质量门控后才能完成。
+- Step、Criterion 与 completion 关联的 Evidence 使用同一质量规则；缺失、`null`、`unknown`、failed 或不可复现的 Evidence 均不能证明完成。
+- v2 tool、mutation request 与 ledger event 不接受 `forceWithReason` 或等价字段。
+- v1 ledger 或旧 snapshot 中的 forced completion 仅迁移为 `legacy_forced_completion` 只读审计记录；Task 不恢复为可信 `done`，该记录也不计作 Evidence。
+
 ## Ledger 与 Session Cursor
 
 - `expectedCursor`、receipt 的 `cursorBefore` 和 envelope 的 `parentCursor` 都表示调用前真实 Session branch leaf。
