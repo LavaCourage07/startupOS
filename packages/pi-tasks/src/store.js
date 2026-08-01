@@ -17,11 +17,50 @@ import { reduceTaskState, TaskTransitionError } from "./reducer.js";
 
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
 
-export function createTaskRuntimeStore(initialState = createEmptyState()) {
-    let state = initialState;
+export function createTaskRuntimeStore() {
+    if (arguments.length > 0) {
+        throw new PiTaskContractError(
+            "INITIAL_STATE_FORBIDDEN",
+            "Task Runtime state must be reconstructed from the canonical Session branch",
+        );
+    }
+    let state = createEmptyState();
     let metadata = createEmptyMetadata(state);
     let requestIndex = new Map();
     let legacyForcedCompletions = [];
+    let branchAnchor = createBranchAnchor([]);
+
+    function adoptReplay(replayed, branch) {
+        state = replayed.state;
+        metadata = replayed.metadata;
+        requestIndex = new Map(replayed.receipts.map((receipt) => [receipt.requestId, receipt]));
+        legacyForcedCompletions = [...replayed.legacyForcedCompletions];
+        branchAnchor = createBranchAnchor(branch);
+    }
+
+    function synchronizeBranch(branch) {
+        const delta = inspectBranchDelta(branch, branchAnchor);
+        if (delta.anchorMatches && !delta.containsTaskEntry) {
+            branchAnchor = createBranchAnchor(branch);
+            if (metadata.branchLeaf !== branchAnchor.leaf) {
+                metadata = buildMetadata(
+                    state,
+                    metadata.revision,
+                    metadata.cursor,
+                    branchAnchor.leaf,
+                    requestIndex,
+                    metadata.integrity,
+                    legacyForcedCompletions,
+                    metadata.latestReceipt,
+                );
+            }
+            return;
+        }
+        const replayed = replayBranchEntries(branch);
+        assertSameTaskProjection(replayed, metadata, requestIndex, legacyForcedCompletions);
+        adoptReplay(replayed, branch);
+    }
+
     return {
         getState() {
             return state;
@@ -31,22 +70,14 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
         },
         replay(branchEntries) {
             const replayed = replayBranchEntries(branchEntries);
-            state = replayed.state;
-            metadata = replayed.metadata;
-            requestIndex = new Map(replayed.receipts.map((receipt) => [receipt.requestId, receipt]));
-            legacyForcedCompletions = [...replayed.legacyForcedCompletions];
+            adoptReplay(replayed, branchEntries);
             return replayed;
         },
         mutate(request, event, persistence) {
             const normalized = assertMutationRequest(request);
             assertCommandEventPair(normalized.command, event);
             const branchBefore = readBranchContext(persistence);
-            assertStoreAlignedWithBranch(
-                branchBefore.branch,
-                metadata,
-                requestIndex,
-                legacyForcedCompletions,
-            );
+            synchronizeBranch(branchBefore.branch);
             const previous = requestIndex.get(normalized.requestId);
             if (previous) {
                 if (previous.command !== normalized.command || previous.payloadHash !== normalized.payloadHash) {
@@ -54,13 +85,6 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
                         "DUPLICATE_REQUEST_CONFLICT",
                         `requestId ${normalized.requestId} was already used with different content`,
                         { requestId: normalized.requestId },
-                    );
-                }
-                if (!branchContainsReceipt(branchBefore.branch, previous)) {
-                    throw new PiTaskContractError(
-                        "IDEMPOTENCY_BRANCH_MISMATCH",
-                        `requestId ${normalized.requestId} is not committed on the current Session branch`,
-                        { requestId: normalized.requestId, cursorAfter: previous.cursorAfter },
                     );
                 }
                 return {
@@ -108,6 +132,7 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
                 legacyForcedCompletions,
                 receipt,
             );
+            branchAnchor = createBranchAnchor(readBranchContext(persistence).branch);
             return { state, metadata: cloneMetadata(metadata), receipt };
         },
         checkpoint(event, persistence) {
@@ -118,12 +143,7 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
                 );
             }
             const branchBefore = readBranchContext(persistence);
-            assertStoreAlignedWithBranch(
-                branchBefore.branch,
-                metadata,
-                requestIndex,
-                legacyForcedCompletions,
-            );
+            synchronizeBranch(branchBefore.branch);
             if (containsForcedCompletionField(event)) {
                 throw new PiTaskContractError(
                     "FORCE_COMPLETION_FORBIDDEN",
@@ -152,6 +172,7 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
                 legacyForcedCompletions,
                 metadata.latestReceipt,
             );
+            branchAnchor = createBranchAnchor(readBranchContext(persistence).branch);
             return { state, metadata: cloneMetadata(metadata), envelope };
         },
     };
@@ -611,8 +632,7 @@ function readBranchContext(persistence) {
     return { branch, leaf: getBranchLeaf(branch) };
 }
 
-function assertStoreAlignedWithBranch(branch, metadata, requestIndex, legacyForcedCompletions) {
-    const replayed = replayBranchEntries(branch);
+function assertSameTaskProjection(replayed, metadata, requestIndex, legacyForcedCompletions) {
     const localReceipts = [...requestIndex.values()]
         .map(normalizeReceipt)
         .sort(compareReceipts);
@@ -640,38 +660,41 @@ function assertStoreAlignedWithBranch(branch, metadata, requestIndex, legacyForc
     }
 }
 
-function branchContainsReceipt(branch, receipt) {
-    return branch.some((entry) => {
-        if (entry.type !== "custom" || entry.customType !== TASK_EVENT_CUSTOM_TYPE) return false;
-        const data = entry.data;
-        if (isV2Envelope(data) && data.kind === "mutation") {
-            return entry.id === receipt.cursorAfter &&
-                data.requestId === receipt.requestId &&
-                data.command === receipt.command &&
-                data.payloadHash === receipt.payloadHash;
-        }
-        if (isV2Envelope(data) && data.kind === "snapshot") {
-            return checkpointHashesAreValid(data) && data.checkpoint.receipts.some((candidate) =>
-                candidate.requestId === receipt.requestId &&
-                stableJson(normalizeReceipt(candidate)) === stableJson(normalizeReceipt(receipt))
-            );
-        }
-        return false;
+function createBranchAnchor(branch) {
+    if (!Array.isArray(branch) || branch.length === 0) {
+        return Object.freeze({ length: 0, leaf: null, leafHash: null });
+    }
+    const leafEntry = branch.at(-1);
+    return Object.freeze({
+        length: branch.length,
+        leaf: normalizeEntryCursor(leafEntry?.id),
+        leafHash: sha256(leafEntry),
     });
 }
 
-function checkpointHashesAreValid(envelope) {
-    const checkpoint = envelope.checkpoint;
-    const { checkpointHash, ...unsignedCheckpoint } = checkpoint;
-    return byteLength(envelope) <= PI_TASK_CHECKPOINT_MAX_BYTES &&
-        sha256(checkpoint.receipts) === checkpoint.receiptHash &&
-        checkpointEnvelopeHash({
-            revision: envelope.revision,
-            ledgerParentCursor: envelope.ledgerParentCursor,
-            parentCursor: envelope.parentCursor,
-            event: envelope.event,
-            checkpoint: unsignedCheckpoint,
-        }) === checkpointHash;
+function inspectBranchDelta(branch, anchor) {
+    if (!Array.isArray(branch)) {
+        throw new PiTaskContractError("INVALID_BRANCH", "Task persistence getBranch() must return an array");
+    }
+    if (branch.length < anchor.length) {
+        return { anchorMatches: false, containsTaskEntry: true };
+    }
+    // SessionManager branches are immutable, append-only paths. Initialization,
+    // reload and branch switches perform a full replay; the hot path validates
+    // the previously observed tail and scans only newly appended entries.
+    if (anchor.length > 0) {
+        const anchoredEntry = branch[anchor.length - 1];
+        if (normalizeEntryCursor(anchoredEntry?.id) !== anchor.leaf || sha256(anchoredEntry) !== anchor.leafHash) {
+            return { anchorMatches: false, containsTaskEntry: true };
+        }
+    }
+    for (let index = anchor.length; index < branch.length; index += 1) {
+        const entry = branch[index];
+        if (entry?.type === "custom" && entry.customType === TASK_EVENT_CUSTOM_TYPE) {
+            return { anchorMatches: true, containsTaskEntry: true };
+        }
+    }
+    return { anchorMatches: true, containsTaskEntry: false };
 }
 
 function getBranchLeaf(branch) {
@@ -757,18 +780,20 @@ function cloneMetadata(metadata) {
 
 function recordDiagnostic(malformedEvents, integrity, code, message, cursor, event) {
     const eventHash = sha256(event ?? { code, cursor: cursor ?? null });
-    const key = `${code}:${cursor ?? ""}:${eventHash}`;
+    const cursorHash = cursor ? sha256(cursor) : undefined;
+    const key = `${code}:${cursorHash ?? ""}:${eventHash}`;
     if (integrity.some((item) => item.key === key)) return;
     if (integrity.length >= PI_TASK_DIAGNOSTIC_LIMIT) return;
-    integrity.push(Object.freeze({ key, code, eventHash, ...(cursor ? { cursor } : {}) }));
+    integrity.push(Object.freeze({ key, code, eventHash, ...(cursorHash ? { cursorHash } : {}) }));
     malformedEvents.push(sanitizeDiagnosticMessage(message));
 }
 
 function sanitizeDiagnosticMessage(message) {
     return String(message)
         .replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, "")
-        .replace(/\b(authorization|api[_-]?key|token|secret)\s*[:=]\s*\S+/gi, "$1=[REDACTED]")
-        .replace(/[A-Za-z]:\\Users\\[^\\\s]+/g, "[REDACTED_PATH]")
+        .replace(/\bauthorization\s*:\s*[^\r\n,;]+/gi, "authorization: [REDACTED]")
+        .replace(/\b(api[_-]?key|token|secret)\s*[:=]\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "$1=[REDACTED]")
+        .replace(/[A-Za-z]:\\Users\\[^\r\n:]*/g, "[REDACTED_PATH]")
         .replace(/\/home\/[^/\s]+/g, "/home/[REDACTED]")
         .slice(0, 240);
 }

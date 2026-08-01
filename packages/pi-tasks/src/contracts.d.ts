@@ -65,7 +65,7 @@ export interface PiTaskLedgerDiagnostic {
     key: string;
     code: string;
     eventHash: string;
-    cursor?: string;
+    cursorHash?: string;
 }
 
 export interface PiTaskLegacyForcedCompletion {

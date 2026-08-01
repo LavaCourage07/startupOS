@@ -145,6 +145,32 @@ function createPersistence(entries = [], prefix = 'cursor') {
   };
 }
 
+function createCountingPersistence(entries = [], prefix = 'counting') {
+  const persistence = createPersistence(entries, prefix);
+  let fullIterations = 0;
+  let indexedReads = 0;
+  const branch = new Proxy(persistence.branch, {
+    get(target, property, receiver) {
+      if (property === Symbol.iterator) fullIterations += 1;
+      if (typeof property === 'string' && /^\d+$/.test(property)) indexedReads += 1;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  return {
+    ...persistence,
+    branch,
+    getBranch() {
+      return branch;
+    },
+    get fullIterations() {
+      return fullIterations;
+    },
+    get indexedReads() {
+      return indexedReads;
+    },
+  };
+}
+
 function mutateCreated(store, persistence, request = mutationRequest()) {
   return store.mutate(request, taskCreated(), persistence);
 }
@@ -237,6 +263,13 @@ test('成功 mutation 写入 v2 envelope 并返回真实 Session cursor receipt'
   assert.equal(persistence.branch[0].parentId, null);
   assert.equal(result.metadata.cursor, persistence.branch[0].id);
   assert.equal(result.state.tasks.T1.status, 'active');
+});
+
+test('store 禁止脱离 canonical Session branch 注入 initial state', () => {
+  assert.throws(
+    () => createTaskRuntimeStore({ tasks: { forged: {} } }),
+    (error) => error.code === 'INITIAL_STATE_FORBIDDEN',
+  );
 });
 
 test('提交后相同 requestId 与 payload 即使 CAS 已过期仍 replay 原 receipt', () => {
@@ -696,7 +729,7 @@ test('replay 诊断有界去重且不进入业务 state、snapshot 或 stateHash
 });
 
 test('replay 诊断只持久化分类与 event hash，并裁剪敏感兼容消息', () => {
-  const secretTaskId = 'token=supersecret C:\\Users\\alice\\private';
+  const secretTaskId = 'Authorization: Basic basic-secret; token=topsecret C:\\Users\\alice\\private';
   const invalidEvent = taskUpdated('invalid', 'event-sensitive-diagnostic');
   invalidEvent.taskId = secretTaskId;
   const envelope = {
@@ -711,7 +744,7 @@ test('replay 诊断只持久化分类与 event hash，并裁剪敏感兼容消�
     event: invalidEvent,
   };
   const entry = {
-    id: 'cursor-sensitive-diagnostic',
+    id: 'C:\\Users\\alice\\private\\cursor-secret',
     parentId: null,
     type: 'custom',
     customType: TASK_EVENT_CUSTOM_TYPE,
@@ -721,12 +754,27 @@ test('replay 诊断只持久化分类与 event hash，并裁剪敏感兼容消�
   const serializedMetadata = JSON.stringify(replay.metadata.integrity);
 
   assert.equal(replay.metadata.integrity.length, 1);
-  assert.equal(serializedMetadata.includes('supersecret'), false);
+  assert.equal(serializedMetadata.includes('topsecret'), false);
   assert.equal(serializedMetadata.includes('alice'), false);
+  assert.equal(serializedMetadata.includes('private'), false);
   assert.equal(serializedMetadata.includes('message'), false);
-  assert.equal(replay.malformedEvents[0].includes('supersecret'), false);
+  assert.equal(replay.malformedEvents[0].includes('topsecret'), false);
   assert.equal(replay.malformedEvents[0].includes('alice'), false);
+  assert.equal(replay.malformedEvents[0].includes('private'), false);
   assert.ok(replay.malformedEvents[0].length <= 240);
+});
+
+test('branch 新增 malformed Task entry 时增量对齐刷新诊断后继续 checkpoint', () => {
+  const store = createTaskRuntimeStore();
+  const persistence = createPersistence();
+  mutateCreated(store, persistence);
+  persistence.appendEntry(TASK_EVENT_CUSTOM_TYPE, { invalid: 'tail-task-entry' });
+
+  store.checkpoint(taskSnapshot(store, 'snapshot-after-malformed-tail'), persistence);
+
+  assert.equal(store.getMetadata().integrity.length, 1);
+  assert.equal(store.getMetadata().integrity[0].code, 'INVALID_ENVELOPE');
+  assert.equal(persistence.branch.at(-1).data.kind, 'snapshot');
 });
 
 test('replay 诊断 metadata 最多保留 64 条', () => {
@@ -745,7 +793,7 @@ test('replay 诊断 metadata 最多保留 64 条', () => {
 
 test('200+ requests 的 checkpoint 保持 64KB 内并保留近期幂等窗口', () => {
   const store = createTaskRuntimeStore();
-  const persistence = createPersistence();
+  const persistence = createCountingPersistence();
   mutateCreated(store, persistence);
   let latestRequest;
   for (let index = 1; index <= 220; index += 1) {
@@ -780,7 +828,9 @@ test('200+ requests 的 checkpoint 保持 64KB 内并保留近期幂等窗口', 
   assert.equal(retry.receipt.replayed, true);
   assert.equal(compactedPersistence.appendCount, 0);
 
-  const fullBranchPersistence = createPersistence(persistence.branch, 'full-branch');
+  assert.equal(persistence.fullIterations, 0, 'hot mutation path must not replay the full branch');
+  assert.ok(persistence.indexedReads < 3000, `hot path performed ${persistence.indexedReads} indexed reads`);
+  const fullBranchPersistence = createPersistence([...persistence.branch], 'full-branch');
   const fullBranchStore = createTaskRuntimeStore();
   const fullReplay = fullBranchStore.replay(fullBranchPersistence.branch);
   assert.equal(fullReplay.metadata.revision, 221);

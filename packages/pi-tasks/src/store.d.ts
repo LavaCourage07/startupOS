@@ -42,7 +42,7 @@ export interface TaskRuntimeStore {
     };
 }
 
-export declare function createTaskRuntimeStore(initialState?: TaskState): TaskRuntimeStore;
+export declare function createTaskRuntimeStore(): TaskRuntimeStore;
 export declare function replayBranchEntries(entries: BranchEntry[]): ReplayResult & {
     metadata: PiTaskRuntimeMetadata;
     receipts: PiTaskMutationReceipt[];
