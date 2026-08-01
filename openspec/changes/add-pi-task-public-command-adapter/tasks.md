@@ -21,8 +21,8 @@
 
 ## 5. 契约与打包回归
 
-- [ ] 5.1 [可并行] 在独立 Task branch/worktree 中更新 A-01 Core contract harness，验证 TC-C1、TC-C2 和 A-02 所有成功、失败、边界 case；依赖：4.2；写入范围：`packages/core/src/lib/integrations/pi-agent/__tests__/pi-task-runtime-boundary/`；角色：Contract Worker；必需测试：Core Vitest contract suite；完成证据：测试 case 对照表和输出。
-- [ ] 5.2 [可并行] 在独立 Task branch/worktree 中更新 Desktop package verification 与 release workflow，验证 public export、patch、受控 package 和 transitive dependency；依赖：4.2；写入范围：`packages/desktop/scripts/`、`.github/workflows/desktop-release.yml`；角色：Packaging Worker；必需测试：Electron development smoke、Windows x64、macOS x64/arm64 package verification；完成证据：本地可执行证据及平台 workflow 证据。
+- [x] 5.1 [可并行] 在独立 Task branch/worktree 中更新 A-01 Core contract harness，验证 TC-C1、TC-C2 和 A-02 所有成功、失败、边界 case；依赖：4.2；写入范围：`packages/core/src/lib/integrations/pi-agent/__tests__/pi-task-runtime-boundary/`；角色：Contract Worker；必需测试：Core Vitest contract suite；完成证据：Task commit `8f21d3f`（integration commit `8bb99d4`）；公开契约 case matrix 覆盖 TC-C1、TC-C2、Session/current branch、receipt/state event、stale/busy/timeout/epoch、幂等、Evidence Gate、无孤立消息与兼容性边界；专用 Core Vitest `13/13`、Core typecheck、私有边界与写入范围扫描通过。
+- [x] 5.2 [可并行] 在独立 Task branch/worktree 中更新 Desktop package verification 与 release workflow，验证 public export、patch、受控 package 和 transitive dependency；依赖：4.2；写入范围：`packages/desktop/scripts/`、`.github/workflows/desktop-release.yml`、`packages/agent/package.json`、`packages/agent/scripts/pi-task-runtime-audit*`、`pnpm-lock.yaml`；角色：Packaging Worker；必需测试：Electron development smoke、Windows x64、macOS x64/arm64 package verification；完成证据：Task commit `08da312`（integration commit `07ffed4`）；frozen install、Agent audit `3/3`、受控 package `40/40`、Desktop verifier `6/6`、development smoke（290 条依赖关系）与 runtime staging（126 packages）通过；Windows x64 与 macOS x64/arm64 真包校验已接入三个 release jobs，平台产物执行证据在 6.2 verification goal 中记录。
 - [ ] 5.3 [串行] 执行 Adapter、Core、Desktop、lint、OpenSpec strict 和普通聊天回归，确认未启用产品 Task Runtime 时既有行为不变；依赖：5.1、5.2；写入范围：仅允许必要修复所在 Task worktree；角色：Verification Owner；必需测试：全部相关单元、集成、package smoke 与 `pnpm lint`；完成证据：回归矩阵。
 
 ## 6. 决策闭环与合并
