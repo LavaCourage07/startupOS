@@ -1,0 +1,20 @@
+import type { ExtensionAPI } from './src/pi-types.js';
+
+export {
+  ORIGINOS_PI_TASKS_VERSION,
+  PI_TASK_EVENT_VERSION,
+  PI_TASK_PUBLIC_API_VERSION,
+  PI_TASK_SCHEMA_FINGERPRINT,
+  PI_TASK_STATE_EVENT_VERSION,
+  PI_TASKS_UPSTREAM_ENTRY_SHA256,
+  PI_TASKS_UPSTREAM_REDUCER_SHA256,
+  UPSTREAM_PI_TASKS_VERSION,
+} from './src/contracts.js';
+export { TASK_STATE_EVENT, TASK_WIDGET_ID } from './src/state-events.js';
+export {
+  createTaskRuntimeStore,
+  replayBranchEntries,
+  snapshotState,
+} from './src/store.js';
+
+export default function originosPiTasks(pi: ExtensionAPI): void;
