@@ -9,7 +9,7 @@
 | Runtime host | `@earendil-works/pi-coding-agent` | `0.80.10` | patch SHA-256 `7d70e7b71db29280df41ddf1f8701c9ae56c98e9e48b85ee11700c4ca66c11b4`；host invoke contract `1` | Agent Runtime |
 | Runtime patch set | 两个 Runtime patch 的有序清单 | `1` | composite SHA-256 `213b1f2db610720ca0dde1853abbe02975185ad37c95eb517031844631371674` | Agent Runtime |
 | Task extension | `@originos/pi-tasks` | `0.2.0-originos.1` | public API `1`；event `2`；state event `2`；schema `originos-pi-tasks/v1:event-v2:cas:receipt:evidence-gate-no-force`；32-file package SHA-256 `c900eb1fc776fd0c2ed28d076374a0253d6cb01963590f0930591725b9bb99e0` | Task Extension |
-| Adapter | `@originos/pi-agent-adapter/task-runtime` | adapter package `0.80.10` | adapter contract `1`；snapshot `1` | Agent Runtime |
+| Adapter | `@originos/pi-agent-adapter/task-runtime` | adapter package `0.80.10` | adapter contract `1`；snapshot `1`；state event `pi-tasks:state@2`；Task commit `10b87be` | Agent Runtime |
 
 ### Fingerprint 计算规则
 
@@ -33,6 +33,8 @@ commit、时间戳、本地绝对路径或 tarball metadata 作为 fingerprint�
 - `AgentSession.prototype.invokeRegisteredTool` 与 core `invokeRegisteredToolCall` 必须可解析。
 - `@originos/pi-tasks` 必须公开 extension factory、event/state contract 与 replay API。
 - Adapter 只允许公共 `task-runtime` 子路径，不得导入 Task extension 私有 reducer/store。
+- Adapter bridge 必须绑定 Session id、bridge epoch、current branch membership、host abort 与
+  public EventBus；缺少任一宿主回调时 fail closed。
 - 任一字段缺失或不匹配时返回 `INCOMPATIBLE_RUNTIME`，不得尝试降级执行 mutation。
 
 ### 回滚边界

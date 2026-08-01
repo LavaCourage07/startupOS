@@ -17,7 +17,7 @@
 ## 4. OriginOS Adapter
 
 - [x] 4.1 [可并行] 在独立 Task branch/worktree 中新增 `@originos/pi-agent-adapter/task-runtime` 公共 DTO、compatibility guard、allowlist 和 extension bridge；依赖：1.1；写入范围：`packages/agent/src/task-runtime/`、`packages/agent/package.json`、构建与 export 配置；角色：Adapter Worker；必需测试：类型、公开子路径、错误映射、敏感信息裁剪；完成证据：Task commit `95fee79`，`node packages/agent/build-runtime.js` 与 CJS 公共子路径 import 通过，Adapter contract tests 5/5 通过。
-- [ ] 4.2 [串行] 接入 runtime host invoke 与受控 Task extension receipt/state event，确保原 Session/current branch、busy、epoch 和 timeout 契约；依赖：2.2、3.3、4.1；写入范围：`packages/agent/src/task-runtime/`；角色：Adapter Worker；必需测试：同 Session/branch mutation、stale scope、busy、event timeout、reload epoch、无孤立消息；完成证据：Adapter integration tests。
+- [x] 4.2 [串行] 接入 runtime host invoke 与受控 Task extension receipt/state event，确保原 Session/current branch、busy、epoch 和 timeout 契约；依赖：2.2、3.3、4.1；写入范围：`packages/agent/src/task-runtime/`；角色：Adapter Worker；必需测试：同 Session/branch mutation、stale scope、busy、event timeout、reload epoch、无孤立消息；完成证据：Task commit `10b87be`；真实受控 extension + public EventBus integration tests 19/19，受控 package tests 40/40，d.ts strict check、CJS bundle/import、私有边界扫描通过；覆盖历史 request replay、普通 message leaf、sibling branch event、迟到 event、timeout 幂等恢复、in-flight invalidate/abort、安装回滚和敏感错误裁剪；独立复审 P0/P1=0。
 
 ## 5. 契约与打包回归
 
