@@ -66,19 +66,67 @@ export interface PiTaskSnapshot {
   };
 }
 
-export interface PiTaskRuntimeBridgeOptions<TResult = unknown> {
-  expectedCompatibility: PiTaskCompatibilityDescriptor;
-  bridgeEpoch?: number;
-  getCompatibility(): PiTaskCompatibilityDescriptor | Promise<PiTaskCompatibilityDescriptor>;
-  invokeRegisteredTool(command: NormalizedPiTaskCommand): TResult | Promise<TResult>;
+export interface RegisteredTaskToolInvocationRequest {
+  toolCallId: string;
+  toolName: PiTaskToolName;
+  input: Record<string, unknown>;
 }
 
-export interface PiTaskRuntimeBridge<TResult = unknown> {
+export interface RegisteredTaskToolInvocationResult {
+  toolCallId: string;
+  toolName: string;
+  result: {
+    content?: unknown;
+    details?: unknown;
+    isError?: boolean;
+  };
+  isError: boolean;
+}
+
+export interface PiTaskCommandResult {
+  version: 1;
+  requestId: string;
+  toolCallId: string;
+  taskId?: string;
+  revisionBefore: number;
+  revisionAfter: number;
+  cursorBefore: string | null;
+  cursorAfter: string;
+  eventId: string;
+  stateHash: string;
+  replayed: boolean;
+  snapshot: PiTaskSnapshot;
+  isError: false;
+}
+
+export interface PiTaskRuntimeBridgeOptions {
+  expectedCompatibility: PiTaskCompatibilityDescriptor;
+  sessionId: string;
+  bridgeEpoch?: number;
+  stateEventTimeoutMs?: number;
+  sanitizeLimits?: Record<string, number>;
+  getCompatibility(): PiTaskCompatibilityDescriptor | Promise<PiTaskCompatibilityDescriptor>;
+  getCurrentScope():
+    | { sessionId: string; cursor: string | null }
+    | Promise<{ sessionId: string; cursor: string | null }>;
+  abortHostInvocation(): void | Promise<void>;
+  isCursorOnCurrentBranch(cursor: string | null): boolean;
+  invokeRegisteredTool(
+    request: RegisteredTaskToolInvocationRequest,
+  ): RegisteredTaskToolInvocationResult | Promise<RegisteredTaskToolInvocationResult>;
+}
+
+export interface PiTaskRuntimeBridge {
   readonly bridgeEpoch: number;
-  extension(pi: { on(event: string, handler: (payload: unknown) => unknown): unknown }): void;
+  extension(pi: {
+    on(event: string, handler: (payload: unknown) => unknown): unknown;
+    events: {
+      on(channel: string, handler: (payload: unknown) => void): () => void;
+    };
+  }): void;
   gateway: {
     readonly bridgeEpoch: number;
-    invoke(command: PiTaskCommand): Promise<TResult>;
+    invoke(command: PiTaskCommand): Promise<PiTaskCommandResult>;
   };
   invalidate(): void;
 }
@@ -93,6 +141,7 @@ export const DEFAULT_SANITIZE_LIMITS: Readonly<{
 export const PI_TASK_COMPATIBILITY_REQUIREMENTS: Readonly<Record<string, string | number>>;
 export const PI_TASK_CONTRACT_VERSION: 1;
 export const PI_TASK_SNAPSHOT_VERSION: 1;
+export const PI_TASK_STATE_EVENT_NAME: 'pi-tasks:state';
 export const PI_TASK_STATE_EVENT_VERSION: 2;
 export const PI_TASK_TOOL_NAMES: readonly PiTaskToolName[];
 
@@ -112,9 +161,7 @@ export function createPiTaskCompatibilityGuard(expected: PiTaskCompatibilityDesc
   evaluate(actual: PiTaskCompatibilityDescriptor): PiTaskCompatibilityResult;
   assert(actual: PiTaskCompatibilityDescriptor): PiTaskCompatibilityDescriptor;
 };
-export function createPiTaskRuntimeBridge<TResult = unknown>(
-  options: PiTaskRuntimeBridgeOptions<TResult>,
-): PiTaskRuntimeBridge<TResult>;
+export function createPiTaskRuntimeBridge(options: PiTaskRuntimeBridgeOptions): PiTaskRuntimeBridge;
 export function mapPiTaskRuntimeError(error: unknown, fallbackCode?: string): PiTaskRuntimeError;
 export function sanitizeTaskRuntimeValue(value: unknown, options?: Record<string, number>): unknown;
 export function createBoundedPiTaskSnapshot(
