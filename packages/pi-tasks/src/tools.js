@@ -91,7 +91,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 ...(params.priority ? { priority: params.priority } : {}),
                 ...(params.tags ? { tags: params.tags } : {}),
             });
-            return appendAndReport(pi, store, ctx, event, `Created task ${taskId}: ${params.title}`, buildMutationRequest("task_plan", toolCallId, params, store));
+            return appendAndReport(pi, store, ctx, event, `Created task ${taskId}: ${params.title}`, buildMutationRequest("task_plan", toolCallId, params, store, ctx));
         },
     });
     pi.registerTool({
@@ -157,7 +157,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 resume: buildTaskResume(state),
                 reason: "manual",
             });
-            return appendAndReport(pi, store, ctx, event, `Checkpointed pi-tasks state${params.reason ? `: ${params.reason}` : ""}`, buildMutationRequest("task_checkpoint", toolCallId, params, store));
+            return appendAndReport(pi, store, ctx, event, `Checkpointed pi-tasks state${params.reason ? `: ${params.reason}` : ""}`, buildMutationRequest("task_checkpoint", toolCallId, params, store, ctx));
         },
     });
     pi.registerTool({
@@ -241,7 +241,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 childSteps: params.child_steps,
                 reason: params.reason,
             });
-            return appendAndReport(pi, store, ctx, event, `Decomposed step ${params.step_id} for task ${params.task_id}`, buildMutationRequest("task_decompose", toolCallId, params, store));
+            return appendAndReport(pi, store, ctx, event, `Decomposed step ${params.step_id} for task ${params.task_id}`, buildMutationRequest("task_decompose", toolCallId, params, store, ctx));
         },
     });
     pi.registerTool({
@@ -338,7 +338,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                     : {}),
                 ...(params.blocker ? { blocker: params.blocker } : {}),
             });
-            return appendAndReport(pi, store, ctx, event, `Updated task ${params.task_id}`, buildMutationRequest("task_update", toolCallId, params, store));
+            return appendAndReport(pi, store, ctx, event, `Updated task ${params.task_id}`, buildMutationRequest("task_update", toolCallId, params, store, ctx));
         },
     });
     pi.registerTool({
@@ -395,7 +395,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             const success = duplicate
                 ? `Linked existing evidence ${duplicate.id} for task ${params.task_id}`
                 : `Recorded evidence ${evidenceId} for task ${params.task_id}`;
-            return appendAndReport(pi, store, ctx, event, success, buildMutationRequest("task_evidence", toolCallId, params, store));
+            return appendAndReport(pi, store, ctx, event, success, buildMutationRequest("task_evidence", toolCallId, params, store, ctx));
         },
     });
     pi.registerTool({
@@ -431,7 +431,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             const event = baseEvent("task.decision_recorded", params.task_id, ctx, {
                 decision,
             });
-            return appendAndReport(pi, store, ctx, event, `Recorded decision ${decisionId} for task ${params.task_id}`, buildMutationRequest("task_decision", toolCallId, params, store));
+            return appendAndReport(pi, store, ctx, event, `Recorded decision ${decisionId} for task ${params.task_id}`, buildMutationRequest("task_decision", toolCallId, params, store, ctx));
         },
     });
     pi.registerTool({
@@ -468,7 +468,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                     ? { forceWithReason: params.force_with_reason }
                     : {}),
             });
-            return appendAndReport(pi, store, ctx, event, `Completed task ${params.task_id}`, buildMutationRequest("task_complete", toolCallId, params, store));
+            return appendAndReport(pi, store, ctx, event, `Completed task ${params.task_id}`, buildMutationRequest("task_complete", toolCallId, params, store, ctx));
         },
     });
 }
@@ -500,7 +500,7 @@ function originosCommandSchema() {
         expected_cursor: { type: ["string", "null"], minLength: 1 },
     });
 }
-function buildMutationRequest(command, toolCallId, params, store) {
+function buildMutationRequest(command, toolCallId, params, store, ctx) {
     const businessInput = { ...params };
     delete businessInput.originos_command;
     const current = store.getMetadata();
@@ -510,10 +510,21 @@ function buildMutationRequest(command, toolCallId, params, store) {
         requestId: reserved?.request_id ?? toolCallId,
         command,
         expectedRevision: reserved?.expected_revision ?? current.revision,
-        expectedCursor: reserved ? reserved.expected_cursor : current.cursor,
+        expectedCursor: reserved ? reserved.expected_cursor : currentBranchLeaf(ctx),
         input: businessInput,
         runtimeToolCallId: toolCallId,
     };
+}
+function currentBranchLeaf(ctx) {
+    const branch = ctx.sessionManager.getBranch();
+    if (!Array.isArray(branch) || branch.length === 0) return null;
+    const leaf = branch.at(-1)?.id;
+    if (typeof leaf !== "string" || leaf.length === 0) {
+        const error = new Error("Current Session branch leaf has no stable entry id");
+        error.code = "INVALID_BRANCH_LEAF";
+        throw error;
+    }
+    return leaf;
 }
 function appendAndReport(pi, store, ctx, event, success, request) {
     try {

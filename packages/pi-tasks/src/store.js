@@ -1,12 +1,19 @@
 import {
     assertMutationRequest,
     createMutationReceipt,
+    PI_TASK_CHECKPOINT_MAX_BYTES,
+    PI_TASK_CHECKPOINT_RECEIPT_LIMIT,
+    PI_TASK_DIAGNOSTIC_LIMIT,
     PI_TASK_MUTATION_TOOLS,
     PiTaskContractError,
+    sha256,
+    stableJson,
     stateHash,
 } from "./contracts.js";
 import { createEmptyState, TASK_EVENT_CUSTOM_TYPE, } from "./model.js";
 import { reduceTaskState, TaskTransitionError } from "./reducer.js";
+
+const HASH_PATTERN = /^[a-f0-9]{64}$/;
 
 export function createTaskRuntimeStore(initialState = createEmptyState()) {
     let state = initialState;
@@ -29,6 +36,7 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
         mutate(request, event, persistence) {
             const normalized = assertMutationRequest(request);
             assertCommandEventPair(normalized.command, event);
+            const branchBefore = readBranchContext(persistence);
             const previous = requestIndex.get(normalized.requestId);
             if (previous) {
                 if (previous.command !== normalized.command || previous.payloadHash !== normalized.payloadHash) {
@@ -38,32 +46,42 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
                         { requestId: normalized.requestId },
                     );
                 }
+                if (!branchContainsReceipt(branchBefore.branch, previous)) {
+                    throw new PiTaskContractError(
+                        "IDEMPOTENCY_BRANCH_MISMATCH",
+                        `requestId ${normalized.requestId} is not committed on the current Session branch`,
+                        { requestId: normalized.requestId, cursorAfter: previous.cursorAfter },
+                    );
+                }
                 return {
                     state,
                     metadata: cloneMetadata(metadata),
                     receipt: Object.freeze({ ...previous, replayed: true }),
                 };
             }
-            assertCas(normalized, metadata);
+            assertCas(normalized, metadata, branchBefore.leaf);
             const nextState = reduceTaskState(state, event);
             const revisionBefore = metadata.revision;
-            const cursorBefore = metadata.cursor;
+            const ledgerCursorBefore = metadata.cursor;
             const envelope = Object.freeze({
                 version: 2,
                 kind: "mutation",
                 revision: revisionBefore + 1,
-                parentCursor: cursorBefore,
+                ledgerParentCursor: ledgerCursorBefore,
+                parentCursor: branchBefore.leaf,
                 requestId: normalized.requestId,
                 payloadHash: normalized.payloadHash,
                 command: normalized.command,
                 event,
             });
-            const cursorAfter = appendAndReadCursor(envelope, persistence);
+            const cursorAfter = appendAndReadCursor(envelope, persistence, branchBefore.leaf);
             const receipt = createMutationReceipt({
                 request: normalized,
                 revisionBefore,
                 revisionAfter: revisionBefore + 1,
-                cursorBefore,
+                ledgerCursorBefore,
+                ledgerCursorAfter: cursorAfter,
+                cursorBefore: branchBefore.leaf,
                 cursorAfter,
                 event,
                 nextState,
@@ -73,6 +91,7 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
             metadata = buildMetadata(
                 state,
                 receipt.revisionAfter,
+                receipt.ledgerCursorAfter,
                 receipt.cursorAfter,
                 requestIndex,
                 metadata.integrity,
@@ -87,24 +106,22 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
                     "Compaction checkpoint requires a v1 task.snapshot business event",
                 );
             }
+            const branchBefore = readBranchContext(persistence);
             const nextState = reduceTaskState(state, event);
-            const envelope = Object.freeze({
-                version: 2,
-                kind: "snapshot",
+            const envelope = buildBoundedCheckpointEnvelope({
                 revision: metadata.revision,
-                parentCursor: metadata.cursor,
+                ledgerParentCursor: metadata.cursor,
+                parentCursor: branchBefore.leaf,
                 event,
-                checkpoint: Object.freeze({
-                    version: 1,
-                    stateHash: stateHash(nextState),
-                    receipts: [...requestIndex.values()].map((receipt) => ({ ...receipt, replayed: false })),
-                }),
+                nextState,
+                receipts: [...requestIndex.values()],
             });
-            const cursorAfter = appendAndReadCursor(envelope, persistence);
+            const cursorAfter = appendAndReadCursor(envelope, persistence, branchBefore.leaf);
             state = nextState;
             metadata = buildMetadata(
                 state,
                 metadata.revision,
+                cursorAfter,
                 cursorAfter,
                 requestIndex,
                 metadata.integrity,
@@ -125,17 +142,18 @@ export function replayBranchEntries(entries) {
     const acceptedCursors = new Set();
     const requestIndex = new Map();
     let acceptedEntryCount = 0;
+    const branchLeaf = getBranchLeaf(entries);
 
     for (const entry of entries) {
         if (entry.type !== "custom" || entry.customType !== TASK_EVENT_CUSTOM_TYPE)
             continue;
         const entryCursor = normalizeEntryCursor(entry.id);
         if (!entryCursor) {
-            recordDiagnostic(malformedEvents, integrity, "Task ledger entry is missing a Session cursor");
+            recordDiagnostic(malformedEvents, integrity, "MISSING_CURSOR", "Task ledger entry is missing a Session cursor");
             continue;
         }
         if (acceptedCursors.has(entryCursor)) {
-            recordDiagnostic(malformedEvents, integrity, `Duplicate task ledger cursor ignored: ${entryCursor}`);
+            recordDiagnostic(malformedEvents, integrity, "DUPLICATE_CURSOR", `Duplicate task ledger cursor ignored: ${entryCursor}`, entryCursor);
             continue;
         }
         const data = entry.data;
@@ -148,16 +166,22 @@ export function replayBranchEntries(entries) {
                 acceptedEntryCount += 1;
             }
             catch (error) {
-                recordDiagnostic(
-                    malformedEvents,
-                    integrity,
-                    `Entry ${entryCursor}: ${errorText(error)}`,
-                );
+                recordDiagnostic(malformedEvents, integrity, "V1_REPLAY_REJECTED", `Entry ${entryCursor}: ${errorText(error)}`, entryCursor);
             }
             continue;
         }
         if (!isV2Envelope(data)) {
-            recordDiagnostic(malformedEvents, integrity, `Entry ${entryCursor} is not a pi-tasks event`);
+            recordDiagnostic(malformedEvents, integrity, "INVALID_ENVELOPE", `Entry ${entryCursor} is not a pi-tasks event`, entryCursor);
+            continue;
+        }
+        if (!entryParentMatches(entry, data.parentCursor)) {
+            recordDiagnostic(
+                malformedEvents,
+                integrity,
+                "BRANCH_PARENT_MISMATCH",
+                `Entry ${entryCursor} parentId does not match envelope parentCursor`,
+                entryCursor,
+            );
             continue;
         }
         if (data.kind === "snapshot") {
@@ -171,7 +195,7 @@ export function replayBranchEntries(entries) {
                 allowBootstrap: acceptedEntryCount === 0,
             });
             if (replayed.error) {
-                recordDiagnostic(malformedEvents, integrity, replayed.error);
+                recordDiagnostic(malformedEvents, integrity, replayed.code ?? "SNAPSHOT_REJECTED", replayed.error, entryCursor);
                 continue;
             }
             state = replayed.state;
@@ -184,27 +208,25 @@ export function replayBranchEntries(entries) {
         }
         const existing = requestIndex.get(data.requestId);
         if (existing) {
-            if (existing.command !== data.command || existing.payloadHash !== data.payloadHash) {
-                recordDiagnostic(
-                    malformedEvents,
-                    integrity,
-                    `Conflicting duplicate request ignored: ${data.requestId}`,
-                );
-            }
-            else {
-                recordDiagnostic(
-                    malformedEvents,
-                    integrity,
-                    `Duplicate request entry ignored: ${data.requestId}`,
-                );
-            }
-            continue;
-        }
-        if (data.revision !== revision + 1 || data.parentCursor !== cursor) {
+            const conflict = existing.command !== data.command || existing.payloadHash !== data.payloadHash;
             recordDiagnostic(
                 malformedEvents,
                 integrity,
-                `Out-of-order task event ignored at ${entryCursor}: expected revision ${revision + 1} and parent ${String(cursor)}`,
+                conflict ? "DUPLICATE_REQUEST_CONFLICT" : "DUPLICATE_REQUEST",
+                conflict
+                    ? `Conflicting duplicate request ignored: ${data.requestId}`
+                    : `Duplicate request entry ignored: ${data.requestId}`,
+                entryCursor,
+            );
+            continue;
+        }
+        if (data.revision !== revision + 1 || data.ledgerParentCursor !== cursor) {
+            recordDiagnostic(
+                malformedEvents,
+                integrity,
+                "OUT_OF_ORDER_EVENT",
+                `Out-of-order task event ignored at ${entryCursor}: expected revision ${revision + 1} and ledger parent ${String(cursor)}`,
+                entryCursor,
             );
             continue;
         }
@@ -216,13 +238,15 @@ export function replayBranchEntries(entries) {
                     requestId: data.requestId,
                     command: data.command,
                     expectedRevision: revision,
-                    expectedCursor: cursor,
+                    expectedCursor: data.parentCursor,
                     input: {},
                     payloadHash: data.payloadHash,
                 },
                 revisionBefore: revision,
                 revisionAfter: data.revision,
-                cursorBefore: cursor,
+                ledgerCursorBefore: data.ledgerParentCursor,
+                ledgerCursorAfter: entryCursor,
+                cursorBefore: data.parentCursor,
                 cursorAfter: entryCursor,
                 event: data.event,
                 nextState,
@@ -236,11 +260,10 @@ export function replayBranchEntries(entries) {
             acceptedEntryCount += 1;
         }
         catch (error) {
-            recordDiagnostic(malformedEvents, integrity, `Entry ${entryCursor}: ${errorText(error)}`);
+            recordDiagnostic(malformedEvents, integrity, "MUTATION_REPLAY_REJECTED", `Entry ${entryCursor}: ${errorText(error)}`, entryCursor);
         }
     }
-    if (malformedEvents.length > 0) state.warnings.push(...malformedEvents);
-    const metadata = buildMetadata(state, revision, cursor, requestIndex, integrity, latestReceipt);
+    const metadata = buildMetadata(state, revision, cursor, branchLeaf, requestIndex, integrity, latestReceipt);
     return {
         state,
         metadata,
@@ -254,42 +277,25 @@ export function snapshotState(state) {
     return snapshot;
 }
 
-function replaySnapshotEnvelope({
-    envelope,
-    entryCursor,
-    state,
-    revision,
-    cursor,
-    requestIndex,
-    allowBootstrap,
-}) {
+function replaySnapshotEnvelope({ envelope, entryCursor, state, revision, cursor, requestIndex, allowBootstrap }) {
     if (!isV1TaskEvent(envelope.event) || envelope.event.type !== "task.snapshot") {
-        return { error: `Snapshot entry ${entryCursor} has an invalid business event` };
+        return { code: "INVALID_SNAPSHOT_EVENT", error: `Snapshot entry ${entryCursor} has an invalid business event` };
     }
-    if (!isCheckpoint(envelope.checkpoint)) {
-        return { error: `Snapshot entry ${entryCursor} has invalid checkpoint metadata` };
-    }
-    if (!allowBootstrap && (envelope.revision !== revision || envelope.parentCursor !== cursor)) {
+    if (!allowBootstrap && (envelope.revision !== revision || envelope.ledgerParentCursor !== cursor)) {
         return {
-            error: `Out-of-order task snapshot ignored at ${entryCursor}: expected revision ${revision} and parent ${String(cursor)}`,
+            code: "OUT_OF_ORDER_SNAPSHOT",
+            error: `Out-of-order task snapshot ignored at ${entryCursor}: expected revision ${revision} and ledger parent ${String(cursor)}`,
         };
     }
     try {
+        validateCheckpointEnvelope(envelope, entryCursor, requestIndex);
         const nextState = reduceTaskState(state, envelope.event);
         if (stateHash(nextState) !== envelope.checkpoint.stateHash) {
-            return { error: `Snapshot entry ${entryCursor} failed state hash validation` };
+            return { code: "SNAPSHOT_STATE_HASH_MISMATCH", error: `Snapshot entry ${entryCursor} failed state hash validation` };
         }
         if (allowBootstrap) requestIndex.clear();
         let latestReceipt;
         for (const receipt of envelope.checkpoint.receipts) {
-            if (!isMutationReceipt(receipt)) {
-                return { error: `Snapshot entry ${entryCursor} contains an invalid receipt` };
-            }
-            const existing = requestIndex.get(receipt.requestId);
-            if (existing &&
-                (existing.command !== receipt.command || existing.payloadHash !== receipt.payloadHash)) {
-                return { error: `Snapshot entry ${entryCursor} contains conflicting request ${receipt.requestId}` };
-            }
             const normalized = Object.freeze({ ...receipt, replayed: false });
             requestIndex.set(receipt.requestId, normalized);
             if (!latestReceipt || normalized.revisionAfter > latestReceipt.revisionAfter) {
@@ -303,16 +309,162 @@ function replaySnapshotEnvelope({
         };
     }
     catch (error) {
-        return { error: `Snapshot entry ${entryCursor}: ${errorText(error)}` };
+        return {
+            code: error instanceof PiTaskContractError ? error.code : "SNAPSHOT_REPLAY_REJECTED",
+            error: `Snapshot entry ${entryCursor}: ${errorText(error)}`,
+        };
     }
 }
 
-function appendAndReadCursor(envelope, persistence) {
+function buildBoundedCheckpointEnvelope({ revision, ledgerParentCursor, parentCursor, event, nextState, receipts }) {
+    const ordered = receipts
+        .map((receipt) => ({ ...receipt, replayed: false }))
+        .sort((left, right) => left.revisionAfter - right.revisionAfter);
+    let retained = ordered.slice(-PI_TASK_CHECKPOINT_RECEIPT_LIMIT);
+    while (true) {
+        const receiptWindow = buildReceiptWindow(ordered.length, retained);
+        const receiptHash = sha256(retained);
+        const unsignedCheckpoint = {
+            version: 2,
+            stateHash: stateHash(nextState),
+            receiptHash,
+            receiptWindow,
+            receipts: retained,
+        };
+        const checkpoint = Object.freeze({
+            ...unsignedCheckpoint,
+            checkpointHash: sha256(unsignedCheckpoint),
+        });
+        const envelope = Object.freeze({
+            version: 2,
+            kind: "snapshot",
+            revision,
+            ledgerParentCursor,
+            parentCursor,
+            event,
+            checkpoint,
+        });
+        if (byteLength(envelope) <= PI_TASK_CHECKPOINT_MAX_BYTES) return envelope;
+        if (retained.length === 0) {
+            throw new PiTaskContractError(
+                "CHECKPOINT_TOO_LARGE",
+                `Task checkpoint exceeds ${PI_TASK_CHECKPOINT_MAX_BYTES} bytes without receipts`,
+            );
+        }
+        retained = retained.slice(1);
+    }
+}
+
+function validateCheckpointEnvelope(envelope, entryCursor, requestIndex) {
+    if (!isCheckpoint(envelope.checkpoint)) {
+        throw new PiTaskContractError("INVALID_CHECKPOINT", `Snapshot entry ${entryCursor} has invalid checkpoint metadata`);
+    }
+    if (byteLength(envelope) > PI_TASK_CHECKPOINT_MAX_BYTES) {
+        throw new PiTaskContractError("CHECKPOINT_TOO_LARGE", `Snapshot entry ${entryCursor} exceeds ${PI_TASK_CHECKPOINT_MAX_BYTES} bytes`);
+    }
+    const checkpoint = envelope.checkpoint;
+    const { checkpointHash, ...unsignedCheckpoint } = checkpoint;
+    if (sha256(unsignedCheckpoint) !== checkpointHash) {
+        throw new PiTaskContractError("CHECKPOINT_HASH_MISMATCH", `Snapshot entry ${entryCursor} failed checkpoint hash validation`);
+    }
+    if (sha256(checkpoint.receipts) !== checkpoint.receiptHash) {
+        throw new PiTaskContractError("RECEIPT_HASH_MISMATCH", `Snapshot entry ${entryCursor} failed receipt hash validation`);
+    }
+    validateReceiptWindow(checkpoint.receiptWindow, checkpoint.receipts);
+    const requestIds = new Set();
+    const cursorIds = new Set();
+    const eventIds = new Set();
+    let highestRevision = -1;
+    let latestReceipt;
+    let previousReceipt;
+    for (const receipt of checkpoint.receipts) {
+        assertCheckpointReceipt(receipt, envelope.revision);
+        if (requestIds.has(receipt.requestId)) {
+            throw new PiTaskContractError("DUPLICATE_CHECKPOINT_REQUEST", `Snapshot contains duplicate requestId ${receipt.requestId}`);
+        }
+        requestIds.add(receipt.requestId);
+        if (cursorIds.has(receipt.cursorAfter)) {
+            throw new PiTaskContractError("DUPLICATE_RECEIPT_CURSOR", `Snapshot contains duplicate receipt cursor ${receipt.cursorAfter}`);
+        }
+        if (eventIds.has(receipt.eventId)) {
+            throw new PiTaskContractError("DUPLICATE_RECEIPT_EVENT", `Snapshot contains duplicate eventId ${receipt.eventId}`);
+        }
+        cursorIds.add(receipt.cursorAfter);
+        eventIds.add(receipt.eventId);
+        if (!envelope.event.state?.tasks?.[receipt.taskId]) {
+            throw new PiTaskContractError("RECEIPT_TASK_MISMATCH", `Receipt ${receipt.requestId} references a task absent from the snapshot`);
+        }
+        if (previousReceipt) {
+            if (receipt.revisionAfter <= previousReceipt.revisionAfter) {
+                throw new PiTaskContractError("INVALID_RECEIPT_ORDER", "Checkpoint receipts must be ordered by ascending revision");
+            }
+        }
+        previousReceipt = receipt;
+        const existing = requestIndex.get(receipt.requestId);
+        if (existing && stableJson(normalizeReceipt(existing)) !== stableJson(normalizeReceipt(receipt))) {
+            throw new PiTaskContractError("CHECKPOINT_REQUEST_CONFLICT", `Snapshot request ${receipt.requestId} conflicts with replayed history`);
+        }
+        if (receipt.revisionAfter > highestRevision) {
+            highestRevision = receipt.revisionAfter;
+            latestReceipt = receipt;
+        }
+    }
+    if (latestReceipt && latestReceipt.revisionAfter === envelope.revision && latestReceipt.stateHash !== checkpoint.stateHash) {
+        throw new PiTaskContractError("CHECKPOINT_RECEIPT_STATE_MISMATCH", "Latest checkpoint receipt does not match snapshot state hash");
+    }
+}
+
+function assertCheckpointReceipt(receipt, checkpointRevision) {
+    if (!isMutationReceipt(receipt)) {
+        throw new PiTaskContractError("INVALID_CHECKPOINT_RECEIPT", "Snapshot contains an invalid mutation receipt");
+    }
+    if (receipt.revisionAfter !== receipt.revisionBefore + 1 || receipt.revisionAfter > checkpointRevision) {
+        throw new PiTaskContractError("INVALID_RECEIPT_REVISION", `Receipt ${receipt.requestId} has an invalid revision range`);
+    }
+    if (receipt.eventType !== expectedEventType(receipt.command)) {
+        throw new PiTaskContractError("RECEIPT_COMMAND_EVENT_MISMATCH", `Receipt ${receipt.requestId} command does not match event type`);
+    }
+    if (receipt.cursorAfter !== receipt.ledgerCursorAfter) {
+        throw new PiTaskContractError("RECEIPT_CURSOR_MISMATCH", `Receipt ${receipt.requestId} cursorAfter must equal ledgerCursorAfter`);
+    }
+    if (receipt.revisionBefore === 0 && receipt.ledgerCursorBefore !== null) {
+        throw new PiTaskContractError("INVALID_RECEIPT_LEDGER_CURSOR", `Receipt ${receipt.requestId} revision zero must have a null ledger cursor`);
+    }
+    if (receipt.revisionBefore > 0 &&
+        (typeof receipt.ledgerCursorBefore !== "string" || receipt.ledgerCursorBefore.length === 0)) {
+        throw new PiTaskContractError("INVALID_RECEIPT_LEDGER_CURSOR", `Receipt ${receipt.requestId} must reference the previous Task ledger cursor`);
+    }
+}
+
+function buildReceiptWindow(totalCount, retained) {
+    return Object.freeze({
+        policy: "latest_revision_window",
+        retainedCount: retained.length,
+        omittedCount: Math.max(0, totalCount - retained.length),
+        minRevision: retained.length > 0 ? retained[0].revisionAfter : null,
+        maxRevision: retained.length > 0 ? retained.at(-1).revisionAfter : null,
+    });
+}
+
+function validateReceiptWindow(window, receipts) {
+    if (!window ||
+        window.policy !== "latest_revision_window" ||
+        !Number.isSafeInteger(window.retainedCount) ||
+        !Number.isSafeInteger(window.omittedCount) ||
+        window.retainedCount !== receipts.length ||
+        window.omittedCount < 0) {
+        throw new PiTaskContractError("INVALID_RECEIPT_WINDOW", "Checkpoint receipt window is invalid");
+    }
+    const minRevision = receipts.length > 0 ? receipts[0].revisionAfter : null;
+    const maxRevision = receipts.length > 0 ? receipts.at(-1).revisionAfter : null;
+    if (window.minRevision !== minRevision || window.maxRevision !== maxRevision) {
+        throw new PiTaskContractError("INVALID_RECEIPT_WINDOW", "Checkpoint receipt window revision range is invalid");
+    }
+}
+
+function appendAndReadCursor(envelope, persistence, expectedParentCursor) {
     if (!persistence || typeof persistence.appendEntry !== "function" || typeof persistence.getBranch !== "function") {
-        throw new PiTaskContractError(
-            "INVALID_PERSISTENCE",
-            "Task mutation persistence requires appendEntry() and getBranch()",
-        );
+        throw new PiTaskContractError("INVALID_PERSISTENCE", "Task mutation persistence requires appendEntry() and getBranch()");
     }
     persistence.appendEntry(TASK_EVENT_CUSTOM_TYPE, envelope);
     const branch = persistence.getBranch();
@@ -321,32 +473,87 @@ function appendAndReadCursor(envelope, persistence) {
         tail.type !== "custom" ||
         tail.customType !== TASK_EVENT_CUSTOM_TYPE ||
         !sameEnvelope(tail.data, envelope)) {
-        throw new PiTaskContractError(
-            "CURSOR_CONFIRMATION_FAILED",
-            "Appended task event is not the current Session branch tail",
-        );
+        throw new PiTaskContractError("CURSOR_CONFIRMATION_FAILED", "Appended task event is not the current Session branch tail");
+    }
+    if (!entryParentMatches(tail, expectedParentCursor) || envelope.parentCursor !== expectedParentCursor) {
+        throw new PiTaskContractError("BRANCH_PARENT_MISMATCH", "Appended task entry parentId does not match the invocation branch leaf");
     }
     const cursor = normalizeEntryCursor(tail.id);
     if (!cursor) {
-        throw new PiTaskContractError(
-            "CURSOR_CONFIRMATION_FAILED",
-            "Appended task event has no stable Session entry cursor",
-        );
+        throw new PiTaskContractError("CURSOR_CONFIRMATION_FAILED", "Appended task event has no stable Session entry cursor");
     }
     return cursor;
 }
 
+function readBranchContext(persistence) {
+    if (!persistence || typeof persistence.getBranch !== "function") {
+        throw new PiTaskContractError("INVALID_PERSISTENCE", "Task mutation persistence requires getBranch()");
+    }
+    const branch = persistence.getBranch();
+    if (!Array.isArray(branch)) {
+        throw new PiTaskContractError("INVALID_PERSISTENCE", "Task mutation getBranch() must return an array");
+    }
+    return { branch, leaf: getBranchLeaf(branch) };
+}
+
+function branchContainsReceipt(branch, receipt) {
+    return branch.some((entry) => {
+        if (entry.type !== "custom" || entry.customType !== TASK_EVENT_CUSTOM_TYPE) return false;
+        const data = entry.data;
+        if (isV2Envelope(data) && data.kind === "mutation") {
+            return entry.id === receipt.cursorAfter &&
+                data.requestId === receipt.requestId &&
+                data.command === receipt.command &&
+                data.payloadHash === receipt.payloadHash;
+        }
+        if (isV2Envelope(data) && data.kind === "snapshot") {
+            return checkpointHashesAreValid(data) && data.checkpoint.receipts.some((candidate) =>
+                candidate.requestId === receipt.requestId &&
+                stableJson(normalizeReceipt(candidate)) === stableJson(normalizeReceipt(receipt))
+            );
+        }
+        return false;
+    });
+}
+
+function checkpointHashesAreValid(envelope) {
+    const checkpoint = envelope.checkpoint;
+    const { checkpointHash, ...unsignedCheckpoint } = checkpoint;
+    return byteLength(envelope) <= PI_TASK_CHECKPOINT_MAX_BYTES &&
+        sha256(checkpoint.receipts) === checkpoint.receiptHash &&
+        sha256(unsignedCheckpoint) === checkpointHash;
+}
+
+function getBranchLeaf(branch) {
+    if (!Array.isArray(branch) || branch.length === 0) return null;
+    const leaf = normalizeEntryCursor(branch.at(-1)?.id);
+    if (!leaf) {
+        throw new PiTaskContractError("INVALID_BRANCH_LEAF", "Current Session branch leaf has no stable entry id");
+    }
+    return leaf;
+}
+
+function entryParentMatches(entry, expectedParentCursor) {
+    const actual = entry.parentId ?? null;
+    return actual === expectedParentCursor;
+}
+
 function sameEnvelope(actual, expected) {
     if (!actual || typeof actual !== "object") return false;
-    if (actual.version !== 2 || actual.kind !== expected.kind || actual.revision !== expected.revision)
+    if (actual.version !== 2 ||
+        actual.kind !== expected.kind ||
+        actual.revision !== expected.revision ||
+        actual.ledgerParentCursor !== expected.ledgerParentCursor ||
+        actual.parentCursor !== expected.parentCursor) {
         return false;
+    }
     if (expected.kind === "mutation") {
         return actual.requestId === expected.requestId && actual.payloadHash === expected.payloadHash;
     }
-    return actual.event?.id === expected.event.id && actual.checkpoint?.stateHash === expected.checkpoint.stateHash;
+    return actual.event?.id === expected.event.id && actual.checkpoint?.checkpointHash === expected.checkpoint.checkpointHash;
 }
 
-function assertCas(request, metadata) {
+function assertCas(request, metadata, branchLeaf) {
     if (request.expectedRevision !== metadata.revision) {
         throw new PiTaskContractError(
             "REVISION_CONFLICT",
@@ -354,26 +561,27 @@ function assertCas(request, metadata) {
             { expectedRevision: request.expectedRevision, actualRevision: metadata.revision },
         );
     }
-    if (request.expectedCursor !== metadata.cursor) {
+    if (request.expectedCursor !== branchLeaf) {
         throw new PiTaskContractError(
             "BRANCH_CONFLICT",
-            `Expected cursor ${String(request.expectedCursor)}, current cursor is ${String(metadata.cursor)}`,
-            { expectedCursor: request.expectedCursor, actualCursor: metadata.cursor },
+            `Expected Session leaf ${String(request.expectedCursor)}, current leaf is ${String(branchLeaf)}`,
+            { expectedCursor: request.expectedCursor, actualCursor: branchLeaf },
         );
     }
 }
 
 function createEmptyMetadata(state) {
-    return buildMetadata(state, 0, null, new Map(), [], undefined);
+    return buildMetadata(state, 0, null, null, new Map(), [], undefined);
 }
 
-function buildMetadata(state, revision, cursor, requestIndex, integrity, latestReceipt) {
+function buildMetadata(state, revision, cursor, branchLeaf, requestIndex, integrity, latestReceipt) {
     return Object.freeze({
         revision,
         cursor,
+        branchLeaf,
         stateHash: stateHash(state),
         requestCount: requestIndex.size,
-        integrity: Object.freeze([...integrity]),
+        integrity: Object.freeze(integrity.map((item) => Object.freeze({ ...item }))),
         ...(latestReceipt ? { latestReceipt } : {}),
     });
 }
@@ -381,14 +589,17 @@ function buildMetadata(state, revision, cursor, requestIndex, integrity, latestR
 function cloneMetadata(metadata) {
     return {
         ...metadata,
-        integrity: [...metadata.integrity],
+        integrity: metadata.integrity.map((item) => ({ ...item })),
         ...(metadata.latestReceipt ? { latestReceipt: { ...metadata.latestReceipt } } : {}),
     };
 }
 
-function recordDiagnostic(malformedEvents, integrity, message) {
+function recordDiagnostic(malformedEvents, integrity, code, message, cursor) {
+    const key = `${code}:${cursor ?? ""}:${message}`;
+    if (integrity.some((item) => item.key === key)) return;
+    if (integrity.length >= PI_TASK_DIAGNOSTIC_LIMIT) return;
+    integrity.push(Object.freeze({ key, code, message, ...(cursor ? { cursor } : {}) }));
     malformedEvents.push(message);
-    integrity.push(message);
 }
 
 function normalizeEntryCursor(value) {
@@ -402,32 +613,27 @@ function isV1TaskEvent(value) {
 
 function isV2Envelope(value) {
     if (!value || typeof value !== "object" || value.version !== 2) return false;
+    const common = Number.isSafeInteger(value.revision) &&
+        value.revision >= 0 &&
+        (value.ledgerParentCursor === null || typeof value.ledgerParentCursor === "string") &&
+        (value.parentCursor === null || typeof value.parentCursor === "string") &&
+        isV1TaskEvent(value.event);
+    if (!common) return false;
     if (value.kind === "mutation") {
-        return Number.isSafeInteger(value.revision) &&
-            value.revision > 0 &&
-            (value.parentCursor === null || typeof value.parentCursor === "string") &&
+        return value.revision > 0 &&
             typeof value.requestId === "string" &&
             value.requestId.length > 0 &&
             typeof value.payloadHash === "string" &&
-            /^[a-f0-9]{64}$/.test(value.payloadHash) &&
+            HASH_PATTERN.test(value.payloadHash) &&
             PI_TASK_MUTATION_TOOLS.includes(value.command) &&
-            isV1TaskEvent(value.event) &&
             expectedEventType(value.command) === value.event.type;
     }
-    return value.kind === "snapshot" &&
-        Number.isSafeInteger(value.revision) &&
-        value.revision >= 0 &&
-        (value.parentCursor === null || typeof value.parentCursor === "string") &&
-        isV1TaskEvent(value.event) &&
-        isCheckpoint(value.checkpoint);
+    return value.kind === "snapshot" && isCheckpoint(value.checkpoint);
 }
 
 function assertCommandEventPair(command, event) {
     if (!isV1TaskEvent(event) || expectedEventType(command) !== event.type) {
-        throw new PiTaskContractError(
-            "COMMAND_EVENT_MISMATCH",
-            `Task command ${command} cannot persist event ${String(event?.type)}`,
-        );
+        throw new PiTaskContractError("COMMAND_EVENT_MISMATCH", `Task command ${command} cannot persist event ${String(event?.type)}`);
     }
 }
 
@@ -447,8 +653,11 @@ function expectedEventType(command) {
 function isCheckpoint(value) {
     return Boolean(value &&
         typeof value === "object" &&
-        value.version === 1 &&
-        typeof value.stateHash === "string" &&
+        value.version === 2 &&
+        typeof value.stateHash === "string" && HASH_PATTERN.test(value.stateHash) &&
+        typeof value.receiptHash === "string" && HASH_PATTERN.test(value.receiptHash) &&
+        typeof value.checkpointHash === "string" && HASH_PATTERN.test(value.checkpointHash) &&
+        value.receiptWindow && typeof value.receiptWindow === "object" &&
         Array.isArray(value.receipts));
 }
 
@@ -456,17 +665,28 @@ function isMutationReceipt(value) {
     return Boolean(value &&
         typeof value === "object" &&
         value.version === 1 &&
-        typeof value.requestId === "string" &&
-        typeof value.command === "string" &&
-        Number.isInteger(value.revisionBefore) &&
-        Number.isInteger(value.revisionAfter) &&
+        typeof value.requestId === "string" && value.requestId.length > 0 &&
+        PI_TASK_MUTATION_TOOLS.includes(value.command) &&
+        Number.isInteger(value.revisionBefore) && value.revisionBefore >= 0 &&
+        Number.isInteger(value.revisionAfter) && value.revisionAfter > 0 &&
+        (value.ledgerCursorBefore === null || typeof value.ledgerCursorBefore === "string") &&
+        typeof value.ledgerCursorAfter === "string" && value.ledgerCursorAfter.length > 0 &&
         (value.cursorBefore === null || typeof value.cursorBefore === "string") &&
-        typeof value.cursorAfter === "string" &&
-        typeof value.taskId === "string" &&
-        typeof value.eventId === "string" &&
-        typeof value.eventType === "string" &&
-        typeof value.stateHash === "string" &&
-        typeof value.payloadHash === "string");
+        typeof value.cursorAfter === "string" && value.cursorAfter.length > 0 &&
+        typeof value.taskId === "string" && value.taskId.length > 0 &&
+        typeof value.eventId === "string" && value.eventId.length > 0 &&
+        typeof value.eventType === "string" && value.eventType.length > 0 &&
+        typeof value.stateHash === "string" && HASH_PATTERN.test(value.stateHash) &&
+        typeof value.payloadHash === "string" && HASH_PATTERN.test(value.payloadHash));
+}
+
+function normalizeReceipt(receipt) {
+    const { replayed: _replayed, ...stable } = receipt;
+    return { ...stable, replayed: false };
+}
+
+function byteLength(value) {
+    return Buffer.byteLength(stableJson(value), "utf8");
 }
 
 export function errorText(error) {

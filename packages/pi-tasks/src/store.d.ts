@@ -10,6 +10,7 @@ export interface BranchEntry {
     customType?: string;
     data?: unknown;
     id?: string;
+    parentId?: string | null;
     timestamp?: string;
 }
 

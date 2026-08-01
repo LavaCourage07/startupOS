@@ -2,12 +2,14 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+  PI_TASK_CHECKPOINT_MAX_BYTES,
   PI_TASK_EVENT_V2_SCHEMA,
   PI_TASK_STATE_EVENT_V2_SCHEMA,
   createTaskRuntimeStore,
 } from '../index.js';
 import { registerTaskTools } from '../src/tools.js';
-import { mutationPayloadHash } from '../src/contracts.js';
+import { mutationPayloadHash, sha256 } from '../src/contracts.js';
+import { TASK_EVENT_CUSTOM_TYPE } from '../src/model.js';
 
 const CREATED_AT = '2026-08-01T00:00:00.000Z';
 
@@ -53,6 +55,46 @@ function taskUpdated(nextAction, eventId) {
   };
 }
 
+function taskSnapshot(store, eventId = 'snapshot-compaction') {
+  return {
+    version: 1,
+    id: eventId,
+    type: 'task.snapshot',
+    taskId: 'T1',
+    createdAt: '2026-08-01T00:01:00.000Z',
+    source: 'system',
+    state: (() => {
+      const { events, ...snapshot } = store.getState();
+      void events;
+      return snapshot;
+    })(),
+    resume: {
+      currentStepLineage: [],
+      evidenceIds: [],
+      criterionIds: [],
+      allowedActions: [],
+      nextAllowedActions: [],
+      verificationGaps: [],
+      blockers: [],
+      decisions: [],
+      warnings: [],
+      resumeInstruction: 'resume',
+    },
+    reason: 'compaction',
+  };
+}
+
+function resignCheckpoint(entry) {
+  const checkpoint = entry.data.checkpoint;
+  checkpoint.receiptWindow.retainedCount = checkpoint.receipts.length;
+  checkpoint.receiptWindow.minRevision = checkpoint.receipts[0]?.revisionAfter ?? null;
+  checkpoint.receiptWindow.maxRevision = checkpoint.receipts.at(-1)?.revisionAfter ?? null;
+  checkpoint.receiptHash = sha256(checkpoint.receipts);
+  const { checkpointHash: _checkpointHash, ...unsigned } = checkpoint;
+  checkpoint.checkpointHash = sha256(unsigned);
+  return entry;
+}
+
 function mutationRequest(overrides = {}) {
   return {
     version: 1,
@@ -74,12 +116,20 @@ function createPersistence(entries = [], prefix = 'cursor') {
     appendEntry(customType, data) {
       sequence += 1;
       this.appendCount += 1;
+      const parentId = branch.at(-1)?.id ?? null;
       branch.push({
         id: `${prefix}-${sequence}`,
+        parentId,
         type: 'custom',
         customType,
         data: structuredClone(data),
       });
+    },
+    appendMessage(id = `${prefix}-message-${sequence + 1}`) {
+      const parentId = branch.at(-1)?.id ?? null;
+      sequence += 1;
+      branch.push({ id, parentId, type: 'message', role: 'user' });
+      return id;
     },
     getBranch() {
       return branch;
@@ -110,8 +160,10 @@ function createFakePi(sessionId = 'session-1') {
     },
     appendEntry(customType, data) {
       cursor += 1;
+      const parentId = branch.at(-1)?.id ?? null;
       branch.push({
         id: `session-entry-${cursor}`,
+        parentId,
         type: 'custom',
         customType,
         data: structuredClone(data),
@@ -166,16 +218,20 @@ test('成功 mutation 写入 v2 envelope 并返回真实 Session cursor receipt'
   assert.equal(result.receipt.revisionAfter, 1);
   assert.equal(result.receipt.cursorBefore, null);
   assert.equal(result.receipt.cursorAfter, 'cursor-1');
+  assert.equal(result.receipt.ledgerCursorBefore, null);
+  assert.equal(result.receipt.ledgerCursorAfter, 'cursor-1');
   assert.equal(result.receipt.taskId, 'T1');
   assert.equal(result.receipt.replayed, false);
   assert.equal(persistence.branch[0].data.version, 2);
   assert.equal(persistence.branch[0].data.kind, 'mutation');
+  assert.equal(persistence.branch[0].data.ledgerParentCursor, null);
   assert.equal(persistence.branch[0].data.parentCursor, null);
+  assert.equal(persistence.branch[0].parentId, null);
   assert.equal(result.metadata.cursor, persistence.branch[0].id);
   assert.equal(result.state.tasks.T1.status, 'active');
 });
 
-test('相同 requestId 与 payload replay 原 receipt，不追加 event；内容冲突 fail closed', () => {
+test('提交后相同 requestId 与 payload 即使 CAS 已过期仍 replay 原 receipt', () => {
   const store = createTaskRuntimeStore();
   const persistence = createPersistence();
   const first = mutateCreated(store, persistence);
@@ -194,6 +250,21 @@ test('相同 requestId 与 payload replay 原 receipt，不追加 event；内容
     (error) => error.code === 'DUPLICATE_REQUEST_CONFLICT',
   );
   assert.equal(persistence.appendCount, 1);
+});
+
+test('同 requestId 不能跨到不包含原 receipt 的 sibling branch 复用', () => {
+  const root = { id: 'message-root', parentId: null, type: 'message', role: 'user' };
+  const store = createTaskRuntimeStore();
+  const committedBranch = createPersistence([root], 'committed');
+  const request = mutationRequest({ expectedCursor: 'message-root' });
+  mutateCreated(store, committedBranch, request);
+  const siblingBranch = createPersistence([root], 'sibling');
+
+  assert.throws(
+    () => store.mutate(request, taskCreated('cross-branch-retry'), siblingBranch),
+    (error) => error.code === 'IDEMPOTENCY_BRANCH_MISMATCH',
+  );
+  assert.equal(siblingBranch.appendCount, 0);
 });
 
 test('expectedRevision 和 expectedCursor 冲突均不 reduce、不 append', () => {
@@ -271,6 +342,85 @@ test('branch replay 只继承共同祖先，各自 revision/cursor 独立推进'
   assert.equal(rightStore.getState().tasks.T1.nextAction, 'right');
 });
 
+test('Task entry 后普通 message 成为真实 leaf：旧 Task cursor 拒绝，当前 leaf 合法写入', () => {
+  const store = createTaskRuntimeStore();
+  const persistence = createPersistence();
+  mutateCreated(store, persistence);
+  const messageLeaf = persistence.appendMessage('message-after-task');
+  const updateInput = { task_id: 'T1', next_action: 'after-message' };
+
+  assert.throws(
+    () => store.mutate(
+      mutationRequest({
+        requestId: 'request-after-message-stale',
+        command: 'task_update',
+        expectedRevision: 1,
+        expectedCursor: 'cursor-1',
+        input: updateInput,
+      }),
+      taskUpdated('after-message', 'event-after-message-stale'),
+      persistence,
+    ),
+    (error) => error.code === 'BRANCH_CONFLICT',
+  );
+
+  const result = store.mutate(
+    mutationRequest({
+      requestId: 'request-after-message',
+      command: 'task_update',
+      expectedRevision: 1,
+      expectedCursor: messageLeaf,
+      input: updateInput,
+    }),
+    taskUpdated('after-message', 'event-after-message'),
+    persistence,
+  );
+  const entry = persistence.branch.at(-1);
+  assert.equal(entry.parentId, messageLeaf);
+  assert.equal(entry.data.parentCursor, messageLeaf);
+  assert.equal(entry.data.ledgerParentCursor, 'cursor-1');
+  assert.equal(result.receipt.cursorBefore, messageLeaf);
+  assert.equal(result.receipt.cursorAfter, entry.id);
+  assert.equal(result.receipt.ledgerCursorBefore, 'cursor-1');
+  assert.equal(result.receipt.ledgerCursorAfter, entry.id);
+  assert.equal(result.metadata.cursor, entry.id);
+  assert.equal(result.metadata.branchLeaf, entry.id);
+});
+
+test('共享 Task ancestor 的 sibling branch 以各自真实 message leaf 做 CAS', () => {
+  const rootStore = createTaskRuntimeStore();
+  const rootPersistence = createPersistence([], 'root');
+  mutateCreated(rootStore, rootPersistence);
+  const sharedTaskBranch = structuredClone(rootPersistence.branch);
+  const sibling = createPersistence(sharedTaskBranch, 'sibling');
+  const siblingLeaf = sibling.appendMessage('sibling-message-leaf');
+  const siblingStore = createTaskRuntimeStore();
+  siblingStore.replay(sibling.branch);
+  const requestBase = {
+    requestId: 'request-sibling-update',
+    command: 'task_update',
+    expectedRevision: 1,
+    input: { task_id: 'T1', next_action: 'sibling' },
+  };
+
+  assert.throws(
+    () => siblingStore.mutate(
+      mutationRequest({ ...requestBase, expectedCursor: 'root-1' }),
+      taskUpdated('sibling', 'event-sibling-stale'),
+      sibling,
+    ),
+    (error) => error.code === 'BRANCH_CONFLICT',
+  );
+  const result = siblingStore.mutate(
+    mutationRequest({ ...requestBase, expectedCursor: siblingLeaf }),
+    taskUpdated('sibling', 'event-sibling-valid'),
+    sibling,
+  );
+  assert.equal(result.receipt.cursorBefore, siblingLeaf);
+  assert.equal(result.receipt.ledgerCursorBefore, 'root-1');
+  assert.equal(sibling.branch.at(-1).parentId, siblingLeaf);
+});
+
 test('重复 cursor 与乱序 envelope 被忽略，后续合法 entry 仍可 replay', () => {
   const sourceStore = createTaskRuntimeStore();
   const source = createPersistence();
@@ -310,32 +460,7 @@ test('compaction v2 snapshot 不递增 revision，并可单 entry 恢复 state �
   const store = createTaskRuntimeStore();
   const persistence = createPersistence();
   const first = mutateCreated(store, persistence);
-  const checkpointEvent = {
-    version: 1,
-    id: 'snapshot-compaction',
-    type: 'task.snapshot',
-    taskId: 'T1',
-    createdAt: '2026-08-01T00:01:00.000Z',
-    source: 'system',
-    state: (() => {
-      const { events, ...snapshot } = store.getState();
-      void events;
-      return snapshot;
-    })(),
-    resume: {
-      currentStepLineage: [],
-      evidenceIds: [],
-      criterionIds: [],
-      allowedActions: [],
-      nextAllowedActions: [],
-      verificationGaps: [],
-      blockers: [],
-      decisions: [],
-      warnings: [],
-      resumeInstruction: 'resume',
-    },
-    reason: 'compaction',
-  };
+  const checkpointEvent = taskSnapshot(store);
   const checkpoint = store.checkpoint(checkpointEvent, persistence);
   const snapshotEntry = persistence.branch.at(-1);
 
@@ -344,15 +469,186 @@ test('compaction v2 snapshot 不递增 revision，并可单 entry 恢复 state �
   assert.equal(snapshotEntry.data.kind, 'snapshot');
   assert.equal(snapshotEntry.data.revision, 1);
   const compactedStore = createTaskRuntimeStore();
-  const replay = compactedStore.replay([snapshotEntry]);
+  const compactedPersistence = createPersistence([snapshotEntry], 'compacted');
+  const replay = compactedStore.replay(compactedPersistence.branch);
   assert.equal(replay.metadata.revision, 1);
   assert.equal(replay.metadata.cursor, 'cursor-2');
   assert.equal(replay.metadata.requestCount, 1);
   assert.equal(replay.state.tasks.T1.title, 'Versioned ledger task');
-  const idempotent = compactedStore.mutate(mutationRequest(), taskCreated('after-compaction'), persistence);
+  const idempotent = compactedStore.mutate(
+    mutationRequest(),
+    taskCreated('after-compaction'),
+    compactedPersistence,
+  );
   assert.equal(idempotent.receipt.replayed, true);
   assert.equal(idempotent.receipt.eventId, first.receipt.eventId);
-  assert.equal(persistence.appendCount, 2);
+  assert.equal(compactedPersistence.appendCount, 0);
+});
+
+test('checkpoint 拒绝伪造 receipt 的 revision、command/event 与重复 requestId', () => {
+  const store = createTaskRuntimeStore();
+  const persistence = createPersistence();
+  mutateCreated(store, persistence);
+  store.checkpoint(taskSnapshot(store), persistence);
+  const validSnapshot = persistence.branch.at(-1);
+
+  const forgeries = [
+    (entry) => {
+      entry.data.checkpoint.receipts[0].revisionBefore = 8;
+      entry.data.checkpoint.receipts[0].revisionAfter = 9;
+    },
+    (entry) => {
+      entry.data.checkpoint.receipts[0].eventType = 'task.updated';
+    },
+    (entry) => {
+      entry.data.checkpoint.receipts.push(structuredClone(entry.data.checkpoint.receipts[0]));
+    },
+  ];
+
+  for (const forge of forgeries) {
+    const entry = structuredClone(validSnapshot);
+    forge(entry);
+    resignCheckpoint(entry);
+    const replay = createTaskRuntimeStore().replay([entry]);
+    assert.equal(replay.metadata.revision, 0);
+    assert.equal(replay.metadata.requestCount, 0);
+    assert.equal(replay.malformedEvents.length, 1);
+  }
+});
+
+test('checkpoint receipt 必须与已 replay 的 request index 完全一致', () => {
+  const store = createTaskRuntimeStore();
+  const persistence = createPersistence();
+  mutateCreated(store, persistence);
+  store.checkpoint(taskSnapshot(store), persistence);
+  const mutationEntry = structuredClone(persistence.branch[0]);
+  const forgedSnapshot = structuredClone(persistence.branch[1]);
+  forgedSnapshot.data.checkpoint.receipts[0].payloadHash = 'a'.repeat(64);
+  resignCheckpoint(forgedSnapshot);
+
+  const replay = createTaskRuntimeStore().replay([mutationEntry, forgedSnapshot]);
+  assert.equal(replay.metadata.revision, 1);
+  assert.equal(replay.metadata.cursor, mutationEntry.id);
+  assert.equal(replay.metadata.requestCount, 1);
+  assert.match(replay.malformedEvents[0], /conflicts with replayed history/);
+});
+
+test('checkpoint 可位于相邻 mutation revision 之间而不破坏 receipt 校验', () => {
+  const store = createTaskRuntimeStore();
+  const persistence = createPersistence();
+  mutateCreated(store, persistence);
+  store.checkpoint(taskSnapshot(store, 'snapshot-between-mutations'), persistence);
+  store.mutate(
+    mutationRequest({
+      requestId: 'request-after-snapshot',
+      command: 'task_update',
+      expectedRevision: 1,
+      expectedCursor: 'cursor-2',
+      input: { task_id: 'T1', next_action: 'after-snapshot' },
+    }),
+    taskUpdated('after-snapshot', 'event-after-snapshot'),
+    persistence,
+  );
+  store.checkpoint(taskSnapshot(store, 'snapshot-after-mutation'), persistence);
+  const snapshotEntry = persistence.branch.at(-1);
+  const replay = createTaskRuntimeStore().replay([snapshotEntry]);
+
+  assert.equal(replay.metadata.revision, 2);
+  assert.equal(replay.metadata.requestCount, 2);
+  assert.equal(replay.state.tasks.T1.nextAction, 'after-snapshot');
+  assert.equal(replay.malformedEvents.length, 0);
+});
+
+test('replay 诊断有界去重且不进入业务 state、snapshot 或 stateHash', () => {
+  const sourceStore = createTaskRuntimeStore();
+  const source = createPersistence();
+  mutateCreated(sourceStore, source);
+  sourceStore.mutate(
+    mutationRequest({
+      requestId: 'request-clean-update',
+      command: 'task_update',
+      expectedRevision: 1,
+      expectedCursor: 'cursor-1',
+      input: { task_id: 'T1', next_action: 'clean' },
+    }),
+    taskUpdated('clean', 'event-clean-update'),
+    source,
+  );
+  const duplicate = structuredClone(source.branch[0]);
+  const outOfOrder = structuredClone(source.branch[1]);
+  outOfOrder.id = 'cursor-forged';
+  outOfOrder.data.revision = 99;
+  const dirtyEntries = [source.branch[0], duplicate, duplicate, outOfOrder, source.branch[1]];
+  const cleanReplay = createTaskRuntimeStore().replay(source.branch);
+  const dirtyStore = createTaskRuntimeStore();
+  const dirtyReplay = dirtyStore.replay(dirtyEntries);
+  const repeatedReplay = createTaskRuntimeStore().replay(dirtyEntries);
+
+  assert.equal(dirtyReplay.metadata.stateHash, cleanReplay.metadata.stateHash);
+  assert.deepEqual(dirtyReplay.state.warnings, cleanReplay.state.warnings);
+  assert.equal(dirtyReplay.metadata.integrity.length, 2);
+  assert.deepEqual(dirtyReplay.metadata.integrity, repeatedReplay.metadata.integrity);
+  assert.equal(dirtyReplay.metadata.stateHash, repeatedReplay.metadata.stateHash);
+
+  const dirtyPersistence = createPersistence(dirtyEntries, 'dirty');
+  dirtyStore.checkpoint(taskSnapshot(dirtyStore, 'snapshot-diagnostics'), dirtyPersistence);
+  const snapshotEntry = dirtyPersistence.branch.at(-1);
+  assert.equal(JSON.stringify(snapshotEntry.data.event.state).includes('DUPLICATE_CURSOR'), false);
+  const compacted = createTaskRuntimeStore().replay([snapshotEntry]);
+  assert.equal(compacted.metadata.stateHash, cleanReplay.metadata.stateHash);
+  assert.deepEqual(compacted.state.warnings, cleanReplay.state.warnings);
+});
+
+test('replay 诊断 metadata 最多保留 64 条', () => {
+  const malformed = Array.from({ length: 100 }, (_, index) => ({
+    id: `malformed-${index}`,
+    parentId: index === 0 ? null : `malformed-${index - 1}`,
+    type: 'custom',
+    customType: TASK_EVENT_CUSTOM_TYPE,
+    data: { invalid: index },
+  }));
+  const replay = createTaskRuntimeStore().replay(malformed);
+  assert.equal(replay.metadata.integrity.length, 64);
+  assert.equal(replay.malformedEvents.length, 64);
+  assert.equal(replay.metadata.stateHash, createTaskRuntimeStore().getMetadata().stateHash);
+});
+
+test('200+ requests 的 checkpoint 保持 64KB 内并保留近期幂等窗口', () => {
+  const store = createTaskRuntimeStore();
+  const persistence = createPersistence();
+  mutateCreated(store, persistence);
+  let latestRequest;
+  for (let index = 1; index <= 220; index += 1) {
+    latestRequest = mutationRequest({
+      requestId: `request-update-${index}`,
+      command: 'task_update',
+      expectedRevision: store.getMetadata().revision,
+      expectedCursor: persistence.branch.at(-1).id,
+      input: { task_id: 'T1', next_action: `bounded-${index}` },
+    });
+    store.mutate(latestRequest, taskUpdated(`bounded-${index}`, `event-update-${index}`), persistence);
+  }
+  store.checkpoint(taskSnapshot(store, 'snapshot-bounded'), persistence);
+  const snapshotEntry = persistence.branch.at(-1);
+  const snapshotBytes = Buffer.byteLength(JSON.stringify(snapshotEntry.data), 'utf8');
+  assert.ok(snapshotBytes <= PI_TASK_CHECKPOINT_MAX_BYTES, `${snapshotBytes} exceeds checkpoint limit`);
+  assert.equal(snapshotEntry.data.checkpoint.receiptWindow.policy, 'latest_revision_window');
+  assert.ok(snapshotEntry.data.checkpoint.receiptWindow.omittedCount > 0);
+
+  const compactedPersistence = createPersistence([snapshotEntry], 'bounded');
+  const compactedStore = createTaskRuntimeStore();
+  const replay = compactedStore.replay(compactedPersistence.branch);
+  assert.equal(replay.metadata.revision, 221);
+  assert.ok(replay.receipts.length <= 128);
+  assert.equal(replay.receipts.some((receipt) => receipt.requestId === 'request-create'), false);
+  assert.equal(replay.receipts.some((receipt) => receipt.requestId === latestRequest.requestId), true);
+  const retry = compactedStore.mutate(
+    latestRequest,
+    taskUpdated('unused', 'unused-after-compaction'),
+    compactedPersistence,
+  );
+  assert.equal(retry.receipt.replayed, true);
+  assert.equal(compactedPersistence.appendCount, 0);
 });
 
 test('schema snapshot 固定 v2 envelope/state event 和 7 个 mutation tool reserved 参数', async () => {
@@ -375,6 +671,9 @@ test('schema snapshot 固定 v2 envelope/state event 和 7 个 mutation tool res
       kinds: PI_TASK_EVENT_V2_SCHEMA.oneOf.map((schema) => schema.properties.kind.const),
       mutationRequired: PI_TASK_EVENT_V2_SCHEMA.oneOf[0].required,
       snapshotRequired: PI_TASK_EVENT_V2_SCHEMA.oneOf[1].required,
+      checkpointRequired: PI_TASK_EVENT_V2_SCHEMA.oneOf[1].properties.checkpoint.required,
+      receiptWindow: PI_TASK_EVENT_V2_SCHEMA.oneOf[1]
+        .properties.checkpoint.properties.receiptWindow,
     },
     stateEvent: {
       id: PI_TASK_STATE_EVENT_V2_SCHEMA.$id,

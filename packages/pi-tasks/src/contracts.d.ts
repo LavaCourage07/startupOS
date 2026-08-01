@@ -3,6 +3,9 @@ export declare const UPSTREAM_PI_TASKS_VERSION = "0.2.0";
 export declare const PI_TASK_EVENT_VERSION = 2;
 export declare const PI_TASK_STATE_EVENT_VERSION = 2;
 export declare const PI_TASK_PUBLIC_API_VERSION = 1;
+export declare const PI_TASK_CHECKPOINT_MAX_BYTES: number;
+export declare const PI_TASK_CHECKPOINT_RECEIPT_LIMIT = 128;
+export declare const PI_TASK_DIAGNOSTIC_LIMIT = 64;
 export declare const PI_TASKS_UPSTREAM_ENTRY_SHA256: string;
 export declare const PI_TASKS_UPSTREAM_REDUCER_SHA256: string;
 export declare const PI_TASK_MUTATION_TOOLS: readonly PiTaskMutationTool[];
@@ -36,6 +39,8 @@ export interface PiTaskMutationReceipt {
     revisionAfter: number;
     cursorBefore: string | null;
     cursorAfter: string;
+    ledgerCursorBefore: string | null;
+    ledgerCursorAfter: string;
     taskId: string;
     eventId: string;
     eventType: string;
@@ -47,16 +52,25 @@ export interface PiTaskMutationReceipt {
 export interface PiTaskRuntimeMetadata {
     revision: number;
     cursor: string | null;
+    branchLeaf: string | null;
     stateHash: string;
     requestCount: number;
-    integrity: string[];
+    integrity: PiTaskLedgerDiagnostic[];
     latestReceipt?: PiTaskMutationReceipt;
+}
+
+export interface PiTaskLedgerDiagnostic {
+    key: string;
+    code: string;
+    message: string;
+    cursor?: string;
 }
 
 export interface PiTaskMutationEventEnvelopeV2 {
     version: 2;
     kind: "mutation";
     revision: number;
+    ledgerParentCursor: string | null;
     parentCursor: string | null;
     requestId: string;
     payloadHash: string;
@@ -68,11 +82,21 @@ export interface PiTaskSnapshotEventEnvelopeV2 {
     version: 2;
     kind: "snapshot";
     revision: number;
+    ledgerParentCursor: string | null;
     parentCursor: string | null;
     event: Record<string, unknown>;
     checkpoint: {
-        version: 1;
+        version: 2;
         stateHash: string;
+        receiptHash: string;
+        checkpointHash: string;
+        receiptWindow: {
+            policy: "latest_revision_window";
+            retainedCount: number;
+            omittedCount: number;
+            minRevision: number | null;
+            maxRevision: number | null;
+        };
         receipts: PiTaskMutationReceipt[];
     };
 }
@@ -102,6 +126,8 @@ export declare function createMutationReceipt(input: {
     revisionAfter: number;
     cursorBefore: string | null;
     cursorAfter: string;
+    ledgerCursorBefore: string | null;
+    ledgerCursorAfter: string;
     event: { id: string; type: string; taskId: string };
     nextState: Record<string, unknown>;
     replayed?: boolean;

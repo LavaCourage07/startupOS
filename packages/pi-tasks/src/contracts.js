@@ -5,6 +5,9 @@ export const UPSTREAM_PI_TASKS_VERSION = "0.2.0";
 export const PI_TASK_EVENT_VERSION = 2;
 export const PI_TASK_STATE_EVENT_VERSION = 2;
 export const PI_TASK_PUBLIC_API_VERSION = 1;
+export const PI_TASK_CHECKPOINT_MAX_BYTES = 64 * 1024;
+export const PI_TASK_CHECKPOINT_RECEIPT_LIMIT = 128;
+export const PI_TASK_DIAGNOSTIC_LIMIT = 64;
 export const PI_TASKS_UPSTREAM_ENTRY_SHA256 =
     "3a99294bcc034cd63bc245132e7b3c429acf31fd0b2bd6058e4be85eb0b94136";
 export const PI_TASKS_UPSTREAM_REDUCER_SHA256 =
@@ -33,6 +36,7 @@ export const PI_TASK_EVENT_V2_SCHEMA = Object.freeze({
                 "version",
                 "kind",
                 "revision",
+                "ledgerParentCursor",
                 "parentCursor",
                 "requestId",
                 "payloadHash",
@@ -43,6 +47,7 @@ export const PI_TASK_EVENT_V2_SCHEMA = Object.freeze({
                 version: { const: 2 },
                 kind: { const: "mutation" },
                 revision: { type: "integer", minimum: 1 },
+                ledgerParentCursor: { type: ["string", "null"] },
                 parentCursor: { type: ["string", "null"] },
                 requestId: { type: "string", minLength: 1 },
                 payloadHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
@@ -57,6 +62,7 @@ export const PI_TASK_EVENT_V2_SCHEMA = Object.freeze({
                 "version",
                 "kind",
                 "revision",
+                "ledgerParentCursor",
                 "parentCursor",
                 "event",
                 "checkpoint",
@@ -65,15 +71,43 @@ export const PI_TASK_EVENT_V2_SCHEMA = Object.freeze({
                 version: { const: 2 },
                 kind: { const: "snapshot" },
                 revision: { type: "integer", minimum: 0 },
+                ledgerParentCursor: { type: ["string", "null"] },
                 parentCursor: { type: ["string", "null"] },
                 event: { type: "object" },
                 checkpoint: {
                     type: "object",
                     additionalProperties: false,
-                    required: ["version", "stateHash", "receipts"],
+                    required: [
+                        "version",
+                        "stateHash",
+                        "receiptHash",
+                        "checkpointHash",
+                        "receiptWindow",
+                        "receipts",
+                    ],
                     properties: {
-                        version: { const: 1 },
+                        version: { const: 2 },
                         stateHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
+                        receiptHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
+                        checkpointHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
+                        receiptWindow: {
+                            type: "object",
+                            additionalProperties: false,
+                            required: [
+                                "policy",
+                                "retainedCount",
+                                "omittedCount",
+                                "minRevision",
+                                "maxRevision",
+                            ],
+                            properties: {
+                                policy: { const: "latest_revision_window" },
+                                retainedCount: { type: "integer", minimum: 0 },
+                                omittedCount: { type: "integer", minimum: 0 },
+                                minRevision: { type: ["integer", "null"], minimum: 1 },
+                                maxRevision: { type: ["integer", "null"], minimum: 1 },
+                            },
+                        },
                         receipts: { type: "array", items: { type: "object" } },
                     },
                 },
@@ -204,6 +238,8 @@ export function createMutationReceipt({
     request,
     revisionBefore,
     revisionAfter,
+    ledgerCursorBefore,
+    ledgerCursorAfter,
     cursorBefore,
     cursorAfter,
     event,
@@ -216,6 +252,8 @@ export function createMutationReceipt({
         command: request.command,
         revisionBefore,
         revisionAfter,
+        ledgerCursorBefore,
+        ledgerCursorAfter,
         cursorBefore,
         cursorAfter,
         taskId: event.taskId,
