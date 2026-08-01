@@ -12,6 +12,9 @@ Story 9.41 选择 `pi-tasks` 作为 Task、Step、Criterion、Evidence、Blocker
 Pi Runtime 公共单工具执行 primitive、受控 `@originos/pi-tasks` fork，以及
 OriginOS Task Runtime Adapter。
 
+精确版本、patch fingerprint、owner 与回滚边界见
+[`compatibility-matrix.md`](compatibility-matrix.md)。
+
 ## Goals / Non-Goals
 
 **Goals:**

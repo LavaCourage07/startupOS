@@ -73,6 +73,7 @@ Evidence gate。
   `505d157c408dc3e27ef1c09f11bf860a92cc0203`。
 - A-01 merge commit
   `2a601606efd5b6639ed7fc29d42a08fac3a5307f`。
+- A-02 精确兼容矩阵：[`compatibility-matrix.md`](compatibility-matrix.md)。
 
 ## Rollout
 
