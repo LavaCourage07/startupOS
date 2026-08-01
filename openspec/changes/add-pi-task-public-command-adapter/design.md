@@ -230,11 +230,15 @@ AGENTS.md 单向依赖规约。
 - State event wait 有固定 timeout，结束后移除 listener。
 - Reload/switch 递增 bridge epoch，旧调用和迟到 event 被隔离。
 
-Pi Runtime `0.80.10` 的 Session 存储是 append-only；compaction entry 只改变发送给 LLM 的
+Pi Runtime `0.80.10` 的 Session branch entry 在进程内不可变且存储是 append-only；compaction entry 只改变发送给 LLM 的
 context 构造，不删除 `getBranch()` 上已持久化的 custom entries。因此正常 restart、branch
 和 compaction replay 必须读取完整 current branch，所有历史 requestId 仍可由原 mutation
 envelope 恢复。仅剩单个 checkpoint 的 snapshot-only bootstrap 属于降级恢复路径，只承诺
 `receiptWindow` 明示的近期幂等窗口，不得等同于正常 compaction 语义。
+
+Store 在初始化、reload 和 branch switch 时执行完整 replay；稳定 branch 的 mutation 热路径
+使用已验证 tail anchor 并只扫描新增 entry。进程外改写 anchor 之前的历史、同时伪装未变化
+的 tail，违反可信 append-only 存储边界，不属于 A-02 的攻击模型。
 
 ## Performance and Security
 

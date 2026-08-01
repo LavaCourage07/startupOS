@@ -8,7 +8,7 @@
 | Runtime core | `@earendil-works/pi-agent-core` | `0.80.10` | patch SHA-256 `10bda90bbb3ff426f6057312464e2cdb470fe61acd4f9e37ffc8436755e644a6` | Agent Runtime |
 | Runtime host | `@earendil-works/pi-coding-agent` | `0.80.10` | patch SHA-256 `7d70e7b71db29280df41ddf1f8701c9ae56c98e9e48b85ee11700c4ca66c11b4`；host invoke contract `1` | Agent Runtime |
 | Runtime patch set | 两个 Runtime patch 的有序清单 | `1` | composite SHA-256 `213b1f2db610720ca0dde1853abbe02975185ad37c95eb517031844631371674` | Agent Runtime |
-| Task extension | `@originos/pi-tasks` | `0.2.0-originos.1` | event `2`；state event `2`；最终 package fingerprint 等待任务 3.2/3.3 固化 | Task Extension |
+| Task extension | `@originos/pi-tasks` | `0.2.0-originos.1` | public API `1`；event `2`；state event `2`；schema `originos-pi-tasks/v1:event-v2:cas:receipt:evidence-gate-no-force`；32-file package SHA-256 `c900eb1fc776fd0c2ed28d076374a0253d6cb01963590f0930591725b9bb99e0` | Task Extension |
 | Adapter | `@originos/pi-agent-adapter/task-runtime` | adapter package `0.80.10` | adapter contract `1`；snapshot `1` | Agent Runtime |
 
 ### Fingerprint 计算规则
@@ -21,8 +21,11 @@ core:10bda90bbb3ff426f6057312464e2cdb470fe61acd4f9e37ffc8436755e644a6
 coding-agent:7d70e7b71db29280df41ddf1f8701c9ae56c98e9e48b85ee11700c4ca66c11b4
 ```
 
-Task extension fingerprint 必须在任务 3.2 与 3.3 完成后，从发布文件清单及其 SHA-256
-构建有序 manifest 再计算；不得使用 Git commit、时间戳或本地绝对路径作为 fingerprint。
+Task extension fingerprint 从 `npm pack --dry-run --json` 返回的发布文件清单生成。文件路径按
+ASCII 升序排列，每行格式为 `<file-sha256><两个空格><relative-path>\n`，再对完整 UTF-8
+manifest 计算 SHA-256。当前 32 个发布文件的结果为
+`c900eb1fc776fd0c2ed28d076374a0253d6cb01963590f0930591725b9bb99e0`；不得使用 Git
+commit、时间戳、本地绝对路径或 tarball metadata 作为 fingerprint。
 
 ### 静态校验
 

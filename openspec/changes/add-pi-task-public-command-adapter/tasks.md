@@ -1,7 +1,7 @@
 ## 1. Proposal 基线
 
 - [x] 1.1 [串行] 校准 A-02 Proposal、Design、Spec 与 A-01 审计结论；依赖：A-01 merge `2a60160`；写入范围：本 Proposal artifacts；角色：Integration Owner；必需测试：`openspec validate add-pi-task-public-command-adapter --strict`；完成证据：strict validation 输出与 Proposal commit `747a10e`。
-- [ ] 1.2 [串行] 建立 runtime、受控 Task extension、Adapter 的精确兼容矩阵与回滚边界；依赖：1.1；写入范围：本 Proposal 与后续 ADR；角色：Agent Runtime Architect；必需测试：版本与 export 静态校验；完成证据：兼容矩阵包含 package、版本、patch hash 和 owner。
+- [x] 1.2 [串行] 建立 runtime、受控 Task extension、Adapter 的精确兼容矩阵与回滚边界；依赖：1.1；写入范围：本 Proposal 与后续 ADR；角色：Agent Runtime Architect；必需测试：版本与 export 静态校验；完成证据：[`compatibility-matrix.md`](compatibility-matrix.md) 包含精确 package/version、Runtime patch composite `213b1f2d...`, Task extension 32-file package SHA-256 `c900eb1f...`、contract/schema 版本、owner 与逆序回滚边界；ESM public export 和 `npm pack --dry-run --json` 通过。
 
 ## 2. Runtime 公共宿主调用
 
@@ -11,8 +11,8 @@
 ## 3. 受控 Task extension
 
 - [x] 3.1 [可并行] 在独立 Task branch/worktree 中建立 `@originos/pi-tasks` workspace package，以 `pi-tasks@0.2.0` 为上游基线且保留上游 reducer 单一事实源；依赖：1.1；写入范围：`packages/pi-tasks/`；角色：Task Extension Worker；必需测试：公共 export、上游基线 fingerprint、v1 正常 replay；完成证据：Task commit `8bdcc75`，upstream entry SHA-256 `3a99294bcc034cd63bc245132e7b3c429acf31fd0b2bd6058e4be85eb0b94136`，upstream reducer SHA-256 `53dc26325e818fec1841cb40a5736f67404adafd021171b7e0976ff7a1e5ea64`，baseline tests 2/2 通过。
-- [ ] 3.2 [串行] 实现 event envelope v2、revision/cursor、requestId/payloadHash 幂等、CAS、mutation receipt、state event v2 和 compaction replay；依赖：3.1；写入范围：`packages/pi-tasks/`；角色：Task Extension Worker；必需测试：成功 mutation、重复请求、冲突请求、revision/cursor 冲突、重启、分支、重复/乱序 entry、compaction；当前证据：基线 commit `ebdd629` 的 13/13 tests 与类型检查通过，但只读审查发现真实 branch leaf CAS、checkpoint receipt 完整性、canonical state hash 稳定性 3 个 P1，以及 64KB checkpoint 上限 1 个 P2，必须由后续 hardening commit 与新增回归用例关闭后才可完成。
-- [ ] 3.3 [串行] 从 schema、event 和 reducer 删除 `force_with_reason`，并将旧 v1 forced completion 标记为不可信；依赖：3.2；写入范围：`packages/pi-tasks/`；角色：Task Extension Worker；必需测试：缺 Step、缺 Evidence、失败 Evidence、未解决 Blocker、强制参数拒绝、合法完成、旧记录迁移；完成证据：Evidence Gate contract 全绿。
+- [x] 3.2 [串行] 实现 event envelope v2、revision/cursor、requestId/payloadHash 幂等、CAS、mutation receipt、state event v2 和 compaction replay；依赖：3.1；写入范围：`packages/pi-tasks/`；角色：Task Extension Worker；必需测试：成功 mutation、重复请求、冲突请求、revision/cursor 冲突、重启、分支、重复/乱序 entry、compaction；完成证据：基线 `ebdd629`，replay hardening `837a922`，branch/checkpoint integrity `c8e9f76`，增量 branch alignment `9505f6f`；40/40 tests、JS/d.ts typecheck、ESM export、package dry-run 全绿；221 次 mutation 热路径无完整 branch iteration，独立复审 P0/P1=0。
+- [x] 3.3 [串行] 从 schema、event 和 reducer 删除 `force_with_reason`，并将旧 v1 forced completion 标记为不可信；依赖：3.2；写入范围：`packages/pi-tasks/`；角色：Task Extension Worker；必需测试：缺 Step、缺 Evidence、失败 Evidence、未解决 Blocker、强制参数拒绝、合法完成、旧记录迁移；完成证据：commit `3541019`；缺 Step/Evidence、failed/unknown/不可复现 Evidence、Blocker、Criterion、合法完成、schema/runtime force 拒绝和 v1 迁移均包含于 40/40 contract tests。
 
 ## 4. OriginOS Adapter
 
