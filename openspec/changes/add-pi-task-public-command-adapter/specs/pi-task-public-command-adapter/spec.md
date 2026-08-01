@@ -140,7 +140,14 @@ lifecycle 与 current-branch replay 中保持一致，不得依赖 process-local
 
 #### Scenario: Compaction 后恢复
 - **WHEN**非终态 Task 完成 compaction 并重新 replay
-- **THEN** Task contract、latest revision/cursor 和已提交 requestId 保持等价
+- **THEN** Adapter 从 append-only current branch（包含 compaction 前的 Task custom entries）
+  恢复 Task contract、latest revision/cursor 和全部已提交 requestId，不能把 LLM context
+  裁剪误当成 Session ledger 删除
+
+#### Scenario: 仅 checkpoint 降级恢复
+- **WHEN**恢复输入只剩一个合法 checkpoint、缺少 compaction 前的历史 custom entries
+- **THEN** Adapter 只对 checkpoint `receiptWindow` 明示的 requestId 提供原 receipt replay，
+  并暴露 retained/omitted 边界，不得声称等价于正常 full-branch replay
 
 #### Scenario: Branch 分叉
 - **WHEN** Session 从旧节点创建另一个 branch

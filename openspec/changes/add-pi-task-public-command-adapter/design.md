@@ -224,14 +224,26 @@ AGENTS.md 单向依赖规约。
 - `expectedRevision` 是 optimistic concurrency guard。
 - `requestId + payloadHash` 是幂等键。
 - Cursor 在 reduce 前、entry append 后、receipt 返回前均校验。
+- Mutation、checkpoint 与幂等 replay 在使用内存投影前，必须确认该投影对应当前
+  `SessionManager.getBranch()` 上最新合法 Task ledger；切换 sibling branch 后未 replay 的
+  stale store 必须 fail closed，禁止把旧分支状态写入或返回给新分支。
 - State event wait 有固定 timeout，结束后移除 listener。
 - Reload/switch 递增 bridge epoch，旧调用和迟到 event 被隔离。
+
+Pi Runtime `0.80.10` 的 Session 存储是 append-only；compaction entry 只改变发送给 LLM 的
+context 构造，不删除 `getBranch()` 上已持久化的 custom entries。因此正常 restart、branch
+和 compaction replay 必须读取完整 current branch，所有历史 requestId 仍可由原 mutation
+envelope 恢复。仅剩单个 checkpoint 的 snapshot-only bootstrap 属于降级恢复路径，只承诺
+`receiptWindow` 明示的近期幂等窗口，不得等同于正常 compaction 语义。
 
 ## Performance and Security
 
 - 每次 mutation 只 replay current branch 的 task entries；实现须维护有界索引并在
   Session 恢复时一次构建，不能在 text delta 热路径运行。
 - Snapshot 最大 64KB，诊断只记录 id、revision、cursor、hash 和错误分类。
+- Session JSONL 在本地数据模型中是可信 canonical storage；checkpoint hash 用于发现
+  accidental corruption、partial write 和字段漂移，不提供针对可任意修改并重新计算 hash
+  的本地攻击者的密码学认证。
 - 禁止记录 prompt、task 正文、凭据、用户 home path 和完整 tool output。
 - `inputHash` 使用稳定 JSON canonicalization 与 SHA-256。
 - Tool allowlist 和 force policy 均 fail closed。
@@ -247,6 +259,12 @@ AGENTS.md 单向依赖规约。
   每次升级重新执行 A-01/A-02 contract。
 - [Risk] Crash 发生在 entry append 与 receipt 返回之间 → requestId/payloadHash 已在
   canonical event 中持久化，重试从 replay 返回原 receipt。
+- [Risk] Task canonical state 自身超过 64KB 时，即使移除全部 receipt 仍无法写入单个
+  checkpoint → extension 必须返回明确的 `CHECKPOINT_TOO_LARGE`，不得写入部分 snapshot；
+  分片或外部 canonical state 引用不在 A-02 范围，作为后续存储演进项保留。
+- [Risk] snapshot-only bootstrap 的 receipt window 会淘汰旧 requestId → 正常 Pi
+  compaction/restart 必须使用 append-only full branch replay；降级 bootstrap 只对窗口内
+  requestId 提供原 receipt replay，并通过 retained/omitted 元数据暴露边界。
 - [Risk] pnpm patch 修改发布包 dist → patch 文件是唯一源码，禁止直接提交
   node_modules；package smoke 必须验证 CJS/ESM 和 ASAR。
 
