@@ -27,7 +27,7 @@
 
 ## 6. 决策闭环与合并
 
-- [ ] 6.1 [串行] 新建 superseding ADR，记录 host invoke、受控 fork、Evidence Gate、兼容矩阵、上游同步和回滚决策；依赖：5.3；写入范围：`docs/architecture/decisions/` 与 Story 9.41 状态文档；角色：Integration Owner；必需测试：文档链接和架构围栏检查；完成证据：ADR 与 Story traceability。
+- [x] 6.1 [串行] 新建 superseding ADR，记录 host invoke、受控 fork、Evidence Gate、兼容矩阵、上游同步和回滚决策；依赖：5.3；写入范围：`docs/architecture/decisions/` 与 Story 9.41 状态文档；角色：Integration Owner；必需测试：文档链接和架构围栏检查；完成证据：Task commit `a12ea2d`（integration commit `0db0346`）；ADR-010 取代 ADR-009，记录受控 Runtime patch、`@originos/pi-tasks`、Adapter 公共边界、Evidence Gate、上游同步和逆序回滚；Epic 9 与 Story 9.41 状态调整为 Ready 且明确产品能力未完成；本地 Markdown 链接、模板占位符、Story 目录结构和 architecture guard 检查通过，报告结论为 PASS。
 - [ ] 6.2 [串行] 创建并执行 Story verification goal，目标为通过 A-02 与 Story 9.41 已定义测试 case；依赖：6.1；写入范围：测试证据与 Proposal tasks；角色：Verification Owner；必需测试：自动化矩阵，无法自动化的平台项需记录人工步骤和剩余风险；完成证据：goal 结论与证据索引。
 - [ ] 6.3 [串行] 按 Task commit 顺序合并到 Proposal integration branch，解决冲突后再次执行完整回归和 OpenSpec strict validation；依赖：6.2；写入范围：Proposal integration branch；角色：Integration Owner；必需测试：5.3 全量重跑；完成证据：integration commit 和测试输出。
 - [ ] 6.4 [串行] 仅在所有门禁通过后合并 Proposal 到 `dev`，归档 OpenSpec change，并按保留策略清理 Task worktree；依赖：6.3；写入范围：`dev`、OpenSpec archive、Git worktree metadata；角色：Integration Owner；必需测试：post-merge smoke 与 worktree 清单；完成证据：merge commit、archive commit 和清理记录。
