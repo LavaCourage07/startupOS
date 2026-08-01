@@ -8,7 +8,7 @@
     "audit:pi-tasks": "node scripts/pi-task-runtime-audit.js --json",
     "build": "node build-runtime.js",
     "prepare": "node build-runtime.js",
-    "test": "node scripts/verify-runtime.js && node --test scripts/pi-task-runtime-audit.test.js"
+    "test": "node scripts/verify-runtime.js && node --test scripts/pi-task-runtime-audit.test.js scripts/task-runtime.test.js"
   },
   "exports": {
     ".": {
@@ -30,6 +30,11 @@
       "types": "./goal.d.ts",
       "require": "./goal.js",
       "default": "./goal.js"
+    },
+    "./task-runtime": {
+      "types": "./task-runtime.d.ts",
+      "require": "./task-runtime.js",
+      "default": "./task-runtime.js"
     }
   },
   "dependencies": {
