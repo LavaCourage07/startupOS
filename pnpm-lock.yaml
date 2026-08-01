@@ -224,6 +224,9 @@ importers:
       '@opentelemetry/api':
         specifier: 1.9.0
         version: 1.9.0
+      '@originos/pi-tasks':
+        specifier: workspace:0.2.0-originos.1
+        version: link:../pi-tasks
       '@smithy/node-http-handler':
         specifier: 4.7.3
         version: 4.7.3
@@ -242,9 +245,6 @@ importers:
       pi-agent-goal:
         specifier: 2026.7.18
         version: 2026.7.18(@earendil-works/pi-coding-agent@0.80.10(patch_hash=kda4b4q6f5ho4ugdasgqzzrhkq)(ws@8.21.1)(zod@3.25.76))(@earendil-works/pi-tui@0.80.10)(typebox@1.1.38)
-      pi-tasks:
-        specifier: 0.2.0
-        version: 0.2.0
       typebox:
         specifier: 1.1.38
         version: 1.1.38
@@ -343,6 +343,12 @@ importers:
       wait-on:
         specifier: ^8.0.5
         version: 8.0.5
+
+  packages/pi-tasks:
+    devDependencies:
+      typescript:
+        specifier: ^5.0.0
+        version: 5.7.3
 
   packages/service:
     dependencies:
@@ -4697,10 +4703,6 @@ packages:
       '@earendil-works/pi-coding-agent': '>=0.80.5 <0.81.0'
       '@earendil-works/pi-tui': '>=0.79.3 <0.81.0'
       typebox: '*'
-
-  pi-tasks@0.2.0:
-    resolution: {integrity: sha512-VN3fQs2khp6M0chAjpKQPeGZI4MJ0PP1XLmc368WGmccMAQOlz1dv5wMNtvUurHvyEinGSAVCNXhMGG6OUp+bw==}
-    engines: {node: '>=22.0.0'}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -10927,8 +10929,6 @@ snapshots:
       '@earendil-works/pi-coding-agent': 0.80.10(patch_hash=kda4b4q6f5ho4ugdasgqzzrhkq)(ws@8.21.1)(zod@3.25.76)
       '@earendil-works/pi-tui': 0.80.10
       typebox: 1.1.38
-
-  pi-tasks@0.2.0: {}
 
   picocolors@1.1.1: {}
 
