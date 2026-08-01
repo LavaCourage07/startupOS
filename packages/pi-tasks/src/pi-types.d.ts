@@ -35,6 +35,7 @@ export interface ExtensionContext {
     mode: "tui" | "rpc" | "print" | string;
     sessionManager: {
         getBranch(): BranchEntry[];
+        getSessionId(): string;
     };
     ui: {
         notify(message: string, type?: "info" | "warning" | "error"): void;

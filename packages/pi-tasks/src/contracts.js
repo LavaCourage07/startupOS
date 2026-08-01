@@ -23,6 +23,92 @@ export const PI_TASK_MUTATION_TOOLS = Object.freeze([
 export const PI_TASK_SCHEMA_FINGERPRINT =
     "originos-pi-tasks/v1:event-v2:cas:receipt:evidence-gate-no-force";
 
+export const PI_TASK_EVENT_V2_SCHEMA = Object.freeze({
+    $id: "originos.pi-tasks.event-envelope.v2",
+    oneOf: [
+        {
+            type: "object",
+            additionalProperties: false,
+            required: [
+                "version",
+                "kind",
+                "revision",
+                "parentCursor",
+                "requestId",
+                "payloadHash",
+                "command",
+                "event",
+            ],
+            properties: {
+                version: { const: 2 },
+                kind: { const: "mutation" },
+                revision: { type: "integer", minimum: 1 },
+                parentCursor: { type: ["string", "null"] },
+                requestId: { type: "string", minLength: 1 },
+                payloadHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
+                command: { enum: [...PI_TASK_MUTATION_TOOLS] },
+                event: { type: "object" },
+            },
+        },
+        {
+            type: "object",
+            additionalProperties: false,
+            required: [
+                "version",
+                "kind",
+                "revision",
+                "parentCursor",
+                "event",
+                "checkpoint",
+            ],
+            properties: {
+                version: { const: 2 },
+                kind: { const: "snapshot" },
+                revision: { type: "integer", minimum: 0 },
+                parentCursor: { type: ["string", "null"] },
+                event: { type: "object" },
+                checkpoint: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["version", "stateHash", "receipts"],
+                    properties: {
+                        version: { const: 1 },
+                        stateHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
+                        receipts: { type: "array", items: { type: "object" } },
+                    },
+                },
+            },
+        },
+    ],
+});
+
+export const PI_TASK_STATE_EVENT_V2_SCHEMA = Object.freeze({
+    $id: "originos.pi-tasks.state-event.v2",
+    type: "object",
+    additionalProperties: false,
+    required: ["version", "reason", "widgetId", "scope", "stateHash", "state"],
+    properties: {
+        version: { const: 2 },
+        reason: {
+            enum: ["session_start", "session_tree", "task_mutation", "compaction"],
+        },
+        widgetId: { const: "pi-tasks" },
+        scope: {
+            type: "object",
+            additionalProperties: false,
+            required: ["sessionId", "cursor", "revision"],
+            properties: {
+                sessionId: { type: "string", minLength: 1 },
+                cursor: { type: ["string", "null"] },
+                revision: { type: "integer", minimum: 0 },
+            },
+        },
+        mutation: { type: "object" },
+        stateHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
+        state: { type: "object" },
+    },
+});
+
 export class PiTaskContractError extends Error {
     constructor(code, message, details = {}) {
         super(message);
@@ -60,7 +146,7 @@ export function sha256(value) {
 }
 
 export function mutationPayloadHash(command, input) {
-    return sha256({ command, input });
+    return sha256({ toolName: command, input });
 }
 
 export function stateHash(state) {
@@ -91,13 +177,14 @@ export function assertMutationRequest(request) {
         throw new PiTaskContractError("INVALID_REQUEST_ID", "requestId is required");
     }
     assertMutationCommand(request.command);
-    if (!Number.isInteger(request.expectedRevision) || request.expectedRevision < 0) {
+    if (!Number.isSafeInteger(request.expectedRevision) || request.expectedRevision < 0) {
         throw new PiTaskContractError(
             "INVALID_EXPECTED_REVISION",
             "expectedRevision must be a non-negative integer",
         );
     }
-    if (request.expectedCursor !== null && typeof request.expectedCursor !== "string") {
+    if (request.expectedCursor !== null &&
+        (typeof request.expectedCursor !== "string" || request.expectedCursor.length === 0)) {
         throw new PiTaskContractError(
             "INVALID_EXPECTED_CURSOR",
             "expectedCursor must be a string or null",
@@ -111,4 +198,31 @@ export function assertMutationRequest(request) {
         requestId: request.requestId.trim(),
         payloadHash: mutationPayloadHash(request.command, request.input),
     };
+}
+
+export function createMutationReceipt({
+    request,
+    revisionBefore,
+    revisionAfter,
+    cursorBefore,
+    cursorAfter,
+    event,
+    nextState,
+    replayed = false,
+}) {
+    return Object.freeze({
+        version: 1,
+        requestId: request.requestId,
+        command: request.command,
+        revisionBefore,
+        revisionAfter,
+        cursorBefore,
+        cursorAfter,
+        taskId: event.taskId,
+        eventId: event.id,
+        eventType: event.type,
+        stateHash: stateHash(nextState),
+        payloadHash: request.payloadHash,
+        replayed,
+    });
 }

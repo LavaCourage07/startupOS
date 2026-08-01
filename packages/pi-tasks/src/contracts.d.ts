@@ -7,6 +7,8 @@ export declare const PI_TASKS_UPSTREAM_ENTRY_SHA256: string;
 export declare const PI_TASKS_UPSTREAM_REDUCER_SHA256: string;
 export declare const PI_TASK_MUTATION_TOOLS: readonly PiTaskMutationTool[];
 export declare const PI_TASK_SCHEMA_FINGERPRINT: string;
+export declare const PI_TASK_EVENT_V2_SCHEMA: Readonly<Record<string, unknown>>;
+export declare const PI_TASK_STATE_EVENT_V2_SCHEMA: Readonly<Record<string, unknown>>;
 
 export type PiTaskMutationTool =
     | "task_plan"
@@ -34,6 +36,7 @@ export interface PiTaskMutationReceipt {
     revisionAfter: number;
     cursorBefore: string | null;
     cursorAfter: string;
+    taskId: string;
     eventId: string;
     eventType: string;
     stateHash: string;
@@ -50,6 +53,34 @@ export interface PiTaskRuntimeMetadata {
     latestReceipt?: PiTaskMutationReceipt;
 }
 
+export interface PiTaskMutationEventEnvelopeV2 {
+    version: 2;
+    kind: "mutation";
+    revision: number;
+    parentCursor: string | null;
+    requestId: string;
+    payloadHash: string;
+    command: PiTaskMutationTool;
+    event: Record<string, unknown>;
+}
+
+export interface PiTaskSnapshotEventEnvelopeV2 {
+    version: 2;
+    kind: "snapshot";
+    revision: number;
+    parentCursor: string | null;
+    event: Record<string, unknown>;
+    checkpoint: {
+        version: 1;
+        stateHash: string;
+        receipts: PiTaskMutationReceipt[];
+    };
+}
+
+export type PiTaskEventEnvelopeV2 =
+    | PiTaskMutationEventEnvelopeV2
+    | PiTaskSnapshotEventEnvelopeV2;
+
 export declare class PiTaskContractError extends Error {
     readonly code: string;
     readonly details: Record<string, unknown>;
@@ -65,3 +96,13 @@ export declare function assertMutationCommand(command: unknown): asserts command
 export declare function assertMutationRequest(request: PiTaskMutationRequest): PiTaskMutationRequest & {
     payloadHash: string;
 };
+export declare function createMutationReceipt(input: {
+    request: PiTaskMutationRequest & { payloadHash: string };
+    revisionBefore: number;
+    revisionAfter: number;
+    cursorBefore: string | null;
+    cursorAfter: string;
+    event: { id: string; type: string; taskId: string };
+    nextState: Record<string, unknown>;
+    replayed?: boolean;
+}): PiTaskMutationReceipt;

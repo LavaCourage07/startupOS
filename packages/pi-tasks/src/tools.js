@@ -1,6 +1,7 @@
 import { createEventId, SequentialIdGenerator } from "./ids.js";
 import { buildTaskResume, formatTaskFocus, formatTaskList, formatTaskNext, formatTaskResume, } from "./render.js";
 import { Type } from "./schema.js";
+import { requireTaskSessionId } from "./state-events.js";
 import { errorText, snapshotState } from "./store.js";
 import { updateTaskUi } from "./widget.js";
 const TASK_STATUSES = [
@@ -56,6 +57,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             "Activate only one task unless the user explicitly asks for parallel work.",
         ],
         parameters: Type.Object({
+            originos_command: Type.Optional(originosCommandSchema()),
             title: Type.String({ description: "Concise task title" }),
             objective: Type.String({
                 description: "User-facing objective and scope",
@@ -77,7 +79,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             tags: Type.Optional(Type.Array(Type.String())),
             activate: Type.Optional(Type.Boolean({ description: "Make this the active task" })),
         }),
-        execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+        execute: async (toolCallId, params, _signal, _onUpdate, ctx) => {
             const taskId = nextTaskId(store.getState());
             const event = baseEvent("task.created", taskId, ctx, {
                 title: params.title,
@@ -89,7 +91,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 ...(params.priority ? { priority: params.priority } : {}),
                 ...(params.tags ? { tags: params.tags } : {}),
             });
-            return appendAndReport(pi, store, ctx, event, `Created task ${taskId}: ${params.title}`);
+            return appendAndReport(pi, store, ctx, event, `Created task ${taskId}: ${params.title}`, buildMutationRequest("task_plan", toolCallId, params, store));
         },
     });
     pi.registerTool({
@@ -142,9 +144,10 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             "Checkpoint is not evidence and does not satisfy acceptance criteria.",
         ],
         parameters: Type.Object({
+            originos_command: Type.Optional(originosCommandSchema()),
             reason: Type.Optional(Type.String()),
         }),
-        execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+        execute: async (toolCallId, params, _signal, _onUpdate, ctx) => {
             const state = store.getState();
             if (Object.keys(state.tasks).length === 0) {
                 return textResult("No pi-tasks state to checkpoint.", buildTaskResume(state));
@@ -154,7 +157,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 resume: buildTaskResume(state),
                 reason: "manual",
             });
-            return appendAndReport(pi, store, ctx, event, `Checkpointed pi-tasks state${params.reason ? `: ${params.reason}` : ""}`);
+            return appendAndReport(pi, store, ctx, event, `Checkpointed pi-tasks state${params.reason ? `: ${params.reason}` : ""}`, buildMutationRequest("task_checkpoint", toolCallId, params, store));
         },
     });
     pi.registerTool({
@@ -216,6 +219,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             "Do not use task_decompose for execution evidence; record execution evidence with task_evidence.",
         ],
         parameters: Type.Object({
+            originos_command: Type.Optional(originosCommandSchema()),
             task_id: Type.String(),
             step_id: Type.String(),
             reason: Type.String(),
@@ -231,13 +235,13 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 granularityCheck: Type.Optional(granularityCheckSchema()),
             })),
         }),
-        execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+        execute: async (toolCallId, params, _signal, _onUpdate, ctx) => {
             const event = baseEvent("task.steps_decomposed", params.task_id, ctx, {
                 parentStepId: params.step_id,
                 childSteps: params.child_steps,
                 reason: params.reason,
             });
-            return appendAndReport(pi, store, ctx, event, `Decomposed step ${params.step_id} for task ${params.task_id}`);
+            return appendAndReport(pi, store, ctx, event, `Decomposed step ${params.step_id} for task ${params.task_id}`, buildMutationRequest("task_decompose", toolCallId, params, store));
         },
     });
     pi.registerTool({
@@ -278,6 +282,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             "Moving to blocked requires blocker details; unblocking requires a reason.",
         ],
         parameters: Type.Object({
+            originos_command: Type.Optional(originosCommandSchema()),
             task_id: Type.String(),
             status: Type.Optional(Type.Enum(TASK_STATUSES)),
             progress: Type.Optional(Type.Number()),
@@ -304,7 +309,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 neededToUnblock: Type.String(),
             })),
         }),
-        execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+        execute: async (toolCallId, params, _signal, _onUpdate, ctx) => {
             const event = baseEvent("task.updated", params.task_id, ctx, {
                 ...(params.status ? { status: params.status } : {}),
                 ...(params.progress !== undefined ? { progress: params.progress } : {}),
@@ -333,7 +338,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                     : {}),
                 ...(params.blocker ? { blocker: params.blocker } : {}),
             });
-            return appendAndReport(pi, store, ctx, event, `Updated task ${params.task_id}`);
+            return appendAndReport(pi, store, ctx, event, `Updated task ${params.task_id}`, buildMutationRequest("task_update", toolCallId, params, store));
         },
     });
     pi.registerTool({
@@ -349,6 +354,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             "Provide quality.source, quality.reproducible, quality.verifier, quality.artifactRefs, and observedOutput for test/command/dogfood evidence.",
         ],
         parameters: Type.Object({
+            originos_command: Type.Optional(originosCommandSchema()),
             task_id: Type.String(),
             type: Type.Enum(EVIDENCE_TYPES),
             level: Type.Enum(VERIFICATION_LEVELS),
@@ -362,10 +368,11 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 description: "Required only when attaching evidence outside the current step lock.",
             })),
         }),
-        execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+        execute: async (toolCallId, params, _signal, _onUpdate, ctx) => {
             const duplicate = findDuplicateEvidenceForParams(store.getState().tasks[params.task_id], params);
             if (duplicate &&
-                criteriaAlreadyLinked(store.getState(), params, duplicate)) {
+                criteriaAlreadyLinked(store.getState(), params, duplicate) &&
+                !params.originos_command) {
                 return textResult(`Evidence already recorded as ${duplicate.id} for task ${params.task_id}\n\n${formatTaskResume(store.getState())}`, buildTaskResume(store.getState()));
             }
             const evidenceId = idGenerator.next("E");
@@ -388,7 +395,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             const success = duplicate
                 ? `Linked existing evidence ${duplicate.id} for task ${params.task_id}`
                 : `Recorded evidence ${evidenceId} for task ${params.task_id}`;
-            return appendAndReport(pi, store, ctx, event, success);
+            return appendAndReport(pi, store, ctx, event, success, buildMutationRequest("task_evidence", toolCallId, params, store));
         },
     });
     pi.registerTool({
@@ -401,6 +408,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             "Do not hide unresolved user choices in notes; record them as blockers or decisions.",
         ],
         parameters: Type.Object({
+            originos_command: Type.Optional(originosCommandSchema()),
             task_id: Type.String(),
             question: Type.String(),
             decision: Type.String(),
@@ -408,7 +416,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             rationale: Type.Optional(Type.String()),
             impact: Type.Optional(Type.String()),
         }),
-        execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+        execute: async (toolCallId, params, _signal, _onUpdate, ctx) => {
             const decisionId = idGenerator.next("D");
             const decision = {
                 id: decisionId,
@@ -423,7 +431,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             const event = baseEvent("task.decision_recorded", params.task_id, ctx, {
                 decision,
             });
-            return appendAndReport(pi, store, ctx, event, `Recorded decision ${decisionId} for task ${params.task_id}`);
+            return appendAndReport(pi, store, ctx, event, `Recorded decision ${decisionId} for task ${params.task_id}`, buildMutationRequest("task_decision", toolCallId, params, store));
         },
     });
     pi.registerTool({
@@ -437,6 +445,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             "Forced completion must be reported as not fully verified.",
         ],
         parameters: Type.Object({
+            originos_command: Type.Optional(originosCommandSchema()),
             task_id: Type.String(),
             summary: Type.String(),
             evidence_ids: Type.Array(Type.String()),
@@ -448,7 +457,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             }))),
             force_with_reason: Type.Optional(Type.String()),
         }),
-        execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+        execute: async (toolCallId, params, _signal, _onUpdate, ctx) => {
             const event = baseEvent("task.completed", params.task_id, ctx, {
                 summary: params.summary,
                 evidenceIds: params.evidence_ids,
@@ -459,7 +468,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                     ? { forceWithReason: params.force_with_reason }
                     : {}),
             });
-            return appendAndReport(pi, store, ctx, event, `Completed task ${params.task_id}`);
+            return appendAndReport(pi, store, ctx, event, `Completed task ${params.task_id}`, buildMutationRequest("task_complete", toolCallId, params, store));
         },
     });
 }
@@ -483,16 +492,64 @@ function evidenceQualitySchema() {
         observedOutput: Type.Optional(Type.String()),
     });
 }
-function appendAndReport(pi, store, ctx, event, success) {
+function originosCommandSchema() {
+    return Type.Object({
+        version: { const: 1 },
+        request_id: Type.String({ minLength: 1 }),
+        expected_revision: { type: "integer", minimum: 0 },
+        expected_cursor: { type: ["string", "null"], minLength: 1 },
+    });
+}
+function buildMutationRequest(command, toolCallId, params, store) {
+    const businessInput = { ...params };
+    delete businessInput.originos_command;
+    const current = store.getMetadata();
+    const reserved = params.originos_command;
+    return {
+        version: reserved?.version ?? 1,
+        requestId: reserved?.request_id ?? toolCallId,
+        command,
+        expectedRevision: reserved?.expected_revision ?? current.revision,
+        expectedCursor: reserved ? reserved.expected_cursor : current.cursor,
+        input: businessInput,
+        runtimeToolCallId: toolCallId,
+    };
+}
+function appendAndReport(pi, store, ctx, event, success, request) {
     try {
-        const state = store.append(event, (customType, data) => {
-            pi.appendEntry(customType, data);
+        if (request.requestId !== request.runtimeToolCallId) {
+            const error = new Error("originos_command.request_id must match the Runtime toolCallId");
+            error.code = "INVALID_REQUEST_ID";
+            throw error;
+        }
+        requireTaskSessionId(ctx);
+        const { runtimeToolCallId: _runtimeToolCallId, ...mutationRequest } = request;
+        const result = store.mutate(mutationRequest, event, {
+            appendEntry(customType, data) {
+                pi.appendEntry(customType, data);
+            },
+            getBranch() {
+                return ctx.sessionManager.getBranch();
+            },
         });
-        updateTaskUi(pi, ctx, state, "task_mutation");
+        updateTaskUi(
+            pi,
+            ctx,
+            result.state,
+            "task_mutation",
+            result.metadata,
+            result.receipt.replayed ? undefined : result.receipt,
+        );
         const warning = event.type === "task.completed" && event.forceWithReason
             ? `\nWarning: forced completion: ${event.forceWithReason}`
             : "";
-        return textResult(`${success}${warning}\n\n${formatTaskResume(state)}`, buildTaskResume(state));
+        const outcome = result.receipt.replayed
+            ? `Idempotent replay: request ${result.receipt.requestId} already committed ${result.receipt.eventType} for task ${result.receipt.taskId}; no new task event was appended.`
+            : `${success}${warning}`;
+        return textResult(`${outcome}\n\n${formatTaskResume(result.state)}`, {
+            ...buildTaskResume(result.state),
+            mutationReceipt: result.receipt,
+        });
     }
     catch (error) {
         const resume = formatTaskResume(store.getState());
@@ -517,6 +574,7 @@ function buildRejectionRecovery(error, state) {
     const resume = buildTaskResume(state);
     return {
         rejected: true,
+        code: typeof error?.code === "string" ? error.code : "TASK_TRANSITION_REJECTED",
         reason: errorText(error),
         retry_with: resume.recommendedTool ?? resume.nextAllowedActions[0] ?? "task_resume",
         minimum_params: resume.minimumParams ?? {},

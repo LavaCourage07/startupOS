@@ -1,4 +1,10 @@
-import { type ReplayResult, type TaskEvent, type TaskState } from "./model.ts";
+import type {
+    PiTaskMutationReceipt,
+    PiTaskMutationRequest,
+    PiTaskRuntimeMetadata,
+} from "./contracts.ts";
+import type { ReplayResult, TaskEvent, TaskState } from "./model.ts";
+
 export interface BranchEntry {
     type: string;
     customType?: string;
@@ -6,12 +12,37 @@ export interface BranchEntry {
     id?: string;
     timestamp?: string;
 }
+
+export interface TaskPersistence {
+    appendEntry(customType: string, data: unknown): void;
+    getBranch(): BranchEntry[];
+}
+
+export interface TaskMutationResult {
+    state: TaskState;
+    metadata: PiTaskRuntimeMetadata;
+    receipt: PiTaskMutationReceipt;
+}
+
 export interface TaskRuntimeStore {
     getState(): TaskState;
-    replay(branchEntries: BranchEntry[]): ReplayResult;
-    append(event: TaskEvent, appendEntry: (customType: string, data: TaskEvent) => void): TaskState;
+    getMetadata(): PiTaskRuntimeMetadata;
+    replay(branchEntries: BranchEntry[]): ReplayResult & {
+        metadata: PiTaskRuntimeMetadata;
+        receipts: PiTaskMutationReceipt[];
+    };
+    mutate(request: PiTaskMutationRequest, event: TaskEvent, persistence: TaskPersistence): TaskMutationResult;
+    checkpoint(event: TaskEvent, persistence: TaskPersistence): {
+        state: TaskState;
+        metadata: PiTaskRuntimeMetadata;
+        envelope: unknown;
+    };
 }
+
 export declare function createTaskRuntimeStore(initialState?: TaskState): TaskRuntimeStore;
-export declare function replayBranchEntries(entries: BranchEntry[]): ReplayResult;
+export declare function replayBranchEntries(entries: BranchEntry[]): ReplayResult & {
+    metadata: PiTaskRuntimeMetadata;
+    receipts: PiTaskMutationReceipt[];
+};
 export declare function snapshotState(state: TaskState): Omit<TaskState, "events">;
 export declare function errorText(error: unknown): string;
