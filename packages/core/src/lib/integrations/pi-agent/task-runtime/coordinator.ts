@@ -126,6 +126,13 @@ function internalUserMessage(text: string): AgentMessage {
 	} as unknown as AgentMessage;
 }
 
+function visibleUserMessage(text: string): AgentMessage {
+	return {
+		role: "user",
+		content: [{ type: "text", text }],
+	} as unknown as AgentMessage;
+}
+
 function taskStatusFromProjection(
 	projection: AgentTaskProjectionV1,
 ): AgentTaskExecutionStateV1["status"] {
@@ -157,6 +164,7 @@ export class AgentTaskRuntimeCoordinator {
 	private baselineTools: readonly AgentTool<unknown>[] = [];
 	private taskToolsInstalled = false;
 	private runningPromise: Promise<void> | null = null;
+	private continuationGeneration = 0;
 	private persistPromise = Promise.resolve();
 	private state: AgentTaskRuntimePersistenceV1;
 
@@ -217,7 +225,7 @@ export class AgentTaskRuntimeCoordinator {
 		if (execution.requestId === request.requestId) {
 			return this.getSnapshot();
 		}
-		if (isActiveExecution(execution.status)) {
+		if (execution.mode !== "chat" || isActiveExecution(execution.status)) {
 			throw new AgentTaskRuntimeConflictError("当前 Session 已有进行中的正式任务");
 		}
 
@@ -266,7 +274,10 @@ export class AgentTaskRuntimeCoordinator {
 		this.assertControlRequest(request);
 		switch (request.action) {
 			case "stop":
-				await this.stopTask(request.requestId);
+				await this.pauseTask();
+				break;
+			case "cancel":
+				await this.cancelTask(request.requestId);
 				break;
 			case "resume":
 				this.resumeTask();
@@ -274,6 +285,67 @@ export class AgentTaskRuntimeCoordinator {
 			case "retry":
 				await this.retryTask(request.requestId);
 				break;
+		}
+		return this.getSnapshot();
+	}
+
+	async submitUserReply(content: string): Promise<AgentTaskRuntimeSnapshotV1> {
+		await this.initialize();
+		if (this.state.execution.mode !== "task_running" || this.state.execution.status !== "waiting_user") {
+			throw new AgentTaskRuntimeConflictError("当前任务不处于等待用户输入状态");
+		}
+		if (!content.trim()) {
+			throw new AgentTaskRuntimeProtocolError("任务答复不能为空");
+		}
+		const projection = this.state.execution.projection;
+		const blocker = projection?.blockers.find((candidate) => !candidate.resolved);
+		if (!projection || !blocker) {
+			throw new AgentTaskRuntimeConflictError("当前任务没有可答复的未解决 blocker");
+		}
+
+		this.installTaskTools();
+		this.state.execution.status = "running";
+		this.state.execution.lastError = undefined;
+		this.state.execution.updatedAt = new Date().toISOString();
+		await this.publishState();
+
+		const context = internalUserMessage([
+			"[Internal Task Runtime] 用户正在答复当前任务 blocker。",
+			`taskId: ${projection.taskId}`,
+			`blockerId: ${blocker.id}`,
+			`expectedRevision: ${projection.revision}`,
+			`bridgeEpoch: ${this.state.execution.bridgeEpoch}`,
+			"先用 task_update 记录并解决该 blocker，再继续当前步骤；不要创建新任务。",
+		].join("\n"));
+		const baseline = createAgentTaskProgressFingerprint(projection);
+		try {
+			await this.options.agent.prompt(
+				[context, visibleUserMessage(content.trim())],
+				undefined,
+				{ completionPolicy: "task_runtime", internalMessageIndexes: [0] },
+			);
+			const nextProjection = projectPiTaskSnapshot(this.requireHost().getSnapshot());
+			if (!nextProjection) {
+				throw new Error("Task 用户答复后 canonical Task 丢失");
+			}
+			this.updateFromProjection(
+				nextProjection,
+				nextProjection.status === "done" || nextProjection.status === "cancelled"
+					? "chat"
+					: "task_running",
+				baseline,
+			);
+			await this.publishState();
+			if (this.state.execution.status === "running") {
+				this.startContinuationLoop();
+			}
+		} catch (error) {
+			const currentStatus: AgentTaskExecutionStateV1["status"] = this.getSnapshot().execution.status;
+			if (currentStatus === "paused" || currentStatus === "cancelled") {
+				return this.getSnapshot();
+			}
+			this.fail("TASK_USER_REPLY_FAILED", errorMessage(error), true, true);
+			await this.publishState();
 		}
 		return this.getSnapshot();
 	}
@@ -303,12 +375,22 @@ export class AgentTaskRuntimeCoordinator {
 		if (!projection) {
 			return;
 		}
+		const preservedStatus = this.state.execution.status;
+		const preservedError = this.state.execution.lastError;
 		this.updateFromProjection(
 			projection,
 			projection.status === "done" || projection.status === "cancelled"
 				? "chat"
 				: "task_running",
 		);
+		if (
+			projection.status !== "done"
+			&& projection.status !== "cancelled"
+			&& (preservedStatus === "paused" || preservedStatus === "failed")
+		) {
+			this.state.execution.status = preservedStatus;
+			this.state.execution.lastError = preservedError;
+		}
 		void this.publishState();
 	}
 
@@ -378,19 +460,30 @@ export class AgentTaskRuntimeCoordinator {
 		if (this.runningPromise) {
 			return;
 		}
-		this.runningPromise = this.runContinuationLoop()
+		const generation = ++this.continuationGeneration;
+		let runningPromise: Promise<void>;
+		runningPromise = this.runContinuationLoop(generation)
 			.catch(async (error: unknown) => {
-				this.fail("TASK_CONTINUATION_FAILED", errorMessage(error), true);
+				if (generation !== this.continuationGeneration) {
+					return;
+				}
+				this.fail("TASK_CONTINUATION_FAILED", errorMessage(error), true, true);
 				await this.publishState();
 			})
 			.finally(() => {
-				this.runningPromise = null;
+				if (this.runningPromise === runningPromise) {
+					this.runningPromise = null;
+				}
 			});
+		this.runningPromise = runningPromise;
 	}
 
-	private async runContinuationLoop(): Promise<void> {
+	private async runContinuationLoop(generation: number): Promise<void> {
 		while (this.state.execution.mode === "task_running" && this.state.execution.status === "running") {
 			await this.options.agent.waitForIdle();
+			if (generation !== this.continuationGeneration) {
+				return;
+			}
 			const decision = this.controller.decide({
 				execution: this.state.execution,
 				projection: this.state.execution.projection,
@@ -420,6 +513,9 @@ export class AgentTaskRuntimeCoordinator {
 				undefined,
 				{ completionPolicy: "task_runtime", internalMessage: true },
 			);
+			if (generation !== this.continuationGeneration) {
+				return;
+			}
 
 			const projection = projectPiTaskSnapshot(this.requireHost().getSnapshot());
 			if (!projection) {
@@ -451,13 +547,33 @@ export class AgentTaskRuntimeCoordinator {
 				retryable: true,
 			};
 		} else if (decision.type === "fail") {
-			this.fail("TASK_RUNTIME_SCOPE_FAILED", decision.reason, false);
+			this.fail("TASK_RUNTIME_SCOPE_FAILED", decision.reason, false, true);
 		}
 		this.state.execution.updatedAt = new Date().toISOString();
 		await this.publishState();
 	}
 
-	private async stopTask(requestId: string): Promise<void> {
+	private async pauseTask(): Promise<void> {
+		if (this.state.execution.mode !== "task_running" || !isActiveExecution(this.state.execution.status)) {
+			throw new AgentTaskRuntimeConflictError("只有活动任务可以停止");
+		}
+		this.continuationGeneration += 1;
+		this.runningPromise = null;
+		this.options.agent.abort();
+		this.state.execution.status = "paused";
+		this.state.execution.lastError = {
+			code: "TASK_PAUSED_BY_USER",
+			message: "用户停止了当前任务执行，进度已保留",
+			retryable: true,
+		};
+		this.state.execution.updatedAt = new Date().toISOString();
+		this.restoreBaselineTools();
+		await this.publishState();
+	}
+
+	private async cancelTask(requestId: string): Promise<void> {
+		this.continuationGeneration += 1;
+		this.runningPromise = null;
 		this.options.agent.abort();
 		const projection = this.state.execution.projection;
 		if (projection && projection.status !== "done" && projection.status !== "cancelled") {
@@ -475,8 +591,8 @@ export class AgentTaskRuntimeCoordinator {
 				input: {
 					task_id: projection.taskId,
 					status: "cancelled",
-					reason: "用户停止任务",
-					activity: "用户从 Task 卡片停止执行",
+					reason: "用户取消任务",
+					activity: "用户从 Task 卡片取消任务",
 				},
 			});
 		}
@@ -502,8 +618,21 @@ export class AgentTaskRuntimeCoordinator {
 
 	private async retryTask(requestId: string): Promise<void> {
 		const draft = this.state.execution.draft;
-		if (this.state.execution.status !== "failed" || !draft) {
-			throw new AgentTaskRuntimeConflictError("只有 planning 失败且保留草稿的任务可以重试");
+		if (this.state.execution.status !== "failed") {
+			throw new AgentTaskRuntimeConflictError("只有失败的任务可以重试");
+		}
+		if (this.state.execution.projection) {
+			this.state.execution.mode = "task_running";
+			this.state.execution.status = "running";
+			this.state.execution.lastError = undefined;
+			this.state.execution.updatedAt = new Date().toISOString();
+			this.installTaskTools();
+			await this.publishState();
+			this.startContinuationLoop();
+			return;
+		}
+		if (!draft) {
+			throw new AgentTaskRuntimeConflictError("失败任务没有可重试的草稿或 canonical state");
 		}
 		await this.createTask({
 			version: 1,
@@ -566,10 +695,10 @@ export class AgentTaskRuntimeCoordinator {
 		}
 	}
 
-	private fail(code: string, message: string, retryable: boolean): void {
+	private fail(code: string, message: string, retryable: boolean, retainTaskLease = false): void {
 		this.state.execution = {
 			...this.state.execution,
-			mode: "chat",
+			mode: retainTaskLease && this.state.execution.projection ? "task_running" : "chat",
 			status: "failed",
 			lastError: { code, message, retryable },
 			updatedAt: new Date().toISOString(),

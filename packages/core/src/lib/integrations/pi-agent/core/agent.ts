@@ -229,6 +229,7 @@ export type AgentCompletionPolicy = "chat_guard" | "task_runtime";
 export interface AgentExecutionOptions {
 	completionPolicy?: AgentCompletionPolicy;
 	internalMessage?: boolean;
+	internalMessageIndexes?: readonly number[];
 }
 
 // ============================================================================
@@ -1277,9 +1278,16 @@ export class OriginOSAgent {
 		const completionPolicy = options.completionPolicy ?? "chat_guard";
 		try {
 			this.resetCompletionGuard(getPromptText(message));
+			const messages = Array.isArray(message) ? message : [message];
 			if (options.internalMessage) {
-				const messages = Array.isArray(message) ? message : [message];
 				for (const candidate of messages) {
+					if (typeof candidate === "object" && candidate !== null) {
+						this.hiddenMessages.add(candidate);
+					}
+				}
+			} else if (options.internalMessageIndexes) {
+				for (const index of options.internalMessageIndexes) {
+					const candidate = messages[index];
 					if (typeof candidate === "object" && candidate !== null) {
 						this.hiddenMessages.add(candidate);
 					}
