@@ -14,6 +14,7 @@ import { existsSync, readFileSync } from 'fs';
 import { StreamEventBatcher } from './stream-event-batcher';
 import { applyAssistantMessageEnd } from './assistant-stream-state';
 import { processHealthMonitor } from './process-health-monitor';
+import { AgentTaskRuntimeIpcController } from './agent-task-runtime-ipc';
 import {
   assertSessionMessageOwnership,
   restoreSessionAtBoundary,
@@ -62,8 +63,11 @@ const ENTRY_TYPE_DIRS: Record<string, string> = {
 };
 
 export class AgentSessionService {
+  private readonly taskRuntimeIpc = new AgentTaskRuntimeIpcController();
+
   constructor() {
     this.registerHandlers();
+    this.taskRuntimeIpc.registerHandlers();
   }
 
   private registerHandlers(): void {
@@ -90,7 +94,7 @@ export class AgentSessionService {
 
     ipcMain.handle(
       IPC_CHANNELS.AGENT_SESSION_CREATE,
-      async (_event, request: {
+      async (event, request: {
         projectId: string;
         projectName: string;
         systemPrompt?: string;
@@ -137,6 +141,7 @@ export class AgentSessionService {
                 },
                 request.projectId,
               ) ?? existing;
+              this.taskRuntimeIpc.rememberSession(session, event.sender);
               return {
                 success: true,
                 data: session,
@@ -166,6 +171,7 @@ export class AgentSessionService {
           };
 
           const session = await agentSessionService.createSession(createRequest);
+          this.taskRuntimeIpc.rememberSession(session, event.sender);
           return {
             success: true,
             data: session,
@@ -181,7 +187,7 @@ export class AgentSessionService {
 
     ipcMain.handle(
       IPC_CHANNELS.AGENT_SESSION_GET,
-      async (_event, request: RestoreAgentSessionRequest): Promise<IpcResponse<unknown>> => {
+      async (event, request: RestoreAgentSessionRequest): Promise<IpcResponse<unknown>> => {
         try {
           if (!request.sessionId || !request.projectId || !request.entryType || !request.entryId) {
             return {
@@ -200,6 +206,7 @@ export class AgentSessionService {
               await agentManager.restoreAgentRuntime(storedSession);
             },
           });
+          await this.taskRuntimeIpc.restoreForSession(session, event.sender);
           return {
             success: true,
             data: session,
@@ -397,7 +404,7 @@ export class AgentSessionService {
 
     ipcMain.handle(
       IPC_CHANNELS.AGENT_SESSION_MESSAGE,
-      async (_event, request: {
+      async (event, request: {
         sessionId: string;
         content: string;
         role?: string;
@@ -423,6 +430,7 @@ export class AgentSessionService {
             };
           }
 
+          this.taskRuntimeIpc.rememberSession(session, event.sender);
           assertSessionMessageOwnership(session, request);
           const agent = await agentManager.getOrRestoreAgentRuntime(session);
 
@@ -509,12 +517,14 @@ export class AgentSessionService {
           });
 
           processHealthMonitor.setAgentActivity(request.sessionId, 'prompt_start');
+          this.taskRuntimeIpc.setUserMessagePending(request.sessionId, true);
           try {
             await agent.prompt(request.content);
           } catch (promptError) {
             hasError = true;
             errorMessage = promptError instanceof Error ? promptError.message : 'Failed to call LLM';
           } finally {
+            this.taskRuntimeIpc.setUserMessagePending(request.sessionId, false);
             processHealthMonitor.clearAgentActivity(request.sessionId);
           }
 
@@ -596,6 +606,7 @@ export class AgentSessionService {
             };
           }
 
+          this.taskRuntimeIpc.rememberSession(session, event.sender);
           assertSessionMessageOwnership(session, request);
           const agent = await agentManager.getOrRestoreAgentRuntime(session);
 
@@ -771,6 +782,7 @@ export class AgentSessionService {
           });
 
           processHealthMonitor.setAgentActivity(request.sessionId, 'prompt_start');
+          this.taskRuntimeIpc.setUserMessagePending(request.sessionId, true);
           agent.prompt(request.content).then(async () => {
             unsubscribe();
             if (assistantContent) {
@@ -794,6 +806,7 @@ export class AgentSessionService {
             sendToRenderer('done', { content: visibleError });
             batcher.dispose();
           }).finally(() => {
+            this.taskRuntimeIpc.setUserMessagePending(request.sessionId, false);
             processHealthMonitor.clearAgentActivity(request.sessionId);
           });
 
