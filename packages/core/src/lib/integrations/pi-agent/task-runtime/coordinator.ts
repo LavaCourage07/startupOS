@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentTool } from "@originos/pi-agent-adapter";
+import type { AgentMessage } from "@originos/pi-agent-adapter";
 import type { OriginOSAgent } from "../core/agent";
 import {
 	TaskContinuationController,
@@ -21,6 +21,7 @@ import {
 } from "./types";
 
 type TaskBranchEntry = Record<string, unknown> & { id: string };
+type RuntimeAgentTool = ReturnType<OriginOSAgent["getTools"]>[number];
 
 interface TaskHostScope {
 	sessionId: string;
@@ -161,7 +162,7 @@ export class AgentTaskRuntimeCoordinator {
 	private readonly hostFactory: TaskSessionHostFactory;
 	private host: TaskSessionHost | null = null;
 	private unsubscribeHost: (() => void) | null = null;
-	private baselineTools: readonly AgentTool<unknown>[] = [];
+	private baselineTools: readonly RuntimeAgentTool[] = [];
 	private taskToolsInstalled = false;
 	private runningPromise: Promise<void> | null = null;
 	private continuationGeneration = 0;
@@ -440,7 +441,7 @@ export class AgentTaskRuntimeCoordinator {
 			description: tool.description,
 			parameters: tool.parameters,
 			execute: tool.execute,
-		})) as AgentTool<unknown>[];
+		})) as RuntimeAgentTool[];
 		const taskToolNames = new Set(taskTools.map((tool) => tool.name));
 		this.options.agent.setTools([
 			...this.baselineTools.filter((tool) => !taskToolNames.has(tool.name)),
