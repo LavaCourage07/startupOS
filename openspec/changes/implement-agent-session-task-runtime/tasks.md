@@ -1,7 +1,7 @@
 ## 1. Proposal 门禁与实施基线
 
 - [x] 1.1 严格校验 Proposal、设计和增量规格，并记录用户已授权开始实施；依赖：无；写入范围：`openspec/changes/implement-agent-session-task-runtime/**`；负责角色：Proposal Maintainer；必需测试：`openspec validate implement-agent-session-task-runtime --strict`；完成证据：用户于 2026-08-02 明确要求继续实施，strict validation 已通过，Proposal integration branch 提交见 Git 历史。
-- [ ] 1.2 为每个应用源码工作包从 Proposal branch 建立独立 Git Task branch/worktree，并确认写入范围互不重叠；依赖：1.1；写入范围：Git refs/worktree metadata，不修改应用源码；负责角色：Integration Maintainer；必需测试：`git worktree list` 与每个 worktree `git status --short --branch`；完成证据：四个 Task worktree 均基于同一 Proposal commit。
+- [x] 1.2 为每个应用源码工作包从 Proposal branch 建立独立 Git Task branch/worktree，并确认写入范围互不重叠；依赖：1.1；写入范围：Git refs/worktree metadata，不修改应用源码；负责角色：Integration Maintainer；必需测试：`git worktree list` 与每个 worktree `git status --short --branch`；完成证据：`task/941-adapter-session-host`、`task/941-core-task-runtime`、`task/941-desktop-task-ipc`、`task/941-web-task-ui` 均基于 `1d85ed5`。
 
 ## 2. Adapter 与 Core Task Runtime
 
