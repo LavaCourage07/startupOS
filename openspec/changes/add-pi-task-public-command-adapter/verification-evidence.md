@@ -9,13 +9,12 @@ smoke 或文档接线替代通过证据。
 
 ## Goal Runtime 状态
 
-2026-08-02 尝试创建本验证 goal 时，线程已有一个处于 `paused` 的性能优化 goal：
+2026-08-02 清理既存 paused goal 后，已创建并执行以下 verification goal：
 
-`实现性能优化 Story PERF.1 和 PERF.2，并通过各 Story testing.md 定义的自动化测试与构建验证`
+`执行 Story 9.41 自动化验证：通过 A-02 已实现的 TC-C1、TC-C2、TC-C3 公共边界测试与普通聊天回归，并逐项记录尚未实施的 P0/P1 产品测试、Windows/macOS 真包人工验证步骤和剩余风险。`
 
-Goal Runtime 拒绝同时创建第二个 goal。A-02 未覆盖、完成或清理该无关 goal；本次
-自动化矩阵已由 Verification Owner 直接执行，但 6.2 的“创建并执行 goal”门禁仍为
-待完成，必须先由 goal owner 处理既存 paused goal 后重新创建本验证 goal。
+所有 A-02 可执行自动化矩阵均在 goal 激活后重新运行并通过；未实施产品 case 与仅能
+在目标平台执行的真包 case 已按下文分类记录，不计入虚假通过率。
 
 ## 已执行矩阵
 
@@ -79,4 +78,4 @@ pnpm --filter @originos/desktop verify:pi-task-runtime
 - A-02 公共边界与普通聊天非回归：**PASS**。
 - Story 9.41 产品能力：**NOT_IMPLEMENTED**，Story 只能标记为 Ready，不能标记 Complete。
 - Windows/macOS 真包：**PENDING_PLATFORM_EVIDENCE**，本地 Linux/WSL 无法替代。
-- Verification goal：**PENDING_EXISTING_GOAL_CLEARANCE**，既存 paused goal 处理后需重新创建并记录最终 goal 结论。
+- Verification goal：**COMPLETE**，A-02 已实现范围全部通过，未实施和平台待验证项已形成显式证据与后续步骤。
