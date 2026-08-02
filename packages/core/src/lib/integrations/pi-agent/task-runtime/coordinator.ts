@@ -306,6 +306,7 @@ export class AgentTaskRuntimeCoordinator {
 		}
 
 		this.installTaskTools();
+		const generation = ++this.continuationGeneration;
 		this.state.execution.status = "running";
 		this.state.execution.lastError = undefined;
 		this.state.execution.updatedAt = new Date().toISOString();
@@ -326,6 +327,9 @@ export class AgentTaskRuntimeCoordinator {
 				undefined,
 				{ completionPolicy: "task_runtime", internalMessageIndexes: [0] },
 			);
+			if (generation !== this.continuationGeneration) {
+				return this.getSnapshot();
+			}
 			const nextProjection = projectPiTaskSnapshot(this.requireHost().getSnapshot());
 			if (!nextProjection) {
 				throw new Error("Task 用户答复后 canonical Task 丢失");
