@@ -134,6 +134,7 @@ describe("AgentTaskRuntimeCoordinator", () => {
 			requestId: "request-1",
 			sessionId: "session-1",
 			objective: "完成纵向闭环",
+			context: "沿用当前 Session 的项目材料",
 		});
 
 		expect(harness.agent.prompt).toHaveBeenCalledWith(
@@ -142,6 +143,7 @@ describe("AgentTaskRuntimeCoordinator", () => {
 			{ completionPolicy: "task_runtime", internalMessage: true },
 		);
 		expect(snapshot.projection?.taskId).toBe("T1");
+		expect(snapshot.execution.draft?.context).toBe("沿用当前 Session 的项目材料");
 		expect(snapshot.execution.status).toBe("waiting_user");
 		expect(harness.getTools()).toEqual(expect.arrayContaining([
 			expect.objectContaining({ name: "read_file" }),
