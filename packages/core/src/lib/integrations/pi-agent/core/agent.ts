@@ -186,6 +186,28 @@ function logInfo(...args: unknown[]): void {
 	console.info(...args);
 }
 
+const COMPLETION_JUDGE_MAX_ATTEMPTS = 2;
+const COMPLETION_JUDGE_TIMEOUT_MS = 15_000;
+
+type CompletionJudgeFailureCategory =
+	| "aborted"
+	| "error"
+	| "invalid_response"
+	| "exception";
+
+class CompletionJudgeAttemptError extends Error {
+	constructor(
+		public readonly category: CompletionJudgeFailureCategory,
+		public readonly stopReason: string,
+		public readonly attempt: number,
+		public readonly elapsedMs: number,
+		message: string,
+	) {
+		super(message);
+		this.name = "CompletionJudgeAttemptError";
+	}
+}
+
 type SyntheticSystemMessage = {
 	role: "system";
 	content: Array<{
@@ -633,7 +655,8 @@ export class OriginOSAgent {
 			return;
 		}
 
-		let decision: SemanticCompletionDecision;
+		let decision: SemanticCompletionDecision | null = null;
+		let lastFailure: CompletionJudgeAttemptError | null = null;
 		try {
 			const runtimeModel = this.agent.state.model as Model<any> & {
 				apiKey?: string;
@@ -641,12 +664,11 @@ export class OriginOSAgent {
 				credentialAuthMode?: string;
 				headers?: Record<string, string>;
 			};
-			const options: Record<string, unknown> = {
+			const baseOptions: Record<string, unknown> = {
 				temperature: 0,
 				maxTokens: 512,
 				reasoning: "minimal",
 				maxRetryDelayMs: 5_000,
-				signal: AbortSignal.timeout(15_000),
 			};
 			let judgeModel = runtimeModel;
 			if (
@@ -654,8 +676,8 @@ export class OriginOSAgent {
 					runtimeModel.credentialAuthMode === "oauth") &&
 				runtimeModel.authToken
 			) {
-				options["apiKey"] = runtimeModel.authToken;
-				options["headers"] = {
+				baseOptions["apiKey"] = runtimeModel.authToken;
+				baseOptions["headers"] = {
 					...(runtimeModel.headers ?? {}),
 					authorization: `Bearer ${runtimeModel.authToken}`,
 				};
@@ -666,41 +688,86 @@ export class OriginOSAgent {
 					authToken: undefined,
 				};
 			} else if (runtimeModel.apiKey) {
-				options["apiKey"] = runtimeModel.apiKey;
+				baseOptions["apiKey"] = runtimeModel.apiKey;
 			}
 
-			const judgeMessage = await piAi.completeSimple(
-				judgeModel,
-				{
-					systemPrompt: COMPLETION_JUDGE_SYSTEM_PROMPT,
-					messages: [{
-						role: "user",
-						content: buildCompletionJudgePrompt({
-							userRequest: this.activeUserRequest,
-							assistantResponse: candidate.text,
-							toolTrace: this.completionToolTrace,
-						}),
-						timestamp: Date.now(),
-					}],
-				},
-				options,
-			);
-			if (judgeMessage.stopReason === "error") {
-				throw new Error(
-					judgeMessage.errorMessage || "Completion judge model failed",
+			for (let attempt = 1; attempt <= COMPLETION_JUDGE_MAX_ATTEMPTS; attempt += 1) {
+				const startedAt = Date.now();
+				try {
+					const judgeMessage = await piAi.completeSimple(
+						judgeModel,
+						{
+							systemPrompt: COMPLETION_JUDGE_SYSTEM_PROMPT,
+							messages: [{
+								role: "user",
+								content: buildCompletionJudgePrompt({
+									userRequest: this.activeUserRequest,
+									assistantResponse: candidate.text,
+									toolTrace: this.completionToolTrace,
+								}),
+								timestamp: Date.now(),
+							}],
+						},
+						{
+							...baseOptions,
+							signal: AbortSignal.timeout(COMPLETION_JUDGE_TIMEOUT_MS),
+						},
+					);
+					const elapsedMs = Date.now() - startedAt;
+					if (
+						judgeMessage.stopReason === "error" ||
+						judgeMessage.stopReason === "aborted"
+					) {
+						throw new CompletionJudgeAttemptError(
+							judgeMessage.stopReason,
+							judgeMessage.stopReason,
+							attempt,
+							elapsedMs,
+							judgeMessage.errorMessage ||
+								`Completion judge ${judgeMessage.stopReason}`,
+						);
+					}
+					const judgeText = getMessageText(judgeMessage);
+					try {
+						decision = parseCompletionJudgeDecision(judgeText);
+					} catch (parseError) {
+						throw new CompletionJudgeAttemptError(
+							"invalid_response",
+							judgeMessage.stopReason || "unknown",
+							attempt,
+							elapsedMs,
+							`${parseError instanceof Error ? parseError.message : String(parseError)}; responseLen=${judgeText.length}; responseHash=${hashText(judgeText)}`,
+						);
+					}
+					logInfo(
+						`[LLM CompletionJudge] status=${decision.status}, reason="${previewText(decision.reason, 160)}", attempt=${attempt}/${COMPLETION_JUDGE_MAX_ATTEMPTS}, elapsedMs=${elapsedMs}`,
+					);
+					break;
+				} catch (error) {
+					const elapsedMs = Date.now() - startedAt;
+					lastFailure = error instanceof CompletionJudgeAttemptError
+						? error
+						: new CompletionJudgeAttemptError(
+							"exception",
+							"unknown",
+							attempt,
+							elapsedMs,
+							error instanceof Error ? error.message : String(error),
+						);
+					console.warn(
+						`[LLM CompletionJudge] attempt failed — attempt=${attempt}/${COMPLETION_JUDGE_MAX_ATTEMPTS}, category=${lastFailure.category}, stopReason=${lastFailure.stopReason}, elapsedMs=${lastFailure.elapsedMs}, retry=${attempt < COMPLETION_JUDGE_MAX_ATTEMPTS}, reason="${previewText(redactErrorForLogging(lastFailure.message), 300)}"`,
+					);
+				}
+			}
+			if (!decision) {
+				throw lastFailure ?? new CompletionJudgeAttemptError(
+					"exception",
+					"unknown",
+					COMPLETION_JUDGE_MAX_ATTEMPTS,
+					0,
+					"Completion judge failed without an error",
 				);
 			}
-			const judgeText = getMessageText(judgeMessage);
-			try {
-				decision = parseCompletionJudgeDecision(judgeText);
-			} catch (parseError) {
-				throw new Error(
-					`${parseError instanceof Error ? parseError.message : String(parseError)}; stopReason=${judgeMessage.stopReason}; response="${previewText(judgeText, 300)}"`,
-				);
-			}
-			logInfo(
-				`[LLM CompletionJudge] status=${decision.status}, reason="${previewText(decision.reason, 160)}"`,
-			);
 		} catch (error) {
 			const fallback = assessCompletion({
 				role: "assistant",
@@ -714,10 +781,17 @@ export class OriginOSAgent {
 				status: fallback.shouldRecover ? "incomplete" : "complete",
 				reason: `fallback:${fallback.reason}`,
 			};
-			console.warn(
-				`[LLM CompletionJudge] failed, using fallback — ${redactErrorForLogging(
+			const failure = error instanceof CompletionJudgeAttemptError
+				? error
+				: new CompletionJudgeAttemptError(
+					"exception",
+					"unknown",
+					0,
+					0,
 					error instanceof Error ? error.message : String(error),
-				)}`,
+				);
+			console.warn(
+				`[LLM CompletionJudge] failed, using fallback — decision=${decision.status}, reason="${previewText(decision.reason, 160)}", attempts=${failure.attempt}, lastFailure=${failure.category}, stopReason=${failure.stopReason}, elapsedMs=${failure.elapsedMs}`,
 			);
 		}
 
