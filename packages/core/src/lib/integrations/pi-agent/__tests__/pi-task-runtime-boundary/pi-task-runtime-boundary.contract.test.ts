@@ -1,249 +1,347 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  boundedContractResult,
-  getTaskCount,
-  inspectForceCompletion,
-  inspectRevision,
-  inspectRuntimeBoundary,
-  PublicPiTasksHarness,
-  VALID_TASK_BLOCKER,
-  VALID_TASK_EVIDENCE,
-  VALID_TASK_PLAN,
-  type PublicBranchEntry,
+  A02_CONTRACT_CASE_MATRIX,
+  ControlledPiTaskHarness,
+  TASK_EVIDENCE_INPUT,
+  TASK_PLAN_INPUT,
+  completeInput,
+  stepDoneInput,
 } from './public-extension-harness';
 
-describe('pi-tasks@0.2.0 public runtime boundary', () => {
+describe('A-02 public pi task command contract', () => {
+  const harnesses: ControlledPiTaskHarness[] = [];
+
+  async function createHarness(
+    options?: Parameters<typeof ControlledPiTaskHarness.create>[0],
+  ): Promise<ControlledPiTaskHarness> {
+    const harness = await ControlledPiTaskHarness.create(options);
+    harnesses.push(harness);
+    return harness;
+  }
+
   afterEach(() => {
+    harnesses.splice(0).forEach((harness) => harness.dispose());
     vi.useRealTimers();
   });
 
-  it('reports unsupported host mutation and force completion boundaries', async () => {
-    const harness = await PublicPiTasksHarness.create();
-    const runtime = await inspectRuntimeBoundary();
-    const taskComplete = harness.tools.get('task_complete');
-    const taskPlan = harness.tools.get('task_plan');
+  it('publishes an explicit case matrix for TC-C1, TC-C2, and A-02 boundaries', () => {
+    expect(A02_CONTRACT_CASE_MATRIX.map(({ id }) => id)).toEqual([
+      'TC-C1',
+      'TC-C2',
+      'A02-SCOPE',
+      'A02-EVENT',
+      'A02-IDEMPOTENCY',
+      'A02-EVIDENCE-GATE',
+      'A02-EPOCH',
+      'A02-HISTORY',
+      'A02-COMPATIBILITY',
+      'A02-STATIC-BOUNDARY',
+    ]);
+  });
 
-    expect(taskComplete).toBeDefined();
-    expect(taskPlan).toBeDefined();
+  it('TC-C1 executes controlled commands through the public pipeline and correlates receipt/state', async () => {
+    const harness = await createHarness();
+    const planned = await harness.invoke('task_plan', TASK_PLAN_INPUT, 'tc-c1-plan');
 
-    const forceCompletion = inspectForceCompletion(taskComplete!);
-    const beforeToolCall = vi.fn();
-    const afterToolCall = vi.fn();
-    const diagnostic = await harness.diagnosticRawExecute(
-      'task_plan',
-      VALID_TASK_PLAN,
-      { beforeToolCall, afterToolCall },
-    );
-
-    expect(diagnostic.result.isError).not.toBe(true);
-    expect(diagnostic.standardHooksObserved).toBe(false);
-    expect(beforeToolCall).not.toHaveBeenCalled();
-    expect(afterToolCall).not.toHaveBeenCalled();
-    expect(runtime.hostInvocation.status).toBe('unsupported');
-    expect(forceCompletion).toEqual({
-      status: 'unsupported',
-      reason:
-        'Stock task_complete exposes force_with_reason, which Story 9.41 first release forbids.',
-    });
-
-    const result = boundedContractResult({
-      schemaVersion: 1,
-      stockBoundary: 'unsupported',
-      capabilities: {
-        forceCompletion,
-        hostInvocation: runtime.hostInvocation,
-        rawToolExecute: {
-          status: 'diagnostic_only',
-          reason:
-            'Raw tool.execute did not invoke standard host before/after tool lifecycle hooks.',
+    expect(planned).toMatchObject({
+      requestId: 'tc-c1-plan',
+      taskId: 'T1',
+      revisionBefore: 0,
+      revisionAfter: 1,
+      cursorBefore: null,
+      replayed: false,
+      isError: false,
+      snapshot: {
+        version: 1,
+        scope: {
+          sessionId: harness.sessionId,
+          revision: 1,
+        },
+        mutation: {
+          requestId: 'tc-c1-plan',
+          command: 'task_plan',
         },
       },
     });
+    expect(planned.cursorAfter).toBe(harness.currentCursor);
+    expect(planned.snapshot.scope.cursor).toBe(planned.cursorAfter);
+    expect(planned.snapshot.stateHash).toBe(planned.stateHash);
 
-    expect(JSON.parse(result)).toMatchObject({
-      stockBoundary: 'unsupported',
-      capabilities: {
-        forceCompletion: { status: 'unsupported' },
-        hostInvocation: { status: 'unsupported' },
-      },
-    });
-    expect(result).not.toMatch(/api[_-]?key|authorization|bearer|prompt/i);
+    expect(harness.tools.has('task_resume')).toBe(true);
+    expect(harness.currentRevision).toBe(1);
+    expect(harness.branchEntries).toHaveLength(1);
+    expect(harness.hookCalls).toEqual([
+      'before:task_plan',
+      'after:task_plan',
+    ]);
+    expect(harness.runtimeEventTypes).toEqual([
+      'tool_execution_start',
+      'tool_execution_end',
+    ]);
   });
 
-  it('publishes public state and replays only the current branch', async () => {
-    const source = await PublicPiTasksHarness.create();
-    await source.diagnosticRawExecute('task_plan', VALID_TASK_PLAN, {
-      beforeToolCall: () => undefined,
-      afterToolCall: () => undefined,
-    });
-    const branchA = source.getBranch();
-    const sourceState = source.latestStateEvent('task_mutation');
+  it('TC-C1 rejects invalid schema, permission, and non-allowlisted tools before mutation', async () => {
+    const invalid = await createHarness();
+    await expect(
+      invalid.invoke('task_plan', { objective: 'missing required fields' }, 'invalid-schema'),
+    ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(invalid.toolExecutions).toBe(0);
+    expect(invalid.branchEntries).toHaveLength(0);
+    expect(invalid.runtimeEventTypes).toEqual([
+      'tool_execution_start',
+      'tool_execution_end',
+    ]);
 
-    expect(source.extensionModule.TASK_STATE_EVENT).toBe('pi-tasks:state');
-    expect(sourceState?.payload.version).toBe(1);
-    expect(getTaskCount(sourceState)).toBe(1);
+    const denied = await createHarness({ denyToolName: 'task_plan' });
+    await expect(
+      denied.invoke('task_plan', TASK_PLAN_INPUT, 'permission-denied'),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    expect(denied.toolExecutions).toBe(0);
+    expect(denied.branchEntries).toHaveLength(0);
 
-    const replay = await PublicPiTasksHarness.create(branchA);
-    await replay.emitLifecycle('session_start');
-    const replayedState = replay.latestStateEvent('session_start');
-
-    expect(getTaskCount(replayedState)).toBe(1);
-    expect(replayedState?.payload.state).toEqual(sourceState?.payload.state);
-
-    replay.setBranch([]);
-    await replay.emitLifecycle('session_tree');
-    expect(getTaskCount(replay.latestStateEvent('session_tree'))).toBe(0);
-
-    replay.setBranch(branchA);
-    await replay.emitLifecycle('session_tree');
-    expect(getTaskCount(replay.latestStateEvent('session_tree'))).toBe(1);
+    await expect(
+      denied.invokeCommand({
+        ...denied.command('task_plan', TASK_PLAN_INPUT, 'not-allowlisted'),
+        toolName: 'task_resume',
+      }),
+    ).rejects.toMatchObject({ code: 'TOOL_NOT_ALLOWED' });
+    expect(denied.branchEntries).toHaveLength(0);
   });
 
-  it('preserves snapshot state across repeatable compaction lifecycle triggers', async () => {
-    const source = await PublicPiTasksHarness.create();
-    const diagnosticHooks = {
-      beforeToolCall: () => undefined,
-      afterToolCall: () => undefined,
-    };
-    const plan = await source.diagnosticRawExecute(
-      'task_plan',
-      VALID_TASK_PLAN,
-      diagnosticHooks,
-    );
-    const evidence = await source.diagnosticRawExecute(
+  it('TC-C2 restarts from current branch and preserves compaction state and revision', async () => {
+    const source = await createHarness();
+    const planned = await source.invoke('task_plan', TASK_PLAN_INPUT, 'tc-c2-plan');
+    await source.invoke(
       'task_evidence',
-      VALID_TASK_EVIDENCE,
-      diagnosticHooks,
+      TASK_EVIDENCE_INPUT,
+      'tc-c2-evidence',
     );
-    const blocker = await source.diagnosticRawExecute(
+    const beforeCompaction = source.latestState;
+
+    await source.emitLifecycle('session_before_compact');
+    const compactedBranch = source.branchEntries;
+    expect(compactedBranch.at(-1)?.data).toMatchObject({
+      version: 2,
+      kind: 'snapshot',
+      revision: 2,
+    });
+
+    const restarted = await createHarness({
+      initialBranch: compactedBranch,
+      sessionId: source.sessionId,
+    });
+    expect(restarted.currentRevision).toBe(2);
+    expect(restarted.latestState?.state.tasks).toEqual(beforeCompaction?.state.tasks);
+    expect(restarted.latestState?.state.activeTaskId).toBe(
+      beforeCompaction?.state.activeTaskId,
+    );
+    expect(restarted.latestState?.state.warnings).toEqual(
+      beforeCompaction?.state.warnings,
+    );
+    expect(restarted.latestState?.scope.revision).toBe(2);
+    expect(restarted.latestState?.scope.cursor).not.toBe(planned.cursorAfter);
+  });
+
+  it('TC-C2 isolates sibling branches and rejects stale branch mutation', async () => {
+    const root = await createHarness();
+    await root.invoke('task_plan', TASK_PLAN_INPUT, 'branch-root');
+    const commonAncestor = root.branchEntries;
+
+    await root.invoke(
       'task_update',
-      VALID_TASK_BLOCKER,
-      diagnosticHooks,
+      { task_id: 'T1', next_action: 'left branch only' },
+      'branch-left',
     );
-    expect(plan.result.isError).not.toBe(true);
-    expect(evidence.result.isError).not.toBe(true);
-    expect(blocker.result.isError).not.toBe(true);
-
-    const stateBeforeCompaction = source.latestStateEvent('task_mutation');
-    const taskBeforeCompaction = stateBeforeCompaction?.payload.state?.tasks as
-      | Record<string, Record<string, unknown>>
-      | undefined;
-    expect(taskBeforeCompaction?.T1.planSteps).toHaveLength(1);
-    expect(taskBeforeCompaction?.T1.acceptanceCriteria).toHaveLength(1);
-    expect(taskBeforeCompaction?.T1.evidence).toHaveLength(1);
-    expect(taskBeforeCompaction?.T1.blockers).toHaveLength(1);
-
-    await source.emitLifecycle('session_before_compact');
-    await new Promise((resolve) => setTimeout(resolve, 2));
-    await source.emitLifecycle('session_before_compact');
-
-    const snapshotEntries = source.entries.filter(
-      (entry) =>
-        entry.customType === 'pi-tasks:event'
-        && typeof entry.data === 'object'
-        && entry.data !== null
-        && 'type' in entry.data
-        && entry.data.type === 'task.snapshot',
-    );
-    expect(snapshotEntries).toHaveLength(2);
-
-    const originalEntries = source.getBranch().filter(
-      (entry) => !snapshotEntries.includes(entry),
-    );
-    const normalReplay = await PublicPiTasksHarness.create(source.getBranch());
-    await normalReplay.emitLifecycle('session_start');
-    expect(normalReplay.latestStateEvent('session_start')?.payload.state?.tasks).toEqual(
-      stateBeforeCompaction?.payload.state?.tasks,
-    );
-
-    const duplicateAndOutOfOrder: PublicBranchEntry[] = [
-      snapshotEntries[1],
-      snapshotEntries[0],
-      snapshotEntries[1],
-      ...originalEntries,
-    ];
-    const replay = await PublicPiTasksHarness.create(duplicateAndOutOfOrder);
-
-    await replay.emitLifecycle('session_start');
-
-    const state = replay.latestStateEvent('session_start');
-    expect(getTaskCount(state)).toBe(1);
-    const replayedTasks = state?.payload.state?.tasks as
-      | Record<string, Record<string, unknown>>
-      | undefined;
-    expect(replayedTasks?.T1.evidence).toHaveLength(1);
-    expect(replayedTasks?.T1.blockers).toHaveLength(2);
-
-    const replayIdempotency = boundedContractResult({
-      schemaVersion: 1,
-      capability: {
-        status: 'unsupported',
-        reason:
-          'Duplicate out-of-order snapshots replay the same blocker more than once.',
-      },
-    });
-    expect(JSON.parse(replayIdempotency)).toMatchObject({
-      capability: { status: 'unsupported' },
+    const sibling = await createHarness({
+      initialBranch: commonAncestor,
+      sessionId: root.sessionId,
     });
 
-    const runtime = await inspectRuntimeBoundary();
-    expect(runtime.compactionTrigger.status).toBe('supported');
-    expect(replay.lifecycle.has('session_before_compact')).toBe(true);
-  });
-
-  it('fails stable revision and restart correlation contracts structurally', async () => {
-    const firstProcess = await PublicPiTasksHarness.create();
-    await firstProcess.diagnosticRawExecute('task_plan', VALID_TASK_PLAN, {
-      beforeToolCall: () => undefined,
-      afterToolCall: () => undefined,
-    });
-    const firstEvent = firstProcess.latestStateEvent('task_mutation');
-    expect(firstEvent).toBeDefined();
-
-    const restartedProcess = await PublicPiTasksHarness.create(firstProcess.getBranch());
-    await restartedProcess.emitLifecycle('session_start');
-    const restartedEvent = restartedProcess.latestStateEvent('session_start');
-    expect(restartedEvent).toBeDefined();
-
-    const firstRevision = inspectRevision(firstEvent!);
-    const restartRevision = inspectRevision(restartedEvent!);
-
-    expect(firstRevision.status).toBe('unsupported');
-    expect(restartRevision.status).toBe('unsupported');
-    expect(restartedEvent?.payload.state).toEqual(firstEvent?.payload.state);
-
-    const result = boundedContractResult({
-      schemaVersion: 1,
-      capabilities: {
-        mutationCorrelation: {
-          status: 'unsupported',
-          reason:
-            'Matching snapshots have no stable public revision across replay or process restart.',
+    expect(sibling.task('T1')?.nextAction).not.toBe('left branch only');
+    await expect(
+      sibling.invokeCommand({
+        ...sibling.command('task_update', { task_id: 'T1', next_action: 'stale' }, 'stale'),
+        scope: {
+          ...sibling.currentScope,
+          expectedCursor: root.currentCursor,
         },
-        stableRevision: restartRevision,
-      },
-    });
-    expect(JSON.parse(result)).toMatchObject({
-      capabilities: {
-        mutationCorrelation: { status: 'unsupported' },
-        stableRevision: { status: 'unsupported' },
-      },
-    });
+      }),
+    ).rejects.toMatchObject({ code: 'BRANCH_CONFLICT' });
+    expect(sibling.branchEntries).toEqual(commonAncestor);
   });
 
-  it('returns a bounded timeout when a required public state event is missing', async () => {
-    vi.useFakeTimers();
-    const harness = await PublicPiTasksHarness.create();
-    const pending = harness.waitForStateEvent(
-      (event) => event.payload.reason === 'task_mutation',
-      25,
-    );
+  it('A02-SCOPE fails closed for stale Session, busy Session, and branch changes during execution', async () => {
+    const staleSession = await createHarness();
+    await expect(
+      staleSession.invokeCommand({
+        ...staleSession.command('task_plan', TASK_PLAN_INPUT, 'stale-session'),
+        scope: { ...staleSession.currentScope, sessionId: 'another-session' },
+      }),
+    ).rejects.toMatchObject({ code: 'SESSION_MISMATCH' });
 
-    const rejection = expect(pending).rejects.toThrow(
-      'pi-tasks state event timeout after 25ms',
-    );
+    const busy = await createHarness();
+    busy.setBusy(true);
+    await expect(
+      busy.invoke('task_plan', TASK_PLAN_INPUT, 'busy-session'),
+    ).rejects.toMatchObject({ code: 'SESSION_BUSY' });
+    expect(busy.branchEntries).toHaveLength(0);
+
+    const diverged = await createHarness({ appendMessageAfterTool: true });
+    await expect(
+      diverged.invoke('task_plan', TASK_PLAN_INPUT, 'branch-diverged'),
+    ).rejects.toMatchObject({ code: 'CONTRACT_VIOLATION' });
+    expect(diverged.branchEntries.filter(({ customType }) => customType === 'pi-tasks:event')).toHaveLength(1);
+  });
+
+  it('A02-EVENT times out boundedly, cleans pending state, and recovers from the canonical receipt', async () => {
+    vi.useFakeTimers();
+    const harness = await createHarness({ muteTaskStateEvents: true, stateEventTimeoutMs: 25 });
+    const pending = harness.invoke('task_plan', TASK_PLAN_INPUT, 'event-timeout');
+    const rejection = expect(pending).rejects.toMatchObject({ code: 'STATE_EVENT_TIMEOUT' });
+
     await vi.advanceTimersByTimeAsync(25);
     await rejection;
+    expect(harness.branchEntries).toHaveLength(1);
+    expect(harness.publicStateListenerCount).toBe(1);
+
+    harness.muteTaskStateEvents(false);
+    const replay = await harness.invoke('task_plan', TASK_PLAN_INPUT, 'event-timeout');
+    expect(replay.replayed).toBe(true);
+    expect(harness.branchEntries).toHaveLength(1);
+  });
+
+  it('A02-IDEMPOTENCY replays identical requests and rejects conflicting payloads', async () => {
+    const harness = await createHarness();
+    const first = await harness.invoke('task_plan', TASK_PLAN_INPUT, 'idempotent-request');
+    const replay = await harness.invoke('task_plan', TASK_PLAN_INPUT, 'idempotent-request');
+
+    expect(replay).toMatchObject({
+      replayed: true,
+      eventId: first.eventId,
+      cursorAfter: first.cursorAfter,
+      revisionAfter: first.revisionAfter,
+    });
+    expect(harness.branchEntries).toHaveLength(1);
+
+    await expect(
+      harness.invoke(
+        'task_plan',
+        { ...TASK_PLAN_INPUT, title: 'Conflicting payload' },
+        'idempotent-request',
+      ),
+    ).rejects.toMatchObject({ code: 'DUPLICATE_REQUEST_CONFLICT' });
+    expect(harness.branchEntries).toHaveLength(1);
+  });
+
+  it('A02-EVIDENCE-GATE rejects missing/forced evidence and completes exactly once with valid evidence', async () => {
+    const harness = await createHarness();
+    await harness.invoke('task_plan', TASK_PLAN_INPUT, 'evidence-plan');
+
+    await expect(
+      harness.invoke('task_complete', completeInput([]), 'missing-evidence'),
+    ).rejects.toMatchObject({
+      details: expect.objectContaining({ rejected: true }),
+    });
+    expect(harness.task('T1')?.status).not.toBe('done');
+
+    await expect(
+      harness.invoke(
+        'task_complete',
+        { ...completeInput([]), force_with_reason: 'bypass' },
+        'forced-completion',
+      ),
+    ).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(harness.task('T1')?.status).not.toBe('done');
+
+    const evidence = await harness.invoke(
+      'task_evidence',
+      TASK_EVIDENCE_INPUT,
+      'evidence-add',
+    );
+    expect(evidence.revisionAfter).toBe(2);
+    await harness.invoke('task_update', stepDoneInput('E1'), 'evidence-step-done');
+    const completed = await harness.invoke(
+      'task_complete',
+      completeInput(['E1']),
+      'evidence-complete',
+    );
+    const replay = await harness.invoke(
+      'task_complete',
+      completeInput(['E1']),
+      'evidence-complete',
+    );
+
+    expect(completed.revisionAfter).toBe(4);
+    expect(harness.task('T1')?.status).toBe('done');
+    expect(replay.replayed).toBe(true);
+    expect(harness.branchEntries).toHaveLength(4);
+  });
+
+  it('A02-EPOCH invalidates stale gateways and aborts an in-flight host invocation', async () => {
+    const stale = await createHarness();
+    stale.invalidate();
+    await expect(
+      stale.invoke('task_plan', TASK_PLAN_INPUT, 'stale-epoch'),
+    ).rejects.toMatchObject({ code: 'BRIDGE_EPOCH_STALE' });
+
+    const hanging = await createHarness({ hostNeverSettles: true });
+    const invocation = hanging.invoke('task_plan', TASK_PLAN_INPUT, 'epoch-in-flight');
+    await new Promise((resolve) => setImmediate(resolve));
+    hanging.invalidate();
+    await expect(invocation).rejects.toMatchObject({ code: 'BRIDGE_EPOCH_STALE' });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(hanging.abortCalls).toBe(1);
+  });
+
+  it('A02-HISTORY keeps host commands out of conversation history', async () => {
+    const harness = await createHarness();
+    const messagesBefore = harness.messages.length;
+    await harness.invoke('task_plan', TASK_PLAN_INPUT, 'history-plan');
+
+    expect(harness.messages).toHaveLength(messagesBefore);
+    expect(harness.runtimeEventTypes).not.toEqual(
+      expect.arrayContaining([
+        'message_start',
+        'message_end',
+        'turn_start',
+        'turn_end',
+        'agent_start',
+        'agent_end',
+      ]),
+    );
+    expect(harness.branchEntries[0]).toMatchObject({
+      type: 'custom',
+      customType: 'pi-tasks:event',
+    });
+  });
+
+  it('A02-COMPATIBILITY fails closed before invoking an incompatible runtime', async () => {
+    const harness = await createHarness({ incompatibleRuntimeVersion: '0.80.11' });
+    await expect(
+      harness.invoke('task_plan', TASK_PLAN_INPUT, 'incompatible-runtime'),
+    ).rejects.toMatchObject({ code: 'INCOMPATIBLE_RUNTIME' });
+    expect(harness.runtimeEventTypes).toHaveLength(0);
+    expect(harness.branchEntries).toHaveLength(0);
+  });
+
+  it('A02-STATIC-BOUNDARY imports only public package entries and no private task state', () => {
+    const directory = path.resolve(
+      process.cwd(),
+      'src/lib/integrations/pi-agent/__tests__/pi-task-runtime-boundary',
+    );
+    const source = fs.readdirSync(directory)
+      .filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))
+      .map((file) => fs.readFileSync(path.join(directory, file), 'utf8'))
+      .join('\n');
+
+    expect(source).not.toMatch(/@originos\/pi-tasks\/(?:store|reducer|src)\b/);
+    expect(source).not.toMatch(/packages\/pi-tasks\/(?:src|upstream)\//);
+    expect(source).not.toMatch(/(?:session|branch).*(?:readFile|JSON\.parse)/i);
+    expect(source).toContain("'@originos/pi-agent-adapter/task-runtime'");
+    expect(source).toContain("'@originos/pi-tasks'");
   });
 });

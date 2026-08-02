@@ -12,9 +12,49 @@ const asar = require('@electron/asar');
 
 const ADAPTER_PACKAGE = '@originos/pi-agent-adapter';
 const ADAPTER_VERSION = '0.80.10';
-const PI_TASKS_PACKAGE = 'pi-tasks';
-const PI_TASKS_VERSION = '0.2.0';
-const PI_TASKS_EXPORTS = ['TASK_STATE_EVENT', 'TASK_WIDGET_ID', 'default'];
+const TASK_RUNTIME_EXPORT = '@originos/pi-agent-adapter/task-runtime';
+const CONTROLLED_TASK_PACKAGE = '@originos/pi-tasks';
+const CONTROLLED_TASK_VERSION = '0.2.0-originos.1';
+const TASK_PACKAGE_FINGERPRINT =
+  'c900eb1fc776fd0c2ed28d076374a0253d6cb01963590f0930591725b9bb99e0';
+const TASK_SCHEMA_FINGERPRINT =
+  'originos-pi-tasks/v1:event-v2:cas:receipt:evidence-gate-no-force';
+const PATCH_SET_FINGERPRINT =
+  '213b1f2db610720ca0dde1853abbe02975185ad37c95eb517031844631371674';
+const RUNTIME_PATCHES = [
+  {
+    label: 'core',
+    packageName: '@earendil-works/pi-agent-core',
+    file: 'patches/@earendil-works__pi-agent-core@0.80.10.patch',
+    sha256: '10bda90bbb3ff426f6057312464e2cdb470fe61acd4f9e37ffc8436755e644a6',
+  },
+  {
+    label: 'coding-agent',
+    packageName: '@earendil-works/pi-coding-agent',
+    file: 'patches/@earendil-works__pi-coding-agent@0.80.10.patch',
+    sha256: '7d70e7b71db29280df41ddf1f8701c9ae56c98e9e48b85ee11700c4ca66c11b4',
+  },
+];
+const TASK_PACKAGE_FILES = [
+  'LICENSE', 'README.md', 'UPSTREAM.md', 'index.d.ts', 'index.js', 'package.json',
+  'src/commands.d.ts', 'src/commands.js', 'src/contracts.d.ts', 'src/contracts.js',
+  'src/ids.d.ts', 'src/ids.js', 'src/model.d.ts', 'src/model.js', 'src/pi-types.d.ts',
+  'src/pi-types.js', 'src/reducer.d.ts', 'src/reducer.js', 'src/render.d.ts',
+  'src/render.js', 'src/schema.d.ts', 'src/schema.js', 'src/state-events.d.ts',
+  'src/state-events.js', 'src/store.d.ts', 'src/store.js', 'src/tools.d.ts',
+  'src/tools.js', 'src/widget.d.ts', 'src/widget.js', 'upstream/index.js',
+  'upstream/reducer.js',
+];
+const EXPECTED_TASK_RUNTIME_EXPORTS = [
+  'DEFAULT_SANITIZE_LIMITS', 'PI_TASK_COMPATIBILITY_REQUIREMENTS',
+  'PI_TASK_CONTRACT_VERSION', 'PI_TASK_SNAPSHOT_VERSION', 'PI_TASK_STATE_EVENT_NAME',
+  'PI_TASK_STATE_EVENT_VERSION', 'PI_TASK_TOOL_NAMES', 'assertAllowedPiTaskTool',
+  'assertPiTaskCompatibility', 'createBoundedPiTaskSnapshot',
+  'createPiTaskCompatibilityGuard', 'createPiTaskRuntimeBridge',
+  'evaluatePiTaskCompatibility', 'isAllowedPiTaskTool', 'mapPiTaskRuntimeError',
+  'normalizePiTaskCommand', 'sanitizeTaskRuntimeValue', 'stableJsonHash',
+  'stableJsonStringify',
+].sort();
 const MAX_ERROR_MESSAGE_LENGTH = 240;
 
 class PiTaskRuntimeVerificationError extends Error {
@@ -26,254 +66,319 @@ class PiTaskRuntimeVerificationError extends Error {
   }
 }
 
-function packageNameParts(packageName) {
-  return packageName.startsWith('@') ? packageName.split('/').slice(0, 2) : [packageName];
+function fail(code, message, details = {}) {
+  throw new PiTaskRuntimeVerificationError(code, message, details);
 }
 
-function findPackageJson(packageName, fromRequire) {
-  const lookupPaths = fromRequire.resolve.paths(packageName) || [];
-  for (const lookupPath of lookupPaths) {
-    const candidate = path.join(lookupPath, ...packageNameParts(packageName), 'package.json');
-    if (fs.existsSync(candidate)) {
-      return fs.realpathSync(candidate);
-    }
-  }
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
 
-  let entry;
-  try {
-    entry = fs.realpathSync(fromRequire.resolve(packageName));
-  } catch (error) {
-    throw new PiTaskRuntimeVerificationError(
-      'MODULE_MISSING',
-      `Required runtime module is missing: ${packageName}`,
-      { module: packageName },
-    );
-  }
-
-  let directory = fs.statSync(entry).isDirectory() ? entry : path.dirname(entry);
-  while (directory !== path.dirname(directory)) {
-    const packageJsonPath = path.join(directory, 'package.json');
-    if (fs.existsSync(packageJsonPath)) {
-      const packageJson = readPackageJson(packageJsonPath, packageName);
-      if (packageJson.name === packageName) {
-        return packageJsonPath;
-      }
-    }
-    directory = path.dirname(directory);
-  }
-
-  throw new PiTaskRuntimeVerificationError(
-    'PACKAGE_INVALID',
-    `Unable to locate package metadata: ${packageName}`,
-    { module: packageName },
-  );
+function packageNameParts(packageName) {
+  return packageName.startsWith('@') ? packageName.split('/').slice(0, 2) : [packageName];
 }
 
 function readPackageJson(packageJsonPath, packageName) {
   try {
     return JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-  } catch (error) {
-    throw new PiTaskRuntimeVerificationError(
-      'PACKAGE_INVALID',
-      `Runtime package metadata is invalid: ${packageName}`,
-      { module: packageName },
-    );
+  } catch {
+    return fail('PACKAGE_INVALID', `Runtime package metadata is invalid: ${packageName}`, {
+      module: packageName,
+    });
+  }
+}
+
+function findPackageJson(packageName, fromRequire) {
+  for (const lookupPath of fromRequire.resolve.paths(packageName) || []) {
+    const candidate = path.join(lookupPath, ...packageNameParts(packageName), 'package.json');
+    if (fs.existsSync(candidate)) return fs.realpathSync(candidate);
+  }
+  return fail('MODULE_MISSING', `Required runtime module is missing: ${packageName}`, {
+    module: packageName,
+  });
+}
+
+function isPathWithin(parent, candidate) {
+  const relative = path.relative(parent, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function assertRuntimeResolutionBoundary(packageJsonPath, baseDir, repositoryRoot, source) {
+  const developmentRoot = source === 'development' && isPathWithin(repositoryRoot, baseDir)
+    ? repositoryRoot
+    : baseDir;
+  if (!isPathWithin(developmentRoot, packageJsonPath)) {
+    fail('MODULE_OUTSIDE_LAYOUT', 'Runtime dependency resolved outside the verified layout', {
+      modulePath: packageJsonPath,
+      source,
+    });
   }
 }
 
 function assertVersion(packageName, actualVersion, expectedVersion) {
   if (actualVersion !== expectedVersion) {
-    throw new PiTaskRuntimeVerificationError(
-      'VERSION_MISMATCH',
-      `Runtime package version mismatch: ${packageName}`,
-      {
-        module: packageName,
-        expectedVersion,
-        actualVersion: actualVersion || 'missing',
-      },
-    );
+    fail('VERSION_MISMATCH', `Runtime package version mismatch: ${packageName}`, {
+      module: packageName,
+      expectedVersion,
+      actualVersion: actualVersion || 'missing',
+    });
   }
 }
 
-function assertAdapterExports(adapterRuntime) {
-  if (!adapterRuntime || typeof adapterRuntime.Agent !== 'function') {
-    throw new PiTaskRuntimeVerificationError(
-      'EXPORT_MISMATCH',
-      `Runtime package export mismatch: ${ADAPTER_PACKAGE}`,
-      { module: ADAPTER_PACKAGE, expectedExports: ['Agent'] },
-    );
+function verifyPatchSet(repositoryRoot) {
+  const patches = RUNTIME_PATCHES.map((patch) => {
+    const patchPath = path.join(repositoryRoot, patch.file);
+    if (!fs.existsSync(patchPath)) {
+      fail('PATCH_MISSING', `Required runtime patch is missing: ${patch.packageName}`, {
+        module: patch.packageName,
+      });
+    }
+    const actual = sha256(fs.readFileSync(patchPath));
+    if (actual !== patch.sha256) {
+      fail('PATCH_MISMATCH', `Runtime patch hash mismatch: ${patch.packageName}`, {
+        module: patch.packageName,
+        expectedSha256: patch.sha256,
+        actualSha256: actual,
+      });
+    }
+    return { ...patch, actualSha256: actual };
+  });
+  const composite = sha256(patches.map((patch) => `${patch.label}:${patch.actualSha256}\n`).join(''));
+  if (composite !== PATCH_SET_FINGERPRINT) {
+    fail('PATCH_SET_MISMATCH', 'Runtime patch set fingerprint mismatch');
   }
+  return { fingerprint: composite, patches };
 }
 
-function assertPiTasksExports(piTasksRuntime) {
-  const actualExports = Object.keys(piTasksRuntime).sort();
-  if (
-    JSON.stringify(actualExports) !== JSON.stringify(PI_TASKS_EXPORTS) ||
-    typeof piTasksRuntime.default !== 'function' ||
-    piTasksRuntime.TASK_STATE_EVENT !== 'pi-tasks:state' ||
-    piTasksRuntime.TASK_WIDGET_ID !== 'pi-tasks'
-  ) {
-    throw new PiTaskRuntimeVerificationError(
-      'EXPORT_MISMATCH',
-      `Runtime package export mismatch: ${PI_TASKS_PACKAGE}`,
-      {
-        module: PI_TASKS_PACKAGE,
-        expectedExports: PI_TASKS_EXPORTS,
-        actualExports: actualExports.slice(0, 16),
-      },
-    );
-  }
-}
-
-function resolveRuntimeDependencies(packageJson, packageRequire) {
-  const dependencies = [
-    ...Object.keys(packageJson.dependencies || {}),
-    ...Object.keys(packageJson.optionalDependencies || {}),
-  ].sort();
-
-  for (const dependency of dependencies) {
-    try {
-      packageRequire.resolve(dependency);
-    } catch (error) {
-      throw new PiTaskRuntimeVerificationError(
-        'TRANSITIVE_DEPENDENCY_MISSING',
-        `Runtime dependency is missing: ${dependency}`,
-        { module: dependency, owner: packageJson.name },
-      );
+function verifyDependencyClosure(packageJsonPath, baseDir, repositoryRoot, source) {
+  const queue = [packageJsonPath];
+  const visited = new Set();
+  const resolved = [];
+  while (queue.length > 0) {
+    const currentPath = fs.realpathSync(queue.shift());
+    if (visited.has(currentPath)) continue;
+    visited.add(currentPath);
+    const manifest = readPackageJson(currentPath, currentPath);
+    const packageRequire = createRequire(currentPath);
+    const requiredDependencies = Object.keys(manifest.dependencies || {}).sort();
+    const optionalDependencies = Object.keys(manifest.optionalDependencies || {})
+      .filter((dependency) => !requiredDependencies.includes(dependency))
+      .sort();
+    for (const dependency of [...requiredDependencies, ...optionalDependencies]) {
+      let dependencyPath;
+      try {
+        dependencyPath = findPackageJson(dependency, packageRequire);
+      } catch (error) {
+        if (
+          optionalDependencies.includes(dependency) &&
+          error instanceof PiTaskRuntimeVerificationError &&
+          error.code === 'MODULE_MISSING'
+        ) {
+          resolved.push(`${manifest.name}->${dependency}@optional-not-installed`);
+          continue;
+        }
+        throw error;
+      }
+      assertRuntimeResolutionBoundary(dependencyPath, baseDir, repositoryRoot, source);
+      resolved.push(`${manifest.name}->${dependency}@${readPackageJson(dependencyPath, dependency).version}`);
+      queue.push(dependencyPath);
     }
   }
-
-  return dependencies;
+  return [...new Set(resolved)].sort();
 }
 
-function createReport({ source, platform, adapterExports, piTasksExports, dependencies }) {
-  const report = {
-    schemaVersion: 1,
-    source,
-    platform,
-    result: 'passed',
-    packages: {
-      [ADAPTER_PACKAGE]: {
-        version: ADAPTER_VERSION,
-        moduleFormat: 'cjs',
-        exports: adapterExports,
-      },
-      [PI_TASKS_PACKAGE]: {
-        version: PI_TASKS_VERSION,
-        moduleFormat: 'esm',
-        exports: piTasksExports,
-        runtimeDependencies: dependencies,
-      },
-    },
-  };
-  const serialized = JSON.stringify(report);
-  return {
-    ...report,
-    hash: crypto.createHash('sha256').update(serialized).digest('hex'),
-  };
+function verifyTaskPackageFingerprint(packageJsonPath) {
+  const packageDir = path.dirname(packageJsonPath);
+  const manifest = TASK_PACKAGE_FILES.map((file) => {
+    const filePath = path.join(packageDir, file);
+    if (!fs.existsSync(filePath)) {
+      fail('PACKAGE_FINGERPRINT_MISMATCH', `Controlled Task package file is missing: ${file}`);
+    }
+    return `${sha256(fs.readFileSync(filePath))}  ${file}\n`;
+  }).join('');
+  const actual = sha256(manifest);
+  if (actual !== TASK_PACKAGE_FINGERPRINT) {
+    fail('PACKAGE_FINGERPRINT_MISMATCH', 'Controlled Task package fingerprint mismatch', {
+      expectedSha256: TASK_PACKAGE_FINGERPRINT,
+      actualSha256: actual,
+    });
+  }
+  return actual;
+}
+
+function assertTaskRuntime(taskRuntime) {
+  const exports = Object.keys(taskRuntime).sort();
+  if (JSON.stringify(exports) !== JSON.stringify(EXPECTED_TASK_RUNTIME_EXPORTS)) {
+    fail('EXPORT_MISMATCH', `Runtime package export mismatch: ${TASK_RUNTIME_EXPORT}`, {
+      module: TASK_RUNTIME_EXPORT,
+      actualExports: exports,
+    });
+  }
+  const requirements = taskRuntime.PI_TASK_COMPATIBILITY_REQUIREMENTS;
+  if (
+    taskRuntime.PI_TASK_CONTRACT_VERSION !== 1 ||
+    taskRuntime.PI_TASK_STATE_EVENT_NAME !== 'pi-tasks:state' ||
+    taskRuntime.PI_TASK_STATE_EVENT_VERSION !== 2 ||
+    requirements?.runtimeVersion !== '0.80.10' ||
+    requirements?.taskExtensionPackage !== CONTROLLED_TASK_PACKAGE ||
+    requirements?.taskExtensionVersion !== CONTROLLED_TASK_VERSION ||
+    requirements?.taskLedgerEventVersion !== 2 ||
+    requirements?.taskStateEventVersion !== 2
+  ) {
+    fail('CONTRACT_MISMATCH', 'Task Runtime adapter compatibility contract mismatch');
+  }
+  return exports;
+}
+
+function assertControlledTaskExports(runtime) {
+  if (
+    typeof runtime.default !== 'function' ||
+    typeof runtime.createTaskRuntimeStore !== 'function' ||
+    typeof runtime.replayBranchEntries !== 'function' ||
+    runtime.ORIGINOS_PI_TASKS_VERSION !== CONTROLLED_TASK_VERSION ||
+    runtime.UPSTREAM_PI_TASKS_VERSION !== '0.2.0' ||
+    runtime.PI_TASK_PUBLIC_API_VERSION !== 1 ||
+    runtime.PI_TASK_EVENT_VERSION !== 2 ||
+    runtime.PI_TASK_STATE_EVENT_VERSION !== 2 ||
+    runtime.TASK_STATE_EVENT !== 'pi-tasks:state' ||
+    runtime.PI_TASK_SCHEMA_FINGERPRINT !== TASK_SCHEMA_FINGERPRINT ||
+    runtime.PI_TASK_EVENT_V2_SCHEMA?.$id !== 'originos.pi-tasks.event-envelope.v2' ||
+    runtime.PI_TASK_STATE_EVENT_V2_SCHEMA?.$id !== 'originos.pi-tasks.state-event.v2'
+  ) {
+    fail('CONTRACT_MISMATCH', `Controlled Task package contract mismatch: ${CONTROLLED_TASK_PACKAGE}`);
+  }
+  return Object.keys(runtime).sort();
+}
+
+async function importFromPackage(packageName, packageJsonPath) {
+  try {
+    const manifest = readPackageJson(packageJsonPath, packageName);
+    const rootExport = manifest.exports?.['.'] ?? manifest.exports;
+    const entry = typeof rootExport === 'string'
+      ? rootExport
+      : rootExport?.import ?? rootExport?.default ?? rootExport?.require ?? manifest.module ?? manifest.main;
+    if (typeof entry !== 'string') {
+      fail('EXPORT_MISMATCH', `Runtime package has no public root export: ${packageName}`);
+    }
+    return await import(pathToFileURL(path.resolve(path.dirname(packageJsonPath), entry)).href);
+  } catch {
+    return fail('ESM_LOAD_FAILED', `ESM runtime load failed: ${packageName}`, {
+      module: packageName,
+      packageJsonPath,
+    });
+  }
 }
 
 async function verifyRuntimeLayout(options) {
   const {
     baseDir,
+    repositoryRoot = path.resolve(__dirname, '..', '..', '..'),
     source = 'development',
     platform = `${process.platform}-${process.arch}`,
   } = options;
   const basePackageJson = path.join(baseDir, 'package.json');
-  if (!fs.existsSync(basePackageJson)) {
-    throw new PiTaskRuntimeVerificationError(
-      'LAYOUT_INVALID',
-      'Runtime layout does not contain package.json',
-    );
-  }
-
+  if (!fs.existsSync(basePackageJson)) fail('LAYOUT_INVALID', 'Runtime layout does not contain package.json');
   const baseRequire = createRequire(basePackageJson);
   const adapterPackageJsonPath = findPackageJson(ADAPTER_PACKAGE, baseRequire);
-  const adapterPackageJson = readPackageJson(adapterPackageJsonPath, ADAPTER_PACKAGE);
-  assertVersion(ADAPTER_PACKAGE, adapterPackageJson.version, ADAPTER_VERSION);
-
-  let adapterRuntime;
-  try {
-    adapterRuntime = baseRequire(ADAPTER_PACKAGE);
-  } catch (error) {
-    throw new PiTaskRuntimeVerificationError(
-      'CJS_LOAD_FAILED',
-      `CJS runtime load failed: ${ADAPTER_PACKAGE}`,
-      { module: ADAPTER_PACKAGE },
-    );
+  assertRuntimeResolutionBoundary(adapterPackageJsonPath, baseDir, repositoryRoot, source);
+  const adapterManifest = readPackageJson(adapterPackageJsonPath, ADAPTER_PACKAGE);
+  assertVersion(ADAPTER_PACKAGE, adapterManifest.version, ADAPTER_VERSION);
+  if (!adapterManifest.exports?.['./task-runtime']) {
+    fail('EXPORT_MISMATCH', `Public package subpath is missing: ${TASK_RUNTIME_EXPORT}`);
   }
-  assertAdapterExports(adapterRuntime);
+
+  let adapter;
+  let taskRuntime;
+  try {
+    adapter = baseRequire(ADAPTER_PACKAGE);
+    taskRuntime = baseRequire(TASK_RUNTIME_EXPORT);
+  } catch {
+    return fail('CJS_LOAD_FAILED', `CJS runtime load failed: ${ADAPTER_PACKAGE}`);
+  }
+  if (typeof adapter.Agent !== 'function') fail('EXPORT_MISMATCH', `Runtime package export mismatch: ${ADAPTER_PACKAGE}`);
+  const taskRuntimeExports = assertTaskRuntime(taskRuntime);
 
   const adapterRequire = createRequire(adapterPackageJsonPath);
-  const piTasksPackageJsonPath = findPackageJson(PI_TASKS_PACKAGE, adapterRequire);
-  const piTasksPackageJson = readPackageJson(piTasksPackageJsonPath, PI_TASKS_PACKAGE);
-  assertVersion(PI_TASKS_PACKAGE, piTasksPackageJson.version, PI_TASKS_VERSION);
+  const controlledPackageJsonPath = findPackageJson(CONTROLLED_TASK_PACKAGE, adapterRequire);
+  assertRuntimeResolutionBoundary(controlledPackageJsonPath, baseDir, repositoryRoot, source);
+  const controlledManifest = readPackageJson(controlledPackageJsonPath, CONTROLLED_TASK_PACKAGE);
+  assertVersion(CONTROLLED_TASK_PACKAGE, controlledManifest.version, CONTROLLED_TASK_VERSION);
+  const controlledRuntime = await importFromPackage(
+    CONTROLLED_TASK_PACKAGE,
+    controlledPackageJsonPath,
+  );
+  const controlledExports = assertControlledTaskExports(controlledRuntime);
+  const patchSet = verifyPatchSet(repositoryRoot);
+  const dependencyClosure = verifyDependencyClosure(
+    adapterPackageJsonPath,
+    baseDir,
+    repositoryRoot,
+    source,
+  );
+  const packageFingerprint = verifyTaskPackageFingerprint(controlledPackageJsonPath);
 
-  const piTasksRequire = createRequire(piTasksPackageJsonPath);
-  const runtimeDependencies = resolveRuntimeDependencies(piTasksPackageJson, piTasksRequire);
-  let piTasksRuntime;
-  try {
-    const piTasksEntry = piTasksRequire.resolve(PI_TASKS_PACKAGE);
-    piTasksRuntime = await import(pathToFileURL(piTasksEntry).href);
-  } catch (error) {
-    throw new PiTaskRuntimeVerificationError(
-      'ESM_LOAD_FAILED',
-      `ESM runtime load failed: ${PI_TASKS_PACKAGE}`,
-      { module: PI_TASKS_PACKAGE },
-    );
+  const runtimeCore = await importFromPackage(
+    '@earendil-works/pi-agent-core',
+    findPackageJson('@earendil-works/pi-agent-core', adapterRequire),
+  );
+  const runtimeHost = await importFromPackage(
+    '@earendil-works/pi-coding-agent',
+    findPackageJson('@earendil-works/pi-coding-agent', adapterRequire),
+  );
+  if (
+    typeof runtimeCore.invokeRegisteredToolCall !== 'function' ||
+    typeof runtimeHost.AgentSession?.prototype.invokeRegisteredTool !== 'function'
+  ) {
+    fail('PATCH_CONTRACT_MISSING', 'Installed Runtime packages do not expose both patched host APIs');
   }
-  assertPiTasksExports(piTasksRuntime);
 
-  return createReport({
+  const report = {
+    schemaVersion: 2,
     source,
     platform,
-    adapterExports: ['Agent'],
-    piTasksExports: Object.keys(piTasksRuntime).sort(),
-    dependencies: runtimeDependencies,
-  });
+    result: 'passed',
+    adapter: { version: ADAPTER_VERSION, publicExport: TASK_RUNTIME_EXPORT, exports: taskRuntimeExports },
+    controlledTaskPackage: {
+      version: CONTROLLED_TASK_VERSION,
+      exports: controlledExports,
+      fingerprint: packageFingerprint,
+      eventVersion: 2,
+      stateEventVersion: 2,
+    },
+    runtimePatchSet: { version: 1, fingerprint: patchSet.fingerprint },
+    transitiveDependencies: {
+      count: dependencyClosure.length,
+      sha256: sha256(`${dependencyClosure.join('\n')}\n`),
+    },
+  };
+  return { ...report, hash: sha256(JSON.stringify(report)) };
 }
 
 function normalizeAsarEntry(entry) {
-  const normalized = entry
-    .replace(/^(?:pack|unpack)\s*:\s*/, '')
-    .replace(/\\/g, '/');
+  const normalized = entry.replace(/^(?:pack|unpack)\s*:\s*/, '').replace(/\\/g, '/');
   return normalized.startsWith('/') ? normalized.slice(1) : normalized;
 }
 
 async function verifyAsarRuntime(options) {
-  const {
-    asarPath,
-    platform,
-  } = options;
-  if (!fs.existsSync(asarPath)) {
-    throw new PiTaskRuntimeVerificationError(
-      'ASAR_MISSING',
-      'Packaged runtime ASAR is missing',
-    );
-  }
-
-  const entries = new Set(
-    asar.listPackage(asarPath, { isPack: true }).map(normalizeAsarEntry),
-  );
-  const requiredEntries = [
+  const { asarPath, platform, repositoryRoot } = options;
+  if (!fs.existsSync(asarPath)) fail('ASAR_MISSING', 'Packaged runtime ASAR is missing');
+  const entries = new Set(asar.listPackage(asarPath, { isPack: true }).map(normalizeAsarEntry));
+  for (const entry of [
     'node_modules/@originos/pi-agent-adapter/package.json',
-    'node_modules/pi-tasks/package.json',
-  ];
-  for (const entry of requiredEntries) {
-    if (!entries.has(entry)) {
-      throw new PiTaskRuntimeVerificationError(
-        'MODULE_MISSING',
-        `Packaged runtime module is missing: ${entry.split('/package.json')[0]}`,
-        { entry },
-      );
-    }
+    'node_modules/@originos/pi-agent-adapter/task-runtime.js',
+    'node_modules/@originos/pi-agent-adapter/dist/task-runtime.cjs',
+    'node_modules/@originos/pi-tasks/package.json',
+    'node_modules/@earendil-works/pi-agent-core/package.json',
+    'node_modules/@earendil-works/pi-coding-agent/package.json',
+  ]) {
+    if (!entries.has(entry)) fail('MODULE_MISSING', `Packaged runtime module is missing: ${entry}`, { entry });
   }
-
   const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'originos-pi-task-package-'));
   try {
     asar.extractAll(asarPath, extractDir);
     return await verifyRuntimeLayout({
       baseDir: extractDir,
+      repositoryRoot,
       source: 'asar',
       platform,
     });
@@ -283,59 +388,40 @@ async function verifyAsarRuntime(options) {
 }
 
 function boundedFailure(error) {
-  const knownError = error instanceof PiTaskRuntimeVerificationError;
-  const message = knownError ? error.message : 'Unexpected runtime verification failure';
+  const known = error instanceof PiTaskRuntimeVerificationError;
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     result: 'failed',
-    code: knownError ? error.code : 'UNEXPECTED_ERROR',
-    message: message.slice(0, MAX_ERROR_MESSAGE_LENGTH),
-    details: knownError ? error.details : {},
+    code: known ? error.code : 'UNEXPECTED_ERROR',
+    message: (known ? error.message : 'Unexpected runtime verification failure').slice(0, MAX_ERROR_MESSAGE_LENGTH),
+    details: known ? error.details : {},
   };
 }
 
 function parseArguments(argv) {
-  const options = {
-    mode: 'development',
-    platform: `${process.platform}-${process.arch}`,
-  };
+  const options = { mode: 'development', platform: `${process.platform}-${process.arch}` };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    if (argument === '--development') {
-      options.mode = 'development';
-    } else if (argument === '--asar') {
+    if (argument === '--development') options.mode = 'development';
+    else if (argument === '--asar') {
       options.mode = 'asar';
-      options.asarPath = path.resolve(argv[index + 1] || '');
-      index += 1;
-    } else if (argument === '--platform') {
-      options.platform = argv[index + 1] || options.platform;
-      index += 1;
-    } else {
-      throw new PiTaskRuntimeVerificationError(
-        'ARGUMENT_INVALID',
-        `Unknown verification argument: ${argument.slice(0, 80)}`,
-      );
-    }
+      options.asarPath = path.resolve(argv[++index] || '');
+    } else if (argument === '--platform') options.platform = argv[++index] || options.platform;
+    else fail('ARGUMENT_INVALID', `Unknown verification argument: ${argument.slice(0, 80)}`);
   }
-  if (options.mode === 'asar' && !options.asarPath) {
-    throw new PiTaskRuntimeVerificationError('ARGUMENT_INVALID', '--asar requires a path');
-  }
+  if (options.mode === 'asar' && !options.asarPath) fail('ARGUMENT_INVALID', '--asar requires a path');
   return options;
 }
 
 async function main() {
-  const desktopDir = path.resolve(__dirname, '..');
   const options = parseArguments(process.argv.slice(2));
   const report = options.mode === 'asar'
-    ? await verifyAsarRuntime({
-      asarPath: options.asarPath,
-      platform: options.platform,
-    })
+    ? await verifyAsarRuntime(options)
     : await verifyRuntimeLayout({
-      baseDir: desktopDir,
-      source: 'development',
-      platform: options.platform,
-    });
+        baseDir: path.resolve(__dirname, '..'),
+        source: 'development',
+        platform: options.platform,
+      });
   console.log(`[verify-pi-task-runtime-package] ${JSON.stringify(report)}`);
 }
 
@@ -349,9 +435,8 @@ if (require.main === module) {
 module.exports = {
   ADAPTER_PACKAGE,
   ADAPTER_VERSION,
-  PI_TASKS_EXPORTS,
-  PI_TASKS_PACKAGE,
-  PI_TASKS_VERSION,
+  CONTROLLED_TASK_PACKAGE,
+  CONTROLLED_TASK_VERSION,
   PiTaskRuntimeVerificationError,
   boundedFailure,
   verifyAsarRuntime,

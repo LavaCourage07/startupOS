@@ -27,6 +27,12 @@
     "node": ">=22.19.0",
     "pnpm": ">=9.0.0"
   },
+  "pnpm": {
+    "patchedDependencies": {
+      "@earendil-works/pi-agent-core@0.80.10": "patches/@earendil-works__pi-agent-core@0.80.10.patch",
+      "@earendil-works/pi-coding-agent@0.80.10": "patches/@earendil-works__pi-coding-agent@0.80.10.patch"
+    }
+  },
   "scripts": {
     "dev": "pnpm --filter @originos/web dev",
     "dev:src": "next dev",

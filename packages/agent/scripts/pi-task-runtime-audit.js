@@ -6,14 +6,69 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ADAPTER_VERSION = '0.80.10';
-const PI_TASKS_VERSION = '0.2.0';
-const PI_RUNTIME_PACKAGES = [
-  '@earendil-works/pi-agent-core',
-  '@earendil-works/pi-ai',
-  '@earendil-works/pi-coding-agent',
-  '@earendil-works/pi-tui',
-];
-const EXPECTED_PI_TASK_EXPORTS = ['TASK_STATE_EVENT', 'TASK_WIDGET_ID', 'default'];
+const CONTROLLED_TASK_PACKAGE = '@originos/pi-tasks';
+const CONTROLLED_TASK_VERSION = '0.2.0-originos.1';
+const TASK_PACKAGE_FINGERPRINT =
+  'c900eb1fc776fd0c2ed28d076374a0253d6cb01963590f0930591725b9bb99e0';
+const TASK_SCHEMA_FINGERPRINT =
+  'originos-pi-tasks/v1:event-v2:cas:receipt:evidence-gate-no-force';
+const RUNTIME_PATCHES = Object.freeze([
+  {
+    name: '@earendil-works/pi-agent-core',
+    file: 'patches/@earendil-works__pi-agent-core@0.80.10.patch',
+    sha256: '10bda90bbb3ff426f6057312464e2cdb470fe61acd4f9e37ffc8436755e644a6',
+  },
+  {
+    name: '@earendil-works/pi-coding-agent',
+    file: 'patches/@earendil-works__pi-coding-agent@0.80.10.patch',
+    sha256: '7d70e7b71db29280df41ddf1f8701c9ae56c98e9e48b85ee11700c4ca66c11b4',
+  },
+]);
+const RUNTIME_PATCH_SET_SHA256 =
+  '213b1f2db610720ca0dde1853abbe02975185ad37c95eb517031844631371674';
+const EXPECTED_TASK_EXPORTS = [
+  'ORIGINOS_PI_TASKS_VERSION',
+  'PI_TASK_CHECKPOINT_MAX_BYTES',
+  'PI_TASK_CHECKPOINT_RECEIPT_LIMIT',
+  'PI_TASK_DIAGNOSTIC_LIMIT',
+  'PI_TASK_EVENT_V2_SCHEMA',
+  'PI_TASK_EVENT_VERSION',
+  'PI_TASK_LEGACY_FORCED_COMPLETION_CODE',
+  'PI_TASK_PUBLIC_API_VERSION',
+  'PI_TASK_SCHEMA_FINGERPRINT',
+  'PI_TASK_STATE_EVENT_V2_SCHEMA',
+  'PI_TASK_STATE_EVENT_VERSION',
+  'PI_TASKS_UPSTREAM_ENTRY_SHA256',
+  'PI_TASKS_UPSTREAM_REDUCER_SHA256',
+  'TASK_STATE_EVENT',
+  'TASK_WIDGET_ID',
+  'UPSTREAM_PI_TASKS_VERSION',
+  'createTaskRuntimeStore',
+  'default',
+  'replayBranchEntries',
+  'snapshotState',
+].sort();
+const EXPECTED_TASK_RUNTIME_EXPORTS = [
+  'DEFAULT_SANITIZE_LIMITS',
+  'PI_TASK_COMPATIBILITY_REQUIREMENTS',
+  'PI_TASK_CONTRACT_VERSION',
+  'PI_TASK_SNAPSHOT_VERSION',
+  'PI_TASK_STATE_EVENT_NAME',
+  'PI_TASK_STATE_EVENT_VERSION',
+  'PI_TASK_TOOL_NAMES',
+  'assertAllowedPiTaskTool',
+  'assertPiTaskCompatibility',
+  'createBoundedPiTaskSnapshot',
+  'createPiTaskCompatibilityGuard',
+  'createPiTaskRuntimeBridge',
+  'evaluatePiTaskCompatibility',
+  'isAllowedPiTaskTool',
+  'mapPiTaskRuntimeError',
+  'normalizePiTaskCommand',
+  'sanitizeTaskRuntimeValue',
+  'stableJsonHash',
+  'stableJsonStringify',
+].sort();
 const EXPECTED_TASK_TOOLS = [
   'task_checkpoint',
   'task_complete',
@@ -28,27 +83,40 @@ const EXPECTED_TASK_TOOLS = [
   'task_resume',
   'task_update',
 ];
-const HOST_INVOKE_METHODS = [
-  'callTool',
-  'executeRegisteredTool',
-  'executeTool',
-  'executeToolCall',
-  'invokeExtensionTool',
-  'invokeTool',
-  'runTool',
+const TASK_PACKAGE_FILES = [
+  'LICENSE',
+  'README.md',
+  'UPSTREAM.md',
+  'index.d.ts',
+  'index.js',
+  'package.json',
+  'src/commands.d.ts',
+  'src/commands.js',
+  'src/contracts.d.ts',
+  'src/contracts.js',
+  'src/ids.d.ts',
+  'src/ids.js',
+  'src/model.d.ts',
+  'src/model.js',
+  'src/pi-types.d.ts',
+  'src/pi-types.js',
+  'src/reducer.d.ts',
+  'src/reducer.js',
+  'src/render.d.ts',
+  'src/render.js',
+  'src/schema.d.ts',
+  'src/schema.js',
+  'src/state-events.d.ts',
+  'src/state-events.js',
+  'src/store.d.ts',
+  'src/store.js',
+  'src/tools.d.ts',
+  'src/tools.js',
+  'src/widget.d.ts',
+  'src/widget.js',
+  'upstream/index.js',
+  'upstream/reducer.js',
 ];
-const MUTATION_COMMAND_NAMES = [
-  'task_checkpoint',
-  'task_complete',
-  'task_decision',
-  'task_decompose',
-  'task_evidence',
-  'task_plan',
-  'task_update',
-];
-const REVISION_FIELDS = ['cursor', 'revision', 'sequence'];
-const PI_TASKS_INTEGRITY =
-  'sha512-VN3fQs2khp6M0chAjpKQPeGZI4MJ0PP1XLmc368WGmccMAQOlz1dv5wMNtvUurHvyEinGSAVCNXhMGG6OUp+bw==';
 
 function sortStrings(values) {
   return [...values].sort();
@@ -58,55 +126,70 @@ function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
+function fingerprintFiles(packageDir) {
+  const manifest = TASK_PACKAGE_FILES.map((file) => {
+    const filePath = path.join(packageDir, file);
+    assert.equal(fs.existsSync(filePath), true, `controlled package file missing: ${file}`);
+    return `${sha256(fs.readFileSync(filePath))}  ${file}\n`;
+  }).join('');
+  return sha256(manifest);
+}
+
 function readRepositoryEvidence() {
   const packageDir = path.join(__dirname, '..');
   const repositoryDir = path.join(packageDir, '..', '..');
   const manifestPath = path.join(packageDir, 'package.json');
   const rootManifestPath = path.join(repositoryDir, 'package.json');
   const lockfilePath = path.join(repositoryDir, 'pnpm-lock.yaml');
-  const manifestText = fs.readFileSync(manifestPath, 'utf8');
+  const controlledPackageDir = path.join(repositoryDir, 'packages', 'pi-tasks');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   const rootManifest = JSON.parse(fs.readFileSync(rootManifestPath, 'utf8'));
   const lockfileText = fs.readFileSync(lockfilePath, 'utf8');
-  const manifest = JSON.parse(manifestText);
+  const controlledManifest = JSON.parse(
+    fs.readFileSync(path.join(controlledPackageDir, 'package.json'), 'utf8'),
+  );
 
   assert.equal(rootManifest.packageManager, 'pnpm@9.15.9');
   assert.equal(manifest.name, '@originos/pi-agent-adapter');
   assert.equal(manifest.version, ADAPTER_VERSION);
-  assert.equal(manifest.dependencies['pi-tasks'], PI_TASKS_VERSION);
-  for (const packageName of PI_RUNTIME_PACKAGES) {
-    assert.equal(
-      manifest.dependencies[packageName],
-      ADAPTER_VERSION,
-      `${packageName} must remain pinned to ${ADAPTER_VERSION}`,
-    );
-  }
+  assert.equal(manifest.dependencies[CONTROLLED_TASK_PACKAGE], 'workspace:0.2.0-originos.1');
+  assert.equal(Object.hasOwn(manifest.dependencies, 'pi-tasks'), false);
+  assert.equal(controlledManifest.name, CONTROLLED_TASK_PACKAGE);
+  assert.equal(controlledManifest.version, CONTROLLED_TASK_VERSION);
+  assert.deepEqual(controlledManifest.dependencies || {}, {});
+  assert.match(
+    lockfileText,
+    /'@originos\/pi-tasks':\s*\n\s+specifier: workspace:0\.2\.0-originos\.1\s*\n\s+version: link:\.\.\/pi-tasks/,
+  );
+  assert.match(lockfileText, /\n\s+packages\/pi-tasks:\s*\n/);
+  assert.equal(/\n\s+pi-tasks@0\.2\.0:/.test(lockfileText), false);
 
-  assert.match(lockfileText, /pi-tasks:\s*\n\s+specifier: 0\.2\.0\s*\n\s+version: 0\.2\.0/);
-  assert.match(lockfileText, /pi-tasks@0\.2\.0:\s*\n\s+resolution: \{integrity: sha512-/);
-  assert.match(lockfileText, /\n\s+pi-tasks@0\.2\.0: \{\}\n/);
-  assert.equal(lockfileText.includes(PI_TASKS_INTEGRITY), true);
+  const patchHashes = RUNTIME_PATCHES.map((patch) => {
+    const actualSha256 = sha256(fs.readFileSync(path.join(repositoryDir, patch.file)));
+    assert.equal(actualSha256, patch.sha256, `${patch.name} patch hash mismatch`);
+    return { ...patch, actualSha256 };
+  });
+  const patchManifest = patchHashes
+    .map((patch) => `${patch.name.endsWith('pi-agent-core') ? 'core' : 'coding-agent'}:${patch.actualSha256}\n`)
+    .join('');
+  assert.equal(sha256(patchManifest), RUNTIME_PATCH_SET_SHA256);
+  assert.equal(fingerprintFiles(controlledPackageDir), TASK_PACKAGE_FINGERPRINT);
 
   return {
-    adapter: {
-      name: manifest.name,
-      version: manifest.version,
+    adapter: { name: manifest.name, version: manifest.version },
+    controlledTaskPackage: {
+      fileCount: TASK_PACKAGE_FILES.length,
+      fingerprint: TASK_PACKAGE_FINGERPRINT,
+      runtimeDependencies: [],
+      version: controlledManifest.version,
     },
-    lockfile: {
-      packageIntegrity: PI_TASKS_INTEGRITY,
-      sha256: sha256(lockfileText),
-    },
+    lockfile: { sha256: sha256(lockfileText) },
     packageManager: rootManifest.packageManager,
-    piRuntime: Object.fromEntries(
-      PI_RUNTIME_PACKAGES.map((packageName) => [
-        packageName,
-        manifest.dependencies[packageName],
-      ]),
-    ),
-    piTasks: {
-      directDependencies: [],
-      version: manifest.dependencies['pi-tasks'],
+    runtimePatchSet: {
+      fingerprint: RUNTIME_PATCH_SET_SHA256,
+      patches: patchHashes,
+      version: 1,
     },
-    publicSources: ['@earendil-works/pi-coding-agent', 'pi-tasks'],
   };
 }
 
@@ -115,7 +198,6 @@ function createExtensionProbe() {
   const emittedEvents = [];
   const handlers = new Map();
   const tools = new Map();
-
   const api = {
     appendEntry() {},
     events: {
@@ -135,13 +217,15 @@ function createExtensionProbe() {
       tools.set(tool.name, tool);
     },
   };
-
   const context = {
     cwd: process.cwd(),
     hasUI: false,
     sessionManager: {
       getBranch() {
         return [];
+      },
+      getSessionId() {
+        return 'audit-session';
       },
     },
     ui: {
@@ -150,198 +234,103 @@ function createExtensionProbe() {
       setWidget() {},
     },
   };
-
-  return {
-    api,
-    commands,
-    context,
-    emittedEvents,
-    handlers,
-    tools,
-  };
+  return { api, commands, context, emittedEvents, handlers, tools };
 }
 
 async function emitLifecycle(probe, name) {
-  const handlers = probe.handlers.get(name) ?? [];
-  for (const handler of handlers) {
+  for (const handler of probe.handlers.get(name) ?? []) {
     await handler({}, probe.context);
   }
 }
 
-function inspectRuntimePublicApi(runtime) {
-  const runtimeExports = sortStrings(Object.keys(runtime));
-  const publicTypes = ['AgentSession', 'AgentSessionRuntime', 'ExtensionRunner'];
-  const publicTypeMethods = Object.fromEntries(
-    publicTypes.map((typeName) => {
-      const publicType = runtime[typeName];
-      assert.equal(typeof publicType, 'function', `${typeName} must be a public runtime export`);
-      return [
-        typeName,
-        sortStrings(
-          Object.getOwnPropertyNames(publicType.prototype).filter(
-            (name) => name !== 'constructor' && !name.startsWith('_'),
-          ),
-        ),
-      ];
-    }),
-  );
-  const publicMethods = Object.values(publicTypeMethods).flat();
-  const possibleHostInvokeNames = sortStrings(
-    new Set(
-      [...runtimeExports, ...publicMethods].filter((name) =>
-        /^(?:call|execute|invoke|run).*(?:extension)?tool/i.test(name),
-      ),
-    ),
-  );
-  const exposedHostInvokeMethods = HOST_INVOKE_METHODS.filter(
-    (name) => runtimeExports.includes(name) || publicMethods.includes(name),
-  );
-  assert.deepEqual(
-    exposedHostInvokeMethods,
-    [],
-    'runtime unexpectedly exposes a host invocation API; review the contract before proceeding',
-  );
-  assert.deepEqual(
-    possibleHostInvokeNames,
-    [],
-    'runtime exposes a possible host tool invocation API; review it before retaining the negative conclusion',
-  );
-
-  return {
-    exports: runtimeExports,
-    hostInvoke: {
-      possiblePublicNames: possibleHostInvokeNames,
-      preservesStandardToolPipeline: false,
-      publicMethodsFound: exposedHostInvokeMethods,
-      requiredPublicMethodsChecked: HOST_INVOKE_METHODS,
-    },
-    publicTypeMethods,
-  };
-}
-
-function inspectStateEvent(piTasks, probe) {
+function inspectStateEvents(piTasks, probe) {
   const stateEvents = probe.emittedEvents.filter(
     ({ name }) => name === piTasks.TASK_STATE_EVENT,
   );
-  assert.equal(piTasks.TASK_STATE_EVENT, 'pi-tasks:state');
-  assert.equal(piTasks.TASK_WIDGET_ID, 'pi-tasks');
-  assert.equal(stateEvents.length >= 2, true, 'session lifecycle must publish state snapshots');
-
-  const observedReasons = sortStrings(
-    new Set(stateEvents.map(({ payload }) => payload.reason)),
-  );
-  assert.deepEqual(observedReasons, ['session_start', 'session_tree']);
-
+  assert.equal(stateEvents.length, 2);
   for (const { payload } of stateEvents) {
-    assert.equal(payload.version, 1);
-    assert.equal(payload.widgetId, piTasks.TASK_WIDGET_ID);
-    assert.equal(typeof payload.state, 'object');
-    assert.equal(payload.state === null, false);
+    assert.equal(payload.version, 2);
+    assert.equal(payload.widgetId, 'pi-tasks');
+    assert.equal(payload.scope.sessionId, 'audit-session');
+    assert.equal(payload.scope.revision, 0);
+    assert.equal(payload.scope.cursor, null);
+    assert.match(payload.stateHash, /^[a-f0-9]{64}$/);
   }
-
-  const payloadKeys = sortStrings(
-    new Set(stateEvents.flatMap(({ payload }) => Object.keys(payload))),
-  );
-  const stateKeys = sortStrings(
-    new Set(stateEvents.flatMap(({ payload }) => Object.keys(payload.state))),
-  );
-  const stableRevisionFields = REVISION_FIELDS.filter(
-    (field) => payloadKeys.includes(field) || stateKeys.includes(field),
-  );
-  assert.deepEqual(stableRevisionFields, []);
-
   return {
     eventName: piTasks.TASK_STATE_EVENT,
-    observedReasons,
-    payloadKeys,
-    stableRevision: {
-      available: false,
-      fieldsFound: stableRevisionFields,
-      fieldsRequiredChecked: REVISION_FIELDS,
-    },
-    stateKeys,
-    version: 1,
-    widgetId: piTasks.TASK_WIDGET_ID,
+    observedReasons: sortStrings(stateEvents.map(({ payload }) => payload.reason)),
+    schemaId: piTasks.PI_TASK_STATE_EVENT_V2_SCHEMA.$id,
+    version: piTasks.PI_TASK_STATE_EVENT_VERSION,
   };
 }
 
 async function runAudit() {
   const repository = readRepositoryEvidence();
-  const piTasks = await import('pi-tasks');
-  const runtime = await import('@earendil-works/pi-coding-agent');
-  const publicExports = sortStrings(Object.keys(piTasks));
+  const piTasks = await import(CONTROLLED_TASK_PACKAGE);
+  const taskRuntime = require('@originos/pi-agent-adapter/task-runtime');
+  const runtimeCore = await import('@earendil-works/pi-agent-core');
+  const runtimeHost = await import('@earendil-works/pi-coding-agent');
 
-  assert.deepEqual(publicExports, EXPECTED_PI_TASK_EXPORTS);
+  assert.deepEqual(sortStrings(Object.keys(piTasks)), EXPECTED_TASK_EXPORTS);
+  assert.deepEqual(sortStrings(Object.keys(taskRuntime)), EXPECTED_TASK_RUNTIME_EXPORTS);
   assert.equal(typeof piTasks.default, 'function');
+  assert.equal(typeof piTasks.createTaskRuntimeStore, 'function');
+  assert.equal(typeof piTasks.replayBranchEntries, 'function');
+  assert.equal(typeof runtimeCore.invokeRegisteredToolCall, 'function');
+  assert.equal(typeof runtimeHost.AgentSession.prototype.invokeRegisteredTool, 'function');
+  assert.equal(piTasks.ORIGINOS_PI_TASKS_VERSION, CONTROLLED_TASK_VERSION);
+  assert.equal(piTasks.UPSTREAM_PI_TASKS_VERSION, '0.2.0');
+  assert.equal(piTasks.PI_TASK_PUBLIC_API_VERSION, 1);
+  assert.equal(piTasks.PI_TASK_EVENT_VERSION, 2);
+  assert.equal(piTasks.PI_TASK_STATE_EVENT_VERSION, 2);
+  assert.equal(piTasks.PI_TASK_SCHEMA_FINGERPRINT, TASK_SCHEMA_FINGERPRINT);
+  assert.equal(piTasks.PI_TASK_EVENT_V2_SCHEMA.$id, 'originos.pi-tasks.event-envelope.v2');
+  assert.equal(piTasks.PI_TASK_STATE_EVENT_V2_SCHEMA.$id, 'originos.pi-tasks.state-event.v2');
+  assert.deepEqual(taskRuntime.PI_TASK_COMPATIBILITY_REQUIREMENTS, {
+    adapterContractVersion: 1,
+    runtimePackage: '@earendil-works/pi-coding-agent',
+    runtimeVersion: '0.80.10',
+    runtimeHostInvokeContractVersion: 1,
+    taskExtensionPackage: CONTROLLED_TASK_PACKAGE,
+    taskExtensionVersion: CONTROLLED_TASK_VERSION,
+    taskExtensionContractVersion: 2,
+    taskLedgerEventVersion: 2,
+    taskStateEventVersion: 2,
+  });
 
   const probe = createExtensionProbe();
   piTasks.default(probe.api);
-
-  const toolNames = sortStrings(probe.tools.keys());
-  const toolSchemas = Object.fromEntries(
-    toolNames.map((name) => {
-      const tool = probe.tools.get(name);
-      assert.equal(typeof tool.execute, 'function', `${name} must expose an execute function`);
-      assert.equal(
-        typeof tool.parameters,
-        'object',
-        `${name} must expose a public parameter schema`,
-      );
-      return [
-        name,
-        {
-          hasExecute: true,
-          parameterSchemaSha256: sha256(JSON.stringify(tool.parameters)),
-        },
-      ];
-    }),
-  );
-  const commandNames = sortStrings(probe.commands.keys());
-  assert.deepEqual(toolNames, EXPECTED_TASK_TOOLS);
-  assert.deepEqual(commandNames, ['tasks']);
-
-  const publicMutationCommands = commandNames.filter((name) =>
-    MUTATION_COMMAND_NAMES.includes(name),
-  );
-  assert.deepEqual(publicMutationCommands, []);
-
+  assert.deepEqual(sortStrings(probe.tools.keys()), EXPECTED_TASK_TOOLS);
+  assert.deepEqual(sortStrings(probe.commands.keys()), ['tasks']);
   await emitLifecycle(probe, 'session_start');
   await emitLifecycle(probe, 'session_tree');
 
   const report = {
-    auditSchemaVersion: 1,
+    auditSchemaVersion: 2,
+    adapter: {
+      contractVersion: taskRuntime.PI_TASK_CONTRACT_VERSION,
+      publicExports: sortStrings(Object.keys(taskRuntime)),
+    },
     capabilities: {
-      hostToolInvocation: {
-        result: 'unsupported',
-        reason:
-          'No public Runtime API preserves schema validation, permission hooks, and the standard tool lifecycle for host invocation.',
-      },
-      publicMutationCommandApi: {
-        result: 'unsupported',
-        reason: 'pi-tasks registers only the read-oriented /tasks command.',
-      },
-      stableRevision: {
-        result: 'unsupported',
-        reason:
-          'The public pi-tasks state event v1 exposes no revision, sequence, or cursor.',
-      },
+      hostToolInvocation: { result: 'supported' },
+      publicMutationCommandApi: { result: 'supported' },
+      stableRevision: { result: 'supported' },
     },
     piTasks: {
-      commands: commandNames,
-      publicExports,
-      publicMutationCommands,
-      stateEvent: inspectStateEvent(piTasks, probe),
-      tools: toolNames,
-      toolSchemas,
+      commands: sortStrings(probe.commands.keys()),
+      eventSchemaId: piTasks.PI_TASK_EVENT_V2_SCHEMA.$id,
+      publicExports: sortStrings(Object.keys(piTasks)),
+      schemaFingerprint: piTasks.PI_TASK_SCHEMA_FINGERPRINT,
+      stateEvent: inspectStateEvents(piTasks, probe),
+      tools: sortStrings(probe.tools.keys()),
     },
     repository,
-    runtime: inspectRuntimePublicApi(runtime),
+    runtime: {
+      coreHostInvoke: 'invokeRegisteredToolCall',
+      sessionHostInvoke: 'AgentSession.invokeRegisteredTool',
+    },
   };
-
-  return {
-    ...report,
-    reportSha256: sha256(JSON.stringify(report)),
-  };
+  return { ...report, reportSha256: sha256(JSON.stringify(report)) };
 }
 
 async function main() {
@@ -351,7 +340,7 @@ async function main() {
     return;
   }
   console.log(
-    `[pi-task-runtime-audit] audited pi-tasks@${report.repository.piTasks.version} against ${report.repository.adapter.name}@${report.repository.adapter.version} (${report.reportSha256})`,
+    `[pi-task-runtime-audit] verified ${CONTROLLED_TASK_PACKAGE}@${CONTROLLED_TASK_VERSION} (${report.reportSha256})`,
   );
 }
 
@@ -363,5 +352,13 @@ if (require.main === module) {
 }
 
 module.exports = {
+  CONTROLLED_TASK_PACKAGE,
+  CONTROLLED_TASK_VERSION,
+  EXPECTED_TASK_EXPORTS,
+  EXPECTED_TASK_RUNTIME_EXPORTS,
+  RUNTIME_PATCHES,
+  RUNTIME_PATCH_SET_SHA256,
+  TASK_PACKAGE_FILES,
+  TASK_PACKAGE_FINGERPRINT,
   runAudit,
 };

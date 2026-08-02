@@ -53,8 +53,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Verify Pi task runtime development imports
-        run: pnpm --filter @originos/desktop verify:pi-task-runtime
+      - name: Verify controlled Pi Task Runtime development contract
+        run: |
+          pnpm --filter @originos/pi-agent-adapter build
+          pnpm --filter @originos/desktop test:pi-task-runtime-package
+          pnpm --filter @originos/desktop verify:pi-task-runtime
 
       - name: Verify Windows workspace upload paths
         run: pnpm --filter @originos/core exec vitest run src/lib/integrations/electron/__tests__/workspace-paths.test.ts
@@ -73,7 +76,8 @@ jobs:
 
       - run: pnpm --filter @originos/desktop generate:update-metadata
 
-      - run: pnpm --filter @originos/desktop verify:win-package
+      - name: Verify Windows x64 package including Pi Task Runtime
+        run: pnpm --filter @originos/desktop verify:win-package
 
       - run: pnpm --filter @originos/desktop verify:update-metadata
 
@@ -109,8 +113,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Verify Pi task runtime development imports
-        run: pnpm --filter @originos/desktop verify:pi-task-runtime
+      - name: Verify controlled Pi Task Runtime development contract
+        run: |
+          pnpm --filter @originos/pi-agent-adapter build
+          pnpm --filter @originos/desktop test:pi-task-runtime-package
+          pnpm --filter @originos/desktop verify:pi-task-runtime
 
       - name: Verify macOS signing secrets
         env:
@@ -148,7 +155,8 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
         run: node scripts/run-electron-builder-mac.js --config electron-builder.yml --mac --arm64 --publish never
 
-      - run: pnpm --filter @originos/desktop verify:mac-package
+      - name: Verify macOS arm64 package including Pi Task Runtime
+        run: pnpm --filter @originos/desktop verify:mac-package
 
       - run: pnpm --filter @originos/desktop verify:mac-signing
 
@@ -180,8 +188,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Verify Pi task runtime development imports
-        run: pnpm --filter @originos/desktop verify:pi-task-runtime
+      - name: Verify controlled Pi Task Runtime development contract
+        run: |
+          pnpm --filter @originos/pi-agent-adapter build
+          pnpm --filter @originos/desktop test:pi-task-runtime-package
+          pnpm --filter @originos/desktop verify:pi-task-runtime
 
       - name: Verify macOS signing secrets
         env:
@@ -219,7 +230,8 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
         run: node scripts/run-electron-builder-mac.js --config electron-builder.yml --mac --x64 --publish never
 
-      - run: pnpm --filter @originos/desktop verify:mac-package
+      - name: Verify macOS x64 package including Pi Task Runtime
+        run: pnpm --filter @originos/desktop verify:mac-package
 
       - run: pnpm --filter @originos/desktop verify:mac-signing
 
