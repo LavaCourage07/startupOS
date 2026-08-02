@@ -5,8 +5,8 @@
 
 ## 2. Adapter 与 Core Task Runtime
 
-- [ ] 2.1 在 adapter 公共边界实现产品 Session host，加载受控 `pi-tasks` extension、replay canonical branch entries、注册 task tools 并执行 revision/cursor/epoch 校验；依赖：1.2；并行性：可与 3.1、4.1 的只读准备并行，接口冻结后由其接入；写入范围：`packages/agent/**`；负责 subagent：Pi Runtime Engineer；必需测试：adapter unit、真实 extension contract、compaction/replay、stale command、module-resolution；完成证据：相关测试通过且无私有 reducer/store import。
-- [ ] 2.2 在 Core 实现 Task Runtime DTO、Session execution state、bounded projection、completion policy 与 `TaskContinuationController`，并在 `OriginOSAgent`/`AgentManager` 中提供同 Session planning/running 生命周期；依赖：2.1；并行性：串行；写入范围：`packages/core/src/lib/integrations/pi-agent/**`、`packages/core/src/types/agent.ts` 及对应 Core 测试；负责 subagent：Core Runtime Engineer；必需测试：chat/task 互斥、幂等创建、evidence gate、no-progress、stop、projection bounds、恢复；完成证据：Core 测试通过且普通聊天回归不变。
+- [x] 2.1 在 adapter 公共边界实现产品 Session host，加载受控 `pi-tasks` extension、replay canonical branch entries、注册 task tools 并执行 revision/cursor/epoch 校验；依赖：1.2；并行性：可与 3.1、4.1 的只读准备并行，接口冻结后由其接入；写入范围：`packages/agent/**`；负责 subagent：Pi Runtime Engineer；必需测试：adapter unit、真实 extension contract、compaction/replay、stale command、module-resolution；完成证据：`150494d` 与合并提交 `3b4ff90`；adapter build 通过，32 项测试通过，包含真实 extension、compaction/replay、stale revision/cursor/epoch、模块解析和私有路径禁用审计。
+- [x] 2.2 在 Core 实现 Task Runtime DTO、Session execution state、bounded projection、completion policy 与 `TaskContinuationController`，并在 `OriginOSAgent`/`AgentManager` 中提供同 Session planning/running 生命周期；依赖：2.1；并行性：串行；写入范围：`packages/core/src/lib/integrations/pi-agent/**`、`packages/core/src/types/agent.ts` 及对应 Core 测试；负责 subagent：Core Runtime Engineer；必需测试：chat/task 互斥、幂等创建、evidence gate、no-progress、stop、projection bounds、恢复；完成证据：`e96ddcb` 与合并提交 `406bc3e`；Core typecheck 通过，60 项相关测试通过，普通聊天继续使用 `chat_guard`，Task turn 仅使用 `task_runtime` policy。
 
 ## 3. Desktop IPC 与持久化恢复
 
