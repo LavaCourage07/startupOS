@@ -75,6 +75,7 @@ export interface AgentTaskExecutionStateV1 {
 	draft?: {
 		title?: string;
 		objective: string;
+		context?: string;
 		acceptanceCriteria: string[];
 	};
 	taskId?: string;
@@ -103,6 +104,7 @@ export interface CreateAgentTaskRequestV1 {
 	sessionId: string;
 	objective: string;
 	title?: string;
+	context?: string;
 	acceptanceCriteria?: string[];
 }
 

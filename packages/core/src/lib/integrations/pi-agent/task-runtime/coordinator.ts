@@ -239,6 +239,7 @@ export class AgentTaskRuntimeCoordinator {
 				draft: {
 					...(request.title ? { title: request.title.trim() } : {}),
 					objective: request.objective.trim(),
+					...(request.context?.trim() ? { context: request.context.trim() } : {}),
 					acceptanceCriteria: request.acceptanceCriteria?.map((item) => item.trim()).filter(Boolean) ?? [],
 				},
 				updatedAt: new Date().toISOString(),
@@ -640,6 +641,7 @@ export class AgentTaskRuntimeCoordinator {
 			sessionId: this.options.sessionId,
 			objective: draft.objective,
 			title: draft.title,
+			context: draft.context,
 			acceptanceCriteria: draft.acceptanceCriteria,
 		});
 	}
@@ -651,6 +653,9 @@ export class AgentTaskRuntimeCoordinator {
 			"必须先调用 task_plan 且只调用一次；不要只返回计划性文本。",
 			`任务标题：${request.title?.trim() || "请根据目标生成简洁标题"}`,
 			`任务目标：${request.objective.trim()}`,
+			request.context?.trim()
+				? `用户补充上下文：\n${request.context.trim()}`
+				: "用户未提供额外上下文，请使用当前 Session 已有上下文。",
 			criteria.length > 0
 				? `用户验收标准：\n${criteria.map((item, index) => `${index + 1}. ${item}`).join("\n")}`
 				: "请生成具体、可验证且需要证据的验收标准。",
