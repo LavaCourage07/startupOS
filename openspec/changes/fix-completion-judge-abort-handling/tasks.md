@@ -1,6 +1,6 @@
 ## 1. Proposal 门禁
 
-- [ ] 1.1 [串行] 完成 Proposal、Design、Spec 和 Task 规格并通过 strict validation；依赖：无；写入范围：`openspec/changes/fix-completion-judge-abort-handling/`；角色：Integration Owner；必需测试：`openspec validate fix-completion-judge-abort-handling --strict`；完成证据：Proposal commit 与 validation 输出。
+- [x] 1.1 [串行] 完成 Proposal、Design、Spec 和 Task 规格并通过 strict validation；依赖：无；写入范围：`openspec/changes/fix-completion-judge-abort-handling/`；角色：Integration Owner；必需测试：`openspec validate fix-completion-judge-abort-handling --strict`；完成证据：Proposal commit `d8ea4d6`，strict validation 通过。
 
 ## 2. Completion Judge 修正
 
