@@ -13,7 +13,7 @@ export type AgentTaskExecutionStatus =
 	| "completed"
 	| "cancelled";
 
-export type AgentTaskAction = "stop" | "resume" | "retry" | "return_to_chat";
+export type AgentTaskAction = "stop" | "cancel" | "resume" | "retry" | "return_to_chat";
 
 export interface AgentTaskRuntimeErrorV1 {
 	code: string;
@@ -110,7 +110,7 @@ export interface ControlAgentTaskRequestV1 {
 	version: 1;
 	requestId: string;
 	sessionId: string;
-	action: "stop" | "resume" | "retry";
+	action: "stop" | "cancel" | "resume" | "retry";
 	expectedRevision: number;
 	expectedCursor: string | null;
 	bridgeEpoch: number;
