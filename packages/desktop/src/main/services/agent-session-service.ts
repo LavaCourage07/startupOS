@@ -14,7 +14,10 @@ import { existsSync, readFileSync } from 'fs';
 import { StreamEventBatcher } from './stream-event-batcher';
 import { applyAssistantMessageEnd } from './assistant-stream-state';
 import { processHealthMonitor } from './process-health-monitor';
-import { AgentTaskRuntimeIpcController } from './agent-task-runtime-ipc';
+import {
+  AgentTaskRuntimeIpcController,
+  routeAgentSessionUserMessage,
+} from './agent-task-runtime-ipc';
 import {
   assertSessionMessageOwnership,
   restoreSessionAtBoundary,
@@ -517,14 +520,25 @@ export class AgentSessionService {
           });
 
           processHealthMonitor.setAgentActivity(request.sessionId, 'prompt_start');
-          this.taskRuntimeIpc.setUserMessagePending(request.sessionId, true);
           try {
-            await agent.prompt(request.content);
+            await routeAgentSessionUserMessage({
+              controller: this.taskRuntimeIpc,
+              session,
+              sender: event.sender,
+              content: request.content,
+              promptChat: async () => {
+                this.taskRuntimeIpc.setUserMessagePending(request.sessionId, true);
+                try {
+                  await agent.prompt(request.content);
+                } finally {
+                  this.taskRuntimeIpc.setUserMessagePending(request.sessionId, false);
+                }
+              },
+            });
           } catch (promptError) {
             hasError = true;
             errorMessage = promptError instanceof Error ? promptError.message : 'Failed to call LLM';
           } finally {
-            this.taskRuntimeIpc.setUserMessagePending(request.sessionId, false);
             processHealthMonitor.clearAgentActivity(request.sessionId);
           }
 
@@ -782,8 +796,20 @@ export class AgentSessionService {
           });
 
           processHealthMonitor.setAgentActivity(request.sessionId, 'prompt_start');
-          this.taskRuntimeIpc.setUserMessagePending(request.sessionId, true);
-          agent.prompt(request.content).then(async () => {
+          routeAgentSessionUserMessage({
+            controller: this.taskRuntimeIpc,
+            session,
+            sender: event.sender,
+            content: request.content,
+            promptChat: async () => {
+              this.taskRuntimeIpc.setUserMessagePending(request.sessionId, true);
+              try {
+                await agent.prompt(request.content);
+              } finally {
+                this.taskRuntimeIpc.setUserMessagePending(request.sessionId, false);
+              }
+            },
+          }).then(async () => {
             unsubscribe();
             if (assistantContent) {
               await agentSessionService.addMessage(request.sessionId, {
@@ -806,7 +832,6 @@ export class AgentSessionService {
             sendToRenderer('done', { content: visibleError });
             batcher.dispose();
           }).finally(() => {
-            this.taskRuntimeIpc.setUserMessagePending(request.sessionId, false);
             processHealthMonitor.clearAgentActivity(request.sessionId);
           });
 

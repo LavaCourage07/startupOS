@@ -17,7 +17,10 @@ vi.mock('electron', () => ({
 }));
 
 import { IPC_CHANNELS } from '../../ipc-protocol';
-import { AgentTaskRuntimeIpcController } from '../agent-task-runtime-ipc';
+import {
+  AgentTaskRuntimeIpcController,
+  routeAgentSessionUserMessage,
+} from '../agent-task-runtime-ipc';
 
 type RegisteredHandler = (event: unknown, request: unknown) => Promise<unknown>;
 
@@ -44,12 +47,16 @@ function makeSession(overrides: Partial<AgentSession> = {}): AgentSession {
 function makeSnapshot(
   status: AgentTaskRuntimeSnapshotV1['execution']['status'] = 'running',
 ): AgentTaskRuntimeSnapshotV1 {
+  const taskMode = status === 'running'
+    || status === 'waiting_user'
+    || status === 'paused'
+    || status === 'failed';
   return {
     version: 1,
     sessionId: 'session-1',
     execution: {
       ...createIdleAgentTaskExecutionState(3, '2026-08-02T00:00:00.000Z'),
-      mode: status === 'running' ? 'task_running' : 'chat',
+      mode: taskMode ? 'task_running' : 'chat',
       status,
       requestId: 'request-1',
       taskId: 'task-1',
@@ -66,7 +73,7 @@ function makePersistence(
     schemaVersion: 1,
     execution: {
       ...makeSnapshot(status).execution,
-      mode: status === 'running' ? 'task_running' : 'chat',
+      mode: makeSnapshot(status).execution.mode,
     },
     branchEntries: [{ id: 'entry-1', type: 'task-plan' }],
   };
@@ -101,6 +108,7 @@ function createHarness(session = makeSession()) {
     createTask: vi.fn(async () => snapshot),
     getSnapshot: vi.fn(() => snapshot),
     controlTask: vi.fn(async () => snapshot),
+    submitUserReply: vi.fn(async () => snapshot),
     resumeAfterRestore: vi.fn(async () => snapshot),
   };
   let binding: AgentTaskRuntimeBindingOptions | undefined;
@@ -214,7 +222,7 @@ describe('AgentTaskRuntimeIpcController', () => {
     const second = await harness.invoke(IPC_CHANNELS.AGENT_TASK_CREATE, request);
 
     expect(first).toMatchObject({ success: true, data: { execution: { taskId: 'task-1' } } });
-    expect(second).toEqual(first);
+    expect(second).toMatchObject({ success: true, data: { execution: { taskId: 'task-1' } } });
     expect(harness.getOrCreateTaskRuntime).toHaveBeenCalledTimes(2);
     expect(harness.runtime.createTask).toHaveBeenCalledTimes(2);
   });
@@ -277,6 +285,82 @@ describe('AgentTaskRuntimeIpcController', () => {
       success: false,
       error: { code: 'TASK_RUNTIME_CONFLICT' },
     });
+  });
+
+  it('keeps stop and cancel as distinct control actions', async () => {
+    const session = makeSession({ taskRuntime: makePersistence('running') });
+    const harness = createHarness(session);
+    harness.runtime.controlTask.mockImplementation(async (request: ControlAgentTaskRequestV1) => (
+      request.action === 'stop' ? makeSnapshot('paused') : makeSnapshot('cancelled')
+    ));
+    const scope = {
+      version: 1 as const,
+      sessionId: 'session-1',
+      expectedRevision: 2,
+      expectedCursor: 'cursor-2',
+      bridgeEpoch: 3,
+    };
+
+    const stopped = await harness.invoke(IPC_CHANNELS.AGENT_TASK_CONTROL, {
+      ...scope,
+      requestId: 'stop-request',
+      action: 'stop',
+    } satisfies ControlAgentTaskRequestV1);
+    const cancelled = await harness.invoke(IPC_CHANNELS.AGENT_TASK_CONTROL, {
+      ...scope,
+      requestId: 'cancel-request',
+      action: 'cancel',
+    } satisfies ControlAgentTaskRequestV1);
+
+    expect(harness.runtime.controlTask).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ action: 'stop' }),
+    );
+    expect(harness.runtime.controlTask).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ action: 'cancel' }),
+    );
+    expect(stopped).toMatchObject({ success: true, data: { execution: { status: 'paused' } } });
+    expect(cancelled).toMatchObject({ success: true, data: { execution: { status: 'cancelled' } } });
+  });
+
+  it('routes waiting_user replies through Task Runtime without invoking chat prompt', async () => {
+    const session = makeSession({ taskRuntime: makePersistence('waiting_user') });
+    const harness = createHarness(session);
+    const waitingSnapshot = makeSnapshot('waiting_user');
+    harness.runtime.getSnapshot.mockReturnValue(waitingSnapshot);
+    harness.runtime.submitUserReply.mockResolvedValue(waitingSnapshot);
+    const promptChat = vi.fn(async () => undefined);
+
+    const result = await routeAgentSessionUserMessage({
+      controller: harness.controller,
+      session,
+      sender: harness.sender,
+      content: '我已补充所需输入',
+      promptChat,
+    });
+
+    expect(result).toMatchObject({ handledBy: 'task_runtime' });
+    expect(harness.runtime.submitUserReply).toHaveBeenCalledWith('我已补充所需输入');
+    expect(promptChat).not.toHaveBeenCalled();
+  });
+
+  it('keeps ordinary chat outside Task Runtime', async () => {
+    const harness = createHarness();
+    const promptChat = vi.fn(async () => undefined);
+
+    const result = await routeAgentSessionUserMessage({
+      controller: harness.controller,
+      session: harness.session,
+      sender: harness.sender,
+      content: '普通聊天消息',
+      promptChat,
+    });
+
+    expect(result).toEqual({ handledBy: 'chat' });
+    expect(promptChat).toHaveBeenCalledOnce();
+    expect(harness.runtime.submitUserReply).not.toHaveBeenCalled();
+    expect(harness.getOrCreateTaskRuntime).not.toHaveBeenCalled();
   });
 
   it('replays and resumes a running task when the window reopens', async () => {

@@ -52,6 +52,11 @@ export interface AgentTaskRuntimeIpcControllerOptions {
   runtimes?: TaskRuntimeManager;
 }
 
+export interface AgentTaskUserMessageRouteResult {
+  handledBy: 'chat' | 'task_runtime';
+  snapshot?: AgentTaskRuntimeSnapshotV1;
+}
+
 class AgentTaskIpcError extends Error {
   constructor(
     readonly code: string,
@@ -235,6 +240,36 @@ export class AgentTaskRuntimeIpcController {
     }
   }
 
+  async submitUserReplyIfWaiting(
+    session: AgentSession,
+    sender: TaskEventSender,
+    content: string,
+  ): Promise<{ handled: boolean; snapshot?: AgentTaskRuntimeSnapshotV1 }> {
+    this.rememberSession(session, sender);
+    if (
+      !isTaskEligibleSession(session)
+      || session.taskRuntime?.execution.mode !== 'task_running'
+      || session.taskRuntime.execution.status !== 'waiting_user'
+    ) {
+      return { handled: false };
+    }
+    assertSupportedPersistence(session);
+    return this.runSerialized(session.sessionId, async () => {
+      const runtime = await this.bindRuntime(session);
+      const current = runtime.getSnapshot();
+      if (
+        current.execution.mode !== 'task_running'
+        || current.execution.status !== 'waiting_user'
+      ) {
+        return { handled: false };
+      }
+      return {
+        handled: true,
+        snapshot: await runtime.submitUserReply(content),
+      };
+    });
+  }
+
   private async bindRuntime(session: AgentSession): Promise<AgentTaskRuntimeCoordinator> {
     assertSupportedPersistence(session);
     return this.runtimes.getOrCreateTaskRuntime(session, {
@@ -319,4 +354,23 @@ export class AgentTaskRuntimeIpcController {
     });
     return current;
   }
+}
+
+export async function routeAgentSessionUserMessage(options: {
+  controller: AgentTaskRuntimeIpcController;
+  session: AgentSession;
+  sender: TaskEventSender;
+  content: string;
+  promptChat(): Promise<void>;
+}): Promise<AgentTaskUserMessageRouteResult> {
+  const taskReply = await options.controller.submitUserReplyIfWaiting(
+    options.session,
+    options.sender,
+    options.content,
+  );
+  if (taskReply.handled) {
+    return { handledBy: 'task_runtime', snapshot: taskReply.snapshot };
+  }
+  await options.promptChat();
+  return { handledBy: 'chat' };
 }
