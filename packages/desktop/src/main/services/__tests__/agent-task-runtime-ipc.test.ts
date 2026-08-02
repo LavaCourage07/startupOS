@@ -107,7 +107,7 @@ function createHarness(session = makeSession()) {
   const runtime = {
     createTask: vi.fn(async () => snapshot),
     getSnapshot: vi.fn(() => snapshot),
-    controlTask: vi.fn(async () => snapshot),
+    controlTask: vi.fn(async (_request: ControlAgentTaskRequestV1) => snapshot),
     submitUserReply: vi.fn(async () => snapshot),
     resumeAfterRestore: vi.fn(async () => snapshot),
   };
@@ -174,6 +174,7 @@ describe('AgentTaskRuntimeIpcController', () => {
       requestId: 'request-1',
       sessionId: 'session-1',
       objective: '完成回归验证',
+      context: '沿用当前会话中的验收约束',
       acceptanceCriteria: ['测试通过'],
     };
 
