@@ -234,6 +234,117 @@ describe("OriginOSAgent", () => {
 			expect(recoveryMessage?.content?.[0]?.text).toContain("execute_command");
 		});
 
+		it("retries an aborted completion judge with a fresh timeout signal", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+			const completeSimpleMock = vi.mocked(piAi.completeSimple);
+			completeSimpleMock
+				.mockResolvedValueOnce({
+					role: "assistant",
+					content: [],
+					stopReason: "aborted",
+					errorMessage: "The operation timed out",
+				} as any)
+				.mockResolvedValueOnce({
+					role: "assistant",
+					content: [{
+						type: "text",
+						text: '{"status":"incomplete","reason":"work is only promised"}',
+					}],
+					stopReason: "stop",
+				} as any);
+			agent = new OriginOSAgent(basicConfig);
+			const message = { role: "assistant" };
+			(agent as any).activeUserRequest = "生成报告";
+			(agent as any).pendingCompletionCandidate = {
+				message,
+				text: "我会开始生成报告。",
+				stopReason: "stop",
+				toolCallCount: 0,
+				repeatedResponse: false,
+			};
+
+			await (agent as any).judgePendingCompletion();
+
+			expect(completeSimpleMock).toHaveBeenCalledTimes(2);
+			const firstSignal = completeSimpleMock.mock.calls[0]?.[2]?.signal;
+			const secondSignal = completeSimpleMock.mock.calls[1]?.[2]?.signal;
+			expect(firstSignal).toBeInstanceOf(AbortSignal);
+			expect(secondSignal).toBeInstanceOf(AbortSignal);
+			expect(secondSignal).not.toBe(firstSignal);
+			expect((agent as any).pendingPromiseStop).toBe(true);
+			const warning = warnSpy.mock.calls.flat().join("\n");
+			expect(warning).toContain("category=aborted");
+			expect(warning).toContain("retry=true");
+			expect(warning).not.toContain("no JSON object");
+		});
+
+		it("uses an observable incomplete fallback after two aborted judge attempts", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+			const completeSimpleMock = vi.mocked(piAi.completeSimple);
+			completeSimpleMock.mockResolvedValue({
+				role: "assistant",
+				content: [],
+				stopReason: "aborted",
+				errorMessage: "The operation timed out",
+			} as any);
+			agent = new OriginOSAgent(basicConfig);
+			(agent as any).activeUserRequest = "生成报告";
+			(agent as any).pendingCompletionCandidate = {
+				message: { role: "assistant" },
+				text: "我会先读取资料，然后生成报告。",
+				stopReason: "stop",
+				toolCallCount: 0,
+				repeatedResponse: false,
+			};
+
+			await (agent as any).judgePendingCompletion();
+
+			expect(completeSimpleMock).toHaveBeenCalledTimes(2);
+			expect((agent as any).pendingPromiseStop).toBe(true);
+			const warning = warnSpy.mock.calls.flat().join("\n");
+			expect(warning).toContain("decision=incomplete");
+			expect(warning).toContain("attempts=2");
+			expect(warning).toContain("lastFailure=aborted");
+		});
+
+		it("classifies model errors and invalid JSON before a redacted complete fallback", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+			const completeSimpleMock = vi.mocked(piAi.completeSimple);
+			completeSimpleMock
+				.mockResolvedValueOnce({
+					role: "assistant",
+					content: [],
+					stopReason: "error",
+					errorMessage: "provider rejected sk-sensitive-value",
+				} as any)
+				.mockResolvedValueOnce({
+					role: "assistant",
+					content: [{ type: "text", text: "not json" }],
+					stopReason: "stop",
+				} as any);
+			agent = new OriginOSAgent(basicConfig);
+			(agent as any).activeUserRequest = "生成报告";
+			(agent as any).pendingCompletionCandidate = {
+				message: { role: "assistant" },
+				text: "报告已生成并保存。",
+				stopReason: "stop",
+				toolCallCount: 0,
+				repeatedResponse: false,
+			};
+
+			await (agent as any).judgePendingCompletion();
+
+			expect(completeSimpleMock).toHaveBeenCalledTimes(2);
+			expect((agent as any).pendingPromiseStop).toBe(false);
+			const warning = warnSpy.mock.calls.flat().join("\n");
+			expect(warning).toContain("category=error");
+			expect(warning).toContain("category=invalid_response");
+			expect(warning).toContain("decision=complete");
+			expect(warning).toContain("lastFailure=invalid_response");
+			expect(warning).toContain("[REDACTED]");
+			expect(warning).not.toContain("sk-sensitive-value");
+		});
+
 		it("returns a deterministic failure report after recovery is exhausted", async () => {
 			agent = new OriginOSAgent(basicConfig);
 			const internalAgent = (agent as any).agent;
