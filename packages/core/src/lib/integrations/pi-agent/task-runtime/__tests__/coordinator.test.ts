@@ -198,4 +198,91 @@ describe("AgentTaskRuntimeCoordinator", () => {
 			bridgeEpoch: 3,
 		})).rejects.toThrow("scope 已过期");
 	});
+
+	it("waiting_user 答复仍由 Task Runtime 在原 Session 消费", async () => {
+		const harness = createHarness({ status: "blocked" });
+		await harness.coordinator.createTask({
+			version: 1,
+			requestId: "request-1",
+			sessionId: "session-1",
+			objective: "完成纵向闭环",
+		});
+
+		const snapshot = await harness.coordinator.submitUserReply("我确认继续执行");
+		expect(harness.agent.prompt).toHaveBeenCalledTimes(2);
+		expect(harness.agent.prompt).toHaveBeenLastCalledWith(
+			[
+				expect.objectContaining({ role: "user" }),
+				expect.objectContaining({
+					role: "user",
+					content: [{ type: "text", text: "我确认继续执行" }],
+				}),
+			],
+			undefined,
+			{ completionPolicy: "task_runtime", internalMessageIndexes: [0] },
+		);
+		expect(snapshot.execution.mode).toBe("task_running");
+		expect(snapshot.execution.status).toBe("waiting_user");
+	});
+
+	it("停止只暂停 execution 并保留 canonical Task", async () => {
+		const harness = createHarness({ status: "blocked" });
+		await harness.coordinator.createTask({
+			version: 1,
+			requestId: "request-1",
+			sessionId: "session-1",
+			objective: "完成纵向闭环",
+		});
+
+		const snapshot = await harness.coordinator.controlTask({
+			version: 1,
+			requestId: "control-stop",
+			sessionId: "session-1",
+			action: "stop",
+			expectedRevision: 1,
+			expectedCursor: "entry-1",
+			bridgeEpoch: 3,
+		});
+		expect(snapshot.execution).toMatchObject({
+			mode: "task_running",
+			status: "paused",
+			projection: { taskId: "T1", status: "blocked" },
+		});
+		expect(harness.host.invoke).not.toHaveBeenCalled();
+		expect(harness.getTools()).toEqual([{ name: "read_file" }]);
+	});
+
+	it("取消通过 canonical mutation 终止任务且不可恢复", async () => {
+		const harness = createHarness({ status: "blocked" });
+		await harness.coordinator.createTask({
+			version: 1,
+			requestId: "request-1",
+			sessionId: "session-1",
+			objective: "完成纵向闭环",
+		});
+
+		const snapshot = await harness.coordinator.controlTask({
+			version: 1,
+			requestId: "control-cancel",
+			sessionId: "session-1",
+			action: "cancel",
+			expectedRevision: 1,
+			expectedCursor: "entry-1",
+			bridgeEpoch: 3,
+		});
+		expect(harness.host.invoke).toHaveBeenCalledWith(expect.objectContaining({
+			toolName: "task_update",
+			input: expect.objectContaining({ task_id: "T1", status: "cancelled" }),
+		}));
+		expect(snapshot.execution).toMatchObject({ mode: "chat", status: "cancelled" });
+		await expect(harness.coordinator.controlTask({
+			version: 1,
+			requestId: "control-resume",
+			sessionId: "session-1",
+			action: "resume",
+			expectedRevision: 1,
+			expectedCursor: "entry-1",
+			bridgeEpoch: 3,
+		})).rejects.toThrow("只有暂停或等待用户的任务可以恢复");
+	});
 });

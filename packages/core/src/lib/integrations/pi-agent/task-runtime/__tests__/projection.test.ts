@@ -41,7 +41,7 @@ describe("projectPiTaskSnapshot", () => {
 			cursor: "entry-3",
 			stateHash: "hash-1",
 			truncated: true,
-			actions: ["stop"],
+			actions: ["stop", "cancel"],
 		});
 		expect(projection?.objective).toBe("01234567890123456789012345678901…");
 		expect(projection?.steps).toHaveLength(1);

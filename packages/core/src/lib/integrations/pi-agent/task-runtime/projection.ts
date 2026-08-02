@@ -51,9 +51,9 @@ function taskActions(status: AgentTaskProjectionV1["status"]): AgentTaskAction[]
 		case "cancelled":
 			return ["return_to_chat"];
 		case "blocked":
-			return ["resume", "stop"];
+			return ["cancel"];
 		default:
-			return ["stop"];
+			return ["stop", "cancel"];
 	}
 }
 
