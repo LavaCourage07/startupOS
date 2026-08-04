@@ -22,7 +22,8 @@
 import { existsSync } from 'node:fs';
 import process from "node:process";
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { toEsmModuleSpecifier } from './agent-worker-module-specifier.mjs';
 
 // stdout is reserved exclusively for the WorkerMessage JSON Line protocol.
 process.env["ORIGINOS_WORKER_STDOUT_JSON_LINE"] = "1";
@@ -48,7 +49,7 @@ function coreModulePath(modulePath: string): string {
     if (!resolved) {
       throw new Error(`Development agent worker module not found: ${modulePath}; tried ${candidates.join(', ')}`);
     }
-    return pathToFileURL(resolved).href;
+    return toEsmModuleSpecifier(resolved);
   }
   if (!packagedCoreSrcDir) {
     throw new Error("ORIGINOS_CORE_SRC_DIR is required in packaged agent worker");
@@ -67,7 +68,7 @@ function coreModulePath(modulePath: string): string {
   if (!resolved) {
     throw new Error(`Packaged agent worker module not found: ${modulePath}; tried ${candidates.join(', ')}`);
   }
-  return pathToFileURL(resolved).href;
+  return toEsmModuleSpecifier(resolved);
 }
 
 function runtimeImport(modulePath: string): Promise<Record<string, unknown>> {
@@ -83,13 +84,13 @@ if (isPackaged) {
   const agentWorkerDir = packagedAgentWorkerDir as string;
 
   // 打包环境：从 extraResources 中导入
-  const pathsModule = await import(path.join(agentWorkerDir, 'lib', 'paths.js'));
+  const pathsModule = await import(toEsmModuleSpecifier(path.join(agentWorkerDir, 'lib', 'paths.js')));
   getMonorepoRoot = pathsModule.getMonorepoRoot;
 
-  const displayContentModule = await import(path.join(agentWorkerDir, 'lib', 'display-content.js'));
+  const displayContentModule = await import(toEsmModuleSpecifier(path.join(agentWorkerDir, 'lib', 'display-content.js')));
   extractDisplayContent = displayContentModule.extractDisplayContent;
 
-  const cognitiveSessionEndModule = await import(path.join(agentWorkerDir, 'cognitive-session-end.js'));
+  const cognitiveSessionEndModule = await import(toEsmModuleSpecifier(path.join(agentWorkerDir, 'cognitive-session-end.js')));
   flushCognitiveSessionEnd = cognitiveSessionEndModule.flushCognitiveSessionEnd;
 } else {
   // 开发环境：直接导入
