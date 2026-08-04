@@ -70,6 +70,8 @@ extraResources:
   # Agent Worker 和依赖
   - from: dist-electron/core/src/modules/collaboration-runtime/sandbox/agent-worker.mjs
     to: agent-worker/agent-worker.mjs
+  - from: dist-electron/core/src/modules/collaboration-runtime/sandbox/agent-worker-module-specifier.mjs
+    to: agent-worker/agent-worker-module-specifier.mjs
   - from: dist-electron/core/src/lib/paths.js
     to: agent-worker/lib/paths.js
   - from: dist-electron/core/src/lib/integrations/pi-agent/display-content.js
