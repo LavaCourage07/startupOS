@@ -12,7 +12,7 @@
 
 - [x] 3.1 `WIN-ESM-01-E`（串行，依赖 2.2）将 task branch commit 合并到 proposal integration branch，复核无越界依赖和无生成产物；写入范围：proposal worktree；负责角色：integration owner；完成证据：合并 commit 与干净状态。
 - [x] 3.2 `WIN-ESM-01-F`（串行，依赖 3.1）运行 `openspec validate fix-windows-multi-agent-esm-url --strict`，并建立 Story verification goal，目标为“通过 Story 9.6 中与 Windows 打包态多 Agent Worker 启动相关的测试 case”；写入范围：OpenSpec tasks/evidence；负责角色：QA owner；完成证据：strict validation 与 goal 验证结果。
-- [ ] 3.3 `WIN-ESM-01-G`（串行，依赖 3.2）合并 proposal 到 `dev` 并清理本次 task/proposal worktree；写入范围：Git refs/worktrees；负责角色：integration owner；完成证据：`dev` commit、工作树状态和清理记录。
+- [x] 3.3 `WIN-ESM-01-G`（串行，依赖 3.2）合并 proposal 到 `dev` 并清理本次 task/proposal worktree；写入范围：Git refs/worktrees；负责角色：integration owner；完成证据：`dev` commit、工作树状态和清理记录。
 
 ## 4. 验证证据
 
@@ -25,3 +25,4 @@
 - 定向 TypeScript ESLint：退出码 0；仅输出项目既有的 Next.js pages 目录提示。
 - 全量 desktop typecheck 的既有阻塞：`adm-zip` 模块/类型缺失、`archiver` 声明缺失及对应测试隐式 `any`，本次变更文件未产生 TypeScript 错误。
 - 当前执行环境为 Linux/WSL，无法运行真实 Windows 安装包；Windows CI 仍需执行 `verify:win-package` 并实际启动一次多 Agent Supervisor，剩余风险仅为平台安装包集成验证。
+- 首次 proposal 合并到 `dev`：`f69c6eb`；基础工作树仅保留任务开始前已有的 3 个未跟踪用户文件，本任务未修改它们。
