@@ -272,6 +272,10 @@ export class OriginOSAgent {
 	private deferredAgentEndEvent: AgentEvent | null = null;
 	private hiddenMessages = new WeakSet<object>();
 
+	private isCompletionGuardEnabled(): boolean {
+		return this.config?.completionGuardEnabled !== false;
+	}
+
 	/**
 	 * Agent 状态
 	 */
@@ -521,7 +525,7 @@ export class OriginOSAgent {
 	private routeAgentEvent(event: AgentEvent): void {
 		const eventType = event.type;
 
-		if (eventType === "tool_execution_end") {
+		if (this.isCompletionGuardEnabled() && eventType === "tool_execution_end") {
 			const status = getToolEventStatus(event);
 			this.completionToolTrace.push(
 				`${event.toolName}: ${status.failed ? "failed" : "succeeded"}${status.reason ? ` (${status.reason.slice(0, 500)})` : ""}`,
@@ -543,6 +547,7 @@ export class OriginOSAgent {
 		}
 
 		if (
+			this.isCompletionGuardEnabled() &&
 			eventType === "agent_end" &&
 			(this.pendingPromiseStop || this.pendingCompletionCandidate)
 		) {
@@ -552,7 +557,11 @@ export class OriginOSAgent {
 
 		this.emitUiEvent(event);
 
-		if (eventType !== "message_end" || event.message.role !== "assistant") {
+		if (
+			!this.isCompletionGuardEnabled() ||
+			eventType !== "message_end" ||
+			event.message.role !== "assistant"
+		) {
 			return;
 		}
 
@@ -824,6 +833,9 @@ export class OriginOSAgent {
 
 		await start();
 		this.throwIfModelStreamFailed();
+		if (!this.isCompletionGuardEnabled()) {
+			return;
+		}
 		await this.judgePendingCompletion();
 		let recoveryAttempt = 0;
 
@@ -1565,6 +1577,9 @@ export interface CreateOriginOSAgentParams {
 	 * 运行时 LLM 配置（可选，覆盖环境变量）
 	 */
 	llmConfig?: RuntimeLLMConfig;
+
+	/** 是否启用语义完成度检查与自动恢复，默认开启。 */
+	completionGuardEnabled?: boolean;
 }
 
 /**
@@ -1573,7 +1588,7 @@ export interface CreateOriginOSAgentParams {
 export function createOriginOSAgent(
 	params: CreateOriginOSAgentParams
 ): OriginOSAgent {
-	const { sessionId, variables, model, thinkingLevel, useBaseModel, healthMonitor, llmConfig } =
+	const { sessionId, variables, model, thinkingLevel, useBaseModel, healthMonitor, llmConfig, completionGuardEnabled } =
 		params;
 
 	// 获取配置状态
@@ -1658,6 +1673,7 @@ export function createOriginOSAgent(
 		projectContext,
 		thinkingLevel: (thinkingLevel || "low") as OriginOSAgentConfig['thinkingLevel'],
 		tools: [],
+		completionGuardEnabled,
 	};
 
 	// 返回未初始化的 Agent，用户需要调用 start() 方法

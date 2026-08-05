@@ -154,6 +154,29 @@ describe("OriginOSAgent", () => {
 	});
 
 	describe("Runtime environment and completion guard", () => {
+		it("does not run completion judging or recovery when the guard is disabled", async () => {
+			agent = new OriginOSAgent({
+				...basicConfig,
+				completionGuardEnabled: false,
+			});
+			const internalAgent = (agent as any).agent;
+			const judgeSpy = vi.spyOn(agent as any, "judgePendingCompletion");
+			const receivedEvents: any[] = [];
+			agent.subscribe((event) => receivedEvents.push(event));
+			vi.spyOn(internalAgent, "prompt").mockImplementationOnce(async () => {
+				emitAssistantStop(internalAgent, "你能描述一下日常工作流程吗？");
+			});
+
+			await agent.prompt("开始项目访谈");
+
+			expect(judgeSpy).not.toHaveBeenCalled();
+			expect(receivedEvents.some((event) =>
+				event.type === "message_end" &&
+				JSON.stringify(event.message?.content).includes("日常工作流程")
+			)).toBe(true);
+			expect(receivedEvents.some((event) => event.message?.completionFailure)).toBe(false);
+		});
+
 		it("injects OS, architecture, shell, path, and syntax constraints", () => {
 			agent = new OriginOSAgent(basicConfig);
 			const internalAgent = (agent as any).agent;
