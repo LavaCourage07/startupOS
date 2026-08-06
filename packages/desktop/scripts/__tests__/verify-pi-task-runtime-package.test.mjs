@@ -130,7 +130,13 @@ function writeFixture(options = {}) {
       recursive: true,
       filter(source) {
         const relativeEntries = path.relative(controlledSource, source).split(path.sep);
-        return !relativeEntries.includes('node_modules') && relativeEntries[0] !== 'test';
+        const relativePath = path.relative(controlledSource, source);
+        const isPackagingPrunedFile = options.packagingPruned && (
+          relativePath === 'README.md' || relativePath.endsWith('.d.ts')
+        );
+        return !relativeEntries.includes('node_modules') &&
+          relativeEntries[0] !== 'test' &&
+          !isPackagingPrunedFile;
       },
     });
     if (options.windowsLineEndings) rewriteTreeLineEndings(controlledDirectory, '\r\n');
@@ -139,6 +145,9 @@ function writeFixture(options = {}) {
       const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
       manifest.version = options.controlledVersion;
       writeJson(manifestPath, manifest);
+    }
+    if (options.controlledRuntimeDrift) {
+      fs.appendFileSync(path.join(controlledDirectory, 'src', 'store.js'), '\n// drift\n');
     }
   }
   return root;
@@ -191,6 +200,21 @@ describe('Pi Task Runtime package verification', () => {
       source: 'development',
       platform: 'path-alias-test',
       result: 'passed',
+    });
+  });
+
+  it('允许打包器裁剪受控 package 的非运行时文档和类型声明', async () => {
+    const report = await verifyRuntimeLayout({
+      baseDir: writeFixture({ packagingPruned: true }),
+      repositoryRoot,
+      platform: 'windows-x64',
+    });
+
+    expect(report).toMatchObject({
+      result: 'passed',
+      controlledTaskPackage: {
+        fingerprint: '310962b7ebd6dbab6fca89d2ba734c78cdecb940e808183069343798178216a8',
+      },
     });
   });
 
@@ -272,7 +296,7 @@ describe('Pi Task Runtime package verification', () => {
   });
 
   it('验证 ASAR inventory 和提取后的真实模块加载', async () => {
-    const layout = writeFixture();
+    const layout = writeFixture({ packagingPruned: true });
     expect(fs.existsSync(path.join(
       layout,
       'node_modules',
@@ -323,6 +347,12 @@ describe('Pi Task Runtime package verification', () => {
       code: 'VERSION_MISMATCH',
       details: { module: '@originos/pi-tasks', expectedVersion: '0.2.0-originos.1' },
     });
+  });
+
+  it('拒绝受控 package 的可执行运行时漂移', async () => {
+    await expect(verifyRuntimeLayout({
+      baseDir: writeFixture({ controlledRuntimeDrift: true }), repositoryRoot,
+    })).rejects.toMatchObject({ code: 'PACKAGE_FINGERPRINT_MISMATCH' });
   });
 
   it('拒绝 Adapter public export 漂移', async () => {

@@ -16,7 +16,7 @@ const TASK_RUNTIME_EXPORT = '@originos/pi-agent-adapter/task-runtime';
 const CONTROLLED_TASK_PACKAGE = '@originos/pi-tasks';
 const CONTROLLED_TASK_VERSION = '0.2.0-originos.1';
 const TASK_PACKAGE_FINGERPRINT =
-  'c900eb1fc776fd0c2ed28d076374a0253d6cb01963590f0930591725b9bb99e0';
+  '310962b7ebd6dbab6fca89d2ba734c78cdecb940e808183069343798178216a8';
 const TASK_SCHEMA_FINGERPRINT =
   'originos-pi-tasks/v1:event-v2:cas:receipt:evidence-gate-no-force';
 const PATCH_SET_FINGERPRINT =
@@ -35,15 +35,14 @@ const RUNTIME_PATCHES = [
     sha256: '7d70e7b71db29280df41ddf1f8701c9ae56c98e9e48b85ee11700c4ca66c11b4',
   },
 ];
-const TASK_PACKAGE_FILES = [
-  'LICENSE', 'README.md', 'UPSTREAM.md', 'index.d.ts', 'index.js', 'package.json',
-  'src/commands.d.ts', 'src/commands.js', 'src/contracts.d.ts', 'src/contracts.js',
-  'src/ids.d.ts', 'src/ids.js', 'src/model.d.ts', 'src/model.js', 'src/pi-types.d.ts',
-  'src/pi-types.js', 'src/reducer.d.ts', 'src/reducer.js', 'src/render.d.ts',
-  'src/render.js', 'src/schema.d.ts', 'src/schema.js', 'src/state-events.d.ts',
-  'src/state-events.js', 'src/store.d.ts', 'src/store.js', 'src/tools.d.ts',
-  'src/tools.js', 'src/widget.d.ts', 'src/widget.js', 'upstream/index.js',
-  'upstream/reducer.js',
+// electron-builder intentionally prunes documentation and TypeScript declarations from
+// production dependencies. Fingerprint only files that can affect the packaged runtime;
+// version and public exports are verified separately below.
+const TASK_PACKAGE_RUNTIME_FILES = [
+  'index.js', 'package.json', 'src/commands.js', 'src/contracts.js', 'src/ids.js',
+  'src/model.js', 'src/pi-types.js', 'src/reducer.js', 'src/render.js',
+  'src/schema.js', 'src/state-events.js', 'src/store.js', 'src/tools.js',
+  'src/widget.js', 'upstream/index.js', 'upstream/reducer.js',
 ];
 const EXPECTED_TASK_RUNTIME_EXPORTS = [
   'DEFAULT_SANITIZE_LIMITS', 'PI_TASK_COMPATIBILITY_REQUIREMENTS',
@@ -115,6 +114,16 @@ function resolveRuntimePath(targetPath, label) {
     return fail('LAYOUT_INVALID', `Runtime ${label} cannot be resolved`, {
       targetPath,
     });
+  }
+}
+
+function removeTemporaryDirectory(directory) {
+  try {
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch (error) {
+    console.warn(
+      `[verify-pi-task-runtime-package] temporary cleanup skipped: ${String(error?.code || 'unknown')}`,
+    );
   }
 }
 
@@ -207,7 +216,7 @@ function verifyDependencyClosure(packageJsonPath, baseDir, repositoryRoot, sourc
 
 function verifyTaskPackageFingerprint(packageJsonPath) {
   const packageDir = path.dirname(packageJsonPath);
-  const manifest = TASK_PACKAGE_FILES.map((file) => {
+  const manifest = TASK_PACKAGE_RUNTIME_FILES.map((file) => {
     const filePath = path.join(packageDir, file);
     if (!fs.existsSync(filePath)) {
       fail('PACKAGE_FINGERPRINT_MISMATCH', `Controlled Task package file is missing: ${file}`);
@@ -415,7 +424,7 @@ async function verifyAsarRuntime(options) {
       platform,
     });
   } finally {
-    fs.rmSync(extractDir, { recursive: true, force: true });
+    removeTemporaryDirectory(extractDir);
   }
 }
 
