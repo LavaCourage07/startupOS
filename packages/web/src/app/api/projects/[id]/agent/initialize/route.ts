@@ -13,7 +13,7 @@ import { getDataRoot, getTemplatesDir } from '@originos/core/lib/paths';
 import {
   PROJECT_DEFAULT_SKILLS,
   provisionProjectSkills,
-} from '@originos/core/lib/integrations/pi-agent/project-agent/project-skill-provisioning';
+} from '@originos/core/lib/integrations/pi-agent/project-agent';
 
 export async function POST(
   _request: NextRequest,
