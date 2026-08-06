@@ -10,8 +10,16 @@ import { afterEach, describe, expect, it } from 'vitest';
 const require = createRequire(import.meta.url);
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(testDirectory, '..', '..', '..', '..');
-const { verifyAsarRuntime, verifyRuntimeLayout } = require('../verify-pi-task-runtime-package.js');
+const {
+  assertRuntimeResolutionBoundary,
+  verifyAsarRuntime,
+  verifyRuntimeLayout,
+} = require('../verify-pi-task-runtime-package.js');
 const temporaryDirectories = [];
+const runtimePatchFiles = [
+  'patches/@earendil-works__pi-agent-core@0.80.10.patch',
+  'patches/@earendil-works__pi-coding-agent@0.80.10.patch',
+];
 
 const taskRuntimeExports = [
   'DEFAULT_SANITIZE_LIMITS', 'PI_TASK_COMPATIBILITY_REQUIREMENTS',
@@ -40,6 +48,31 @@ function writePackage(root, packageName, manifest, source) {
   writeJson(path.join(directory, 'package.json'), manifest);
   fs.writeFileSync(path.join(directory, 'index.cjs'), source);
   return directory;
+}
+
+function withLineEnding(value, lineEnding) {
+  return value.replace(/\r\n?/g, '\n').replace(/\n/g, lineEnding);
+}
+
+function rewriteTreeLineEndings(root, lineEnding) {
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const entryPath = path.join(root, entry.name);
+    if (entry.isDirectory()) rewriteTreeLineEndings(entryPath, lineEnding);
+    else if (entry.isFile()) {
+      fs.writeFileSync(entryPath, withLineEnding(fs.readFileSync(entryPath, 'utf8'), lineEnding));
+    }
+  }
+}
+
+function writePatchRepository(lineEnding = '\n') {
+  const root = temporaryDirectory('originos-pi-task-repository-');
+  for (const patchFile of runtimePatchFiles) {
+    const source = path.join(repositoryRoot, patchFile);
+    const target = path.join(root, patchFile);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, withLineEnding(fs.readFileSync(source, 'utf8'), lineEnding));
+  }
+  return root;
 }
 
 function taskRuntimeSource() {
@@ -91,13 +124,16 @@ function writeFixture(options = {}) {
   }, 'exports.AgentSession = class AgentSession { invokeRegisteredTool() {} };\n');
 
   if (!options.missingControlledPackage) {
+    const controlledSource = path.join(repositoryRoot, 'packages', 'pi-tasks');
     const controlledDirectory = path.join(root, 'node_modules', '@originos', 'pi-tasks');
-    fs.cpSync(path.join(repositoryRoot, 'packages', 'pi-tasks'), controlledDirectory, {
+    fs.cpSync(controlledSource, controlledDirectory, {
       recursive: true,
       filter(source) {
-        return !source.includes(`${path.sep}test${path.sep}`);
+        const relativeEntries = path.relative(controlledSource, source).split(path.sep);
+        return !relativeEntries.includes('node_modules') && relativeEntries[0] !== 'test';
       },
     });
+    if (options.windowsLineEndings) rewriteTreeLineEndings(controlledDirectory, '\r\n');
     if (options.controlledVersion) {
       const manifestPath = path.join(controlledDirectory, 'package.json');
       const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
@@ -158,26 +194,68 @@ describe('Pi Task Runtime package verification', () => {
     });
   });
 
-  it('拒绝通过符号链接逃逸到布局外的依赖', async () => {
+  it('将 Windows CRLF 文本规范化为稳定指纹', async () => {
+    const report = await verifyRuntimeLayout({
+      baseDir: writeFixture({ windowsLineEndings: true }),
+      repositoryRoot: writePatchRepository('\r\n'),
+      platform: 'windows-crlf-test',
+    });
+
+    expect(report).toMatchObject({
+      source: 'development',
+      platform: 'windows-crlf-test',
+      result: 'passed',
+    });
+  });
+
+  it('不将裸 CR 文本视为等价指纹', async () => {
+    await expect(verifyRuntimeLayout({
+      baseDir: writeFixture(),
+      repositoryRoot: writePatchRepository('\r'),
+      platform: 'bare-cr-test',
+    })).rejects.toMatchObject({ code: 'PATCH_MISMATCH' });
+  });
+
+  it('拒绝真实路径位于布局外的依赖', () => {
     const layout = writeFixture();
     const externalRoot = temporaryDirectory('originos-pi-task-external-');
     const externalPackage = writePackage(externalRoot, '@earendil-works/pi-agent-core', {
       name: '@earendil-works/pi-agent-core', version: '0.80.10', main: './index.cjs',
     }, 'exports.invokeRegisteredToolCall = function invokeRegisteredToolCall() {};\n');
-    const linkedPackage = path.join(
-      layout,
-      'node_modules',
-      '@earendil-works',
-      'pi-agent-core',
-    );
+
+    let error;
+    try {
+      assertRuntimeResolutionBoundary(
+        path.join(externalPackage, 'package.json'),
+        layout,
+        repositoryRoot,
+        'development',
+      );
+    } catch (caughtError) {
+      error = caughtError;
+    }
+    expect(error).toMatchObject({
+      code: 'MODULE_OUTSIDE_LAYOUT',
+      details: { modulePath: fs.realpathSync(path.join(externalPackage, 'package.json')) },
+    });
+  });
+
+  it('通过真实模块解析拒绝链接外逃依赖', async () => {
+    const layout = writeFixture();
+    const externalRoot = temporaryDirectory('originos-pi-task-symlink-external-');
+    const externalPackage = writePackage(externalRoot, '@earendil-works/pi-agent-core', {
+      name: '@earendil-works/pi-agent-core', version: '0.80.10', main: './index.cjs',
+    }, 'exports.invokeRegisteredToolCall = function invokeRegisteredToolCall() {};\n');
+    const linkedPackage = path.join(layout, 'node_modules', '@earendil-works', 'pi-agent-core');
     fs.rmSync(linkedPackage, { recursive: true, force: true });
-    fs.symlinkSync(externalPackage, linkedPackage, process.platform === 'win32' ? 'junction' : 'dir');
+    fs.symlinkSync(
+      externalPackage,
+      linkedPackage,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
 
     await expect(verifyRuntimeLayout({ baseDir: layout, repositoryRoot }))
-      .rejects.toMatchObject({
-        code: 'MODULE_OUTSIDE_LAYOUT',
-        details: { modulePath: fs.realpathSync(path.join(externalPackage, 'package.json')) },
-      });
+      .rejects.toMatchObject({ code: 'MODULE_OUTSIDE_LAYOUT' });
   });
 
   it('将悬空布局别名报告为结构化布局错误', async () => {
@@ -195,10 +273,41 @@ describe('Pi Task Runtime package verification', () => {
 
   it('验证 ASAR inventory 和提取后的真实模块加载', async () => {
     const layout = writeFixture();
+    expect(fs.existsSync(path.join(
+      layout,
+      'node_modules',
+      '@originos',
+      'pi-tasks',
+      'node_modules',
+    ))).toBe(false);
     const asarPath = path.join(temporaryDirectory('originos-pi-task-asar-'), 'app.asar');
     await asar.createPackage(layout, asarPath);
+    const entries = asar.listPackage(asarPath, { isPack: true })
+      .map((entry) => entry.replace(/\\/g, '/'));
+    expect(entries.some((entry) => (
+      entry.includes('node_modules/@originos/pi-tasks/node_modules/')
+    ))).toBe(false);
     const report = await verifyAsarRuntime({ asarPath, platform: 'windows-x64', repositoryRoot });
     expect(report).toMatchObject({ source: 'asar', platform: 'windows-x64', result: 'passed' });
+  });
+
+  it('拒绝 ASAR 中受控任务包的嵌套 workspace 依赖', async () => {
+    const layout = writeFixture();
+    writeJson(path.join(
+      layout,
+      'node_modules',
+      '@originos',
+      'pi-tasks',
+      'src',
+      'Node_Modules',
+      'unexpected-runtime',
+      'package.json',
+    ), { name: 'unexpected-runtime', version: '1.0.0' });
+    const asarPath = path.join(temporaryDirectory('originos-pi-task-nested-asar-'), 'app.asar');
+    await asar.createPackage(layout, asarPath);
+
+    await expect(verifyAsarRuntime({ asarPath, platform: 'windows-x64', repositoryRoot }))
+      .rejects.toMatchObject({ code: 'LAYOUT_INVALID' });
   });
 
   it('缺少受控 package 时 fail closed', async () => {

@@ -74,6 +74,11 @@ function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
 
+function sha256TextFile(filePath) {
+  const normalizedText = fs.readFileSync(filePath, 'utf8').replace(/\r\n/g, '\n');
+  return sha256(normalizedText);
+}
+
 function packageNameParts(packageName) {
   return packageName.startsWith('@') ? packageName.split('/').slice(0, 2) : [packageName];
 }
@@ -146,7 +151,7 @@ function verifyPatchSet(repositoryRoot) {
         module: patch.packageName,
       });
     }
-    const actual = sha256(fs.readFileSync(patchPath));
+    const actual = sha256TextFile(patchPath);
     if (actual !== patch.sha256) {
       fail('PATCH_MISMATCH', `Runtime patch hash mismatch: ${patch.packageName}`, {
         module: patch.packageName,
@@ -207,7 +212,7 @@ function verifyTaskPackageFingerprint(packageJsonPath) {
     if (!fs.existsSync(filePath)) {
       fail('PACKAGE_FINGERPRINT_MISMATCH', `Controlled Task package file is missing: ${file}`);
     }
-    return `${sha256(fs.readFileSync(filePath))}  ${file}\n`;
+    return `${sha256TextFile(filePath)}  ${file}\n`;
   }).join('');
   const actual = sha256(manifest);
   if (actual !== TASK_PACKAGE_FINGERPRINT) {
@@ -378,6 +383,18 @@ async function verifyAsarRuntime(options) {
   const { asarPath, platform, repositoryRoot } = options;
   if (!fs.existsSync(asarPath)) fail('ASAR_MISSING', 'Packaged runtime ASAR is missing');
   const entries = new Set(asar.listPackage(asarPath, { isPack: true }).map(normalizeAsarEntry));
+  const nestedTaskDependency = [...entries].find((entry) => {
+    const segments = entry.toLowerCase().split('/');
+    return segments[0] === 'node_modules' &&
+      segments[1] === '@originos' &&
+      segments[2] === 'pi-tasks' &&
+      segments.slice(3).includes('node_modules');
+  });
+  if (nestedTaskDependency) {
+    fail('LAYOUT_INVALID', 'Packaged Task Runtime contains nested workspace dependencies', {
+      entry: nestedTaskDependency,
+    });
+  }
   for (const entry of [
     'node_modules/@originos/pi-agent-adapter/package.json',
     'node_modules/@originos/pi-agent-adapter/task-runtime.js',
@@ -450,6 +467,7 @@ if (require.main === module) {
 module.exports = {
   ADAPTER_PACKAGE,
   ADAPTER_VERSION,
+  assertRuntimeResolutionBoundary,
   CONTROLLED_TASK_PACKAGE,
   CONTROLLED_TASK_VERSION,
   PiTaskRuntimeVerificationError,
