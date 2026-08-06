@@ -103,13 +103,26 @@ function isPathWithin(parent, candidate) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+function resolveRuntimePath(targetPath, label) {
+  try {
+    return fs.realpathSync(targetPath);
+  } catch {
+    return fail('LAYOUT_INVALID', `Runtime ${label} cannot be resolved`, {
+      targetPath,
+    });
+  }
+}
+
 function assertRuntimeResolutionBoundary(packageJsonPath, baseDir, repositoryRoot, source) {
-  const developmentRoot = source === 'development' && isPathWithin(repositoryRoot, baseDir)
-    ? repositoryRoot
-    : baseDir;
-  if (!isPathWithin(developmentRoot, packageJsonPath)) {
+  const resolvedBaseDir = resolveRuntimePath(baseDir, 'layout root');
+  const resolvedRepositoryRoot = resolveRuntimePath(repositoryRoot, 'repository root');
+  const resolvedPackageJsonPath = resolveRuntimePath(packageJsonPath, 'package path');
+  const developmentRoot = source === 'development' && isPathWithin(resolvedRepositoryRoot, resolvedBaseDir)
+    ? resolvedRepositoryRoot
+    : resolvedBaseDir;
+  if (!isPathWithin(developmentRoot, resolvedPackageJsonPath)) {
     fail('MODULE_OUTSIDE_LAYOUT', 'Runtime dependency resolved outside the verified layout', {
-      modulePath: packageJsonPath,
+      modulePath: resolvedPackageJsonPath,
       source,
     });
   }
@@ -276,11 +289,13 @@ async function verifyRuntimeLayout(options) {
     source = 'development',
     platform = `${process.platform}-${process.arch}`,
   } = options;
-  const basePackageJson = path.join(baseDir, 'package.json');
+  const resolvedBaseDir = resolveRuntimePath(baseDir, 'layout root');
+  const resolvedRepositoryRoot = resolveRuntimePath(repositoryRoot, 'repository root');
+  const basePackageJson = path.join(resolvedBaseDir, 'package.json');
   if (!fs.existsSync(basePackageJson)) fail('LAYOUT_INVALID', 'Runtime layout does not contain package.json');
   const baseRequire = createRequire(basePackageJson);
   const adapterPackageJsonPath = findPackageJson(ADAPTER_PACKAGE, baseRequire);
-  assertRuntimeResolutionBoundary(adapterPackageJsonPath, baseDir, repositoryRoot, source);
+  assertRuntimeResolutionBoundary(adapterPackageJsonPath, resolvedBaseDir, resolvedRepositoryRoot, source);
   const adapterManifest = readPackageJson(adapterPackageJsonPath, ADAPTER_PACKAGE);
   assertVersion(ADAPTER_PACKAGE, adapterManifest.version, ADAPTER_VERSION);
   if (!adapterManifest.exports?.['./task-runtime']) {
@@ -300,7 +315,7 @@ async function verifyRuntimeLayout(options) {
 
   const adapterRequire = createRequire(adapterPackageJsonPath);
   const controlledPackageJsonPath = findPackageJson(CONTROLLED_TASK_PACKAGE, adapterRequire);
-  assertRuntimeResolutionBoundary(controlledPackageJsonPath, baseDir, repositoryRoot, source);
+  assertRuntimeResolutionBoundary(controlledPackageJsonPath, resolvedBaseDir, resolvedRepositoryRoot, source);
   const controlledManifest = readPackageJson(controlledPackageJsonPath, CONTROLLED_TASK_PACKAGE);
   assertVersion(CONTROLLED_TASK_PACKAGE, controlledManifest.version, CONTROLLED_TASK_VERSION);
   const controlledRuntime = await importFromPackage(
@@ -311,8 +326,8 @@ async function verifyRuntimeLayout(options) {
   const patchSet = verifyPatchSet(repositoryRoot);
   const dependencyClosure = verifyDependencyClosure(
     adapterPackageJsonPath,
-    baseDir,
-    repositoryRoot,
+    resolvedBaseDir,
+    resolvedRepositoryRoot,
     source,
   );
   const packageFingerprint = verifyTaskPackageFingerprint(controlledPackageJsonPath);

@@ -139,6 +139,60 @@ describe('Pi Task Runtime package verification', () => {
     expect(report.transitiveDependencies.sha256).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it('允许布局根目录使用指向真实路径的别名', async () => {
+    const layout = writeFixture();
+    const aliasRoot = temporaryDirectory('originos-pi-task-alias-');
+    const aliasPath = path.join(aliasRoot, 'runtime-layout');
+    fs.symlinkSync(layout, aliasPath, process.platform === 'win32' ? 'junction' : 'dir');
+
+    const report = await verifyRuntimeLayout({
+      baseDir: aliasPath,
+      repositoryRoot,
+      platform: 'path-alias-test',
+    });
+
+    expect(report).toMatchObject({
+      source: 'development',
+      platform: 'path-alias-test',
+      result: 'passed',
+    });
+  });
+
+  it('拒绝通过符号链接逃逸到布局外的依赖', async () => {
+    const layout = writeFixture();
+    const externalRoot = temporaryDirectory('originos-pi-task-external-');
+    const externalPackage = writePackage(externalRoot, '@earendil-works/pi-agent-core', {
+      name: '@earendil-works/pi-agent-core', version: '0.80.10', main: './index.cjs',
+    }, 'exports.invokeRegisteredToolCall = function invokeRegisteredToolCall() {};\n');
+    const linkedPackage = path.join(
+      layout,
+      'node_modules',
+      '@earendil-works',
+      'pi-agent-core',
+    );
+    fs.rmSync(linkedPackage, { recursive: true, force: true });
+    fs.symlinkSync(externalPackage, linkedPackage, process.platform === 'win32' ? 'junction' : 'dir');
+
+    await expect(verifyRuntimeLayout({ baseDir: layout, repositoryRoot }))
+      .rejects.toMatchObject({
+        code: 'MODULE_OUTSIDE_LAYOUT',
+        details: { modulePath: fs.realpathSync(path.join(externalPackage, 'package.json')) },
+      });
+  });
+
+  it('将悬空布局别名报告为结构化布局错误', async () => {
+    const aliasRoot = temporaryDirectory('originos-pi-task-dangling-');
+    const missingLayout = path.join(aliasRoot, 'missing-layout');
+    const aliasPath = path.join(aliasRoot, 'runtime-layout');
+    fs.symlinkSync(missingLayout, aliasPath, process.platform === 'win32' ? 'junction' : 'dir');
+
+    await expect(verifyRuntimeLayout({ baseDir: aliasPath, repositoryRoot }))
+      .rejects.toMatchObject({
+        code: 'LAYOUT_INVALID',
+        details: { targetPath: aliasPath },
+      });
+  });
+
   it('验证 ASAR inventory 和提取后的真实模块加载', async () => {
     const layout = writeFixture();
     const asarPath = path.join(temporaryDirectory('originos-pi-task-asar-'), 'app.asar');
