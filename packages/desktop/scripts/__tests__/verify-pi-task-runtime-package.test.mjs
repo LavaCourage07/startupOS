@@ -139,6 +139,16 @@ function writeFixture(options = {}) {
           !isPackagingPrunedFile;
       },
     });
+    if (options.packagingPruned) {
+      const manifestPath = path.join(controlledDirectory, 'package.json');
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      delete manifest.description;
+      delete manifest.files;
+      delete manifest.scripts;
+      delete manifest.devDependencies;
+      delete manifest.license;
+      writeJson(manifestPath, manifest);
+    }
     if (options.windowsLineEndings) rewriteTreeLineEndings(controlledDirectory, '\r\n');
     if (options.controlledVersion) {
       const manifestPath = path.join(controlledDirectory, 'package.json');
@@ -213,7 +223,7 @@ describe('Pi Task Runtime package verification', () => {
     expect(report).toMatchObject({
       result: 'passed',
       controlledTaskPackage: {
-        fingerprint: '310962b7ebd6dbab6fca89d2ba734c78cdecb940e808183069343798178216a8',
+        fingerprint: '4a80ab2874d1e39a6cf981f8c4baacddb8121dad4d853d8568b30cdcaf007d28',
       },
     });
   });

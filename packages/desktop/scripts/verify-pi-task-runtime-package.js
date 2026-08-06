@@ -16,7 +16,7 @@ const TASK_RUNTIME_EXPORT = '@originos/pi-agent-adapter/task-runtime';
 const CONTROLLED_TASK_PACKAGE = '@originos/pi-tasks';
 const CONTROLLED_TASK_VERSION = '0.2.0-originos.1';
 const TASK_PACKAGE_FINGERPRINT =
-  '310962b7ebd6dbab6fca89d2ba734c78cdecb940e808183069343798178216a8';
+  '4a80ab2874d1e39a6cf981f8c4baacddb8121dad4d853d8568b30cdcaf007d28';
 const TASK_SCHEMA_FINGERPRINT =
   'originos-pi-tasks/v1:event-v2:cas:receipt:evidence-gate-no-force';
 const PATCH_SET_FINGERPRINT =
@@ -35,14 +35,14 @@ const RUNTIME_PATCHES = [
     sha256: '7d70e7b71db29280df41ddf1f8701c9ae56c98e9e48b85ee11700c4ca66c11b4',
   },
 ];
-// electron-builder intentionally prunes documentation and TypeScript declarations from
-// production dependencies. Fingerprint only files that can affect the packaged runtime;
-// version and public exports are verified separately below.
+// electron-builder intentionally prunes documentation and TypeScript declarations and may
+// normalize package manifests for production dependencies. Fingerprint executable files only;
+// the manifest version, public exports, and loaded runtime contract are verified separately.
 const TASK_PACKAGE_RUNTIME_FILES = [
-  'index.js', 'package.json', 'src/commands.js', 'src/contracts.js', 'src/ids.js',
-  'src/model.js', 'src/pi-types.js', 'src/reducer.js', 'src/render.js',
-  'src/schema.js', 'src/state-events.js', 'src/store.js', 'src/tools.js',
-  'src/widget.js', 'upstream/index.js', 'upstream/reducer.js',
+  'index.js', 'src/commands.js', 'src/contracts.js', 'src/ids.js', 'src/model.js',
+  'src/pi-types.js', 'src/reducer.js', 'src/render.js', 'src/schema.js',
+  'src/state-events.js', 'src/store.js', 'src/tools.js', 'src/widget.js',
+  'upstream/index.js', 'upstream/reducer.js',
 ];
 const EXPECTED_TASK_RUNTIME_EXPORTS = [
   'DEFAULT_SANITIZE_LIMITS', 'PI_TASK_COMPATIBILITY_REQUIREMENTS',
