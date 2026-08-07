@@ -470,23 +470,42 @@ export class AgentSessionService {
                 processHealthMonitor.setAgentActivity(request.sessionId, 'model_wait');
                 break;
               case 'message_end': {
-                const msg = event['message'] as { role?: string; content?: unknown } | undefined;
+                const msg = event['message'] as {
+                  role?: string;
+                  content?: unknown;
+                  completionFailure?: boolean;
+                } | undefined;
                 if (msg?.role === 'assistant' && msg.content) {
                   const extracted = extractTextContent(msg.content);
+                  if (msg.completionFailure) {
+                    hasError = true;
+                    errorMessage = extracted || '任务未能自动完成';
+                    break;
+                  }
                   if (extracted) assistantContent = reconcileFinalStreamContent(assistantContent, extracted);
                 }
                 break;
               }
               case 'agent_end': {
                 processHealthMonitor.setAgentActivity(request.sessionId, 'completion_check');
-                const msg = event['message'] as { role?: string; content?: unknown } | undefined;
-                if (msg?.role === 'assistant' && msg.content) {
+                const msg = event['message'] as {
+                  role?: string;
+                  content?: unknown;
+                  completionFailure?: boolean;
+                } | undefined;
+                if (msg?.role === 'assistant' && msg.content && !msg.completionFailure) {
                   const extracted = extractTextContent(msg.content);
                   if (extracted) assistantContent = reconcileFinalStreamContent(assistantContent, extracted);
                 }
-                const msgs = event['messages'] as { role?: string; content?: unknown }[] | undefined;
+                const msgs = event['messages'] as {
+                  role?: string;
+                  content?: unknown;
+                  completionFailure?: boolean;
+                }[] | undefined;
                 if (msgs && Array.isArray(msgs)) {
-                  const lastAssistant = [...msgs].reverse().find((m) => m?.role === 'assistant');
+                  const lastAssistant = [...msgs]
+                    .reverse()
+                    .find((m) => m?.role === 'assistant' && !m.completionFailure);
                   if (lastAssistant?.content) {
                     const extracted = extractTextContent(lastAssistant.content);
                     if (extracted) assistantContent = reconcileFinalStreamContent(assistantContent, extracted);
@@ -524,8 +543,11 @@ export class AgentSessionService {
             try {
               const state = await agent.getSessionState();
               const msgs = state.messages || [];
-              const last = msgs[msgs.length - 1];
-              if (last?.role === 'assistant' && last.content) {
+              const last = [...msgs].reverse().find((message) => {
+                const candidate = message as typeof message & { completionFailure?: boolean };
+                return candidate.role === 'assistant' && !candidate.completionFailure;
+              }) as { content?: unknown } | undefined;
+              if (last?.content) {
                 assistantContent = extractTextContent(last.content);
               }
             } catch {}
@@ -543,7 +565,11 @@ export class AgentSessionService {
 
           return {
             success: true,
-            data: { userMessage, assistantMessage },
+            data: {
+              userMessage,
+              assistantMessage,
+              ...(hasError ? { completionFailure: errorMessage } : {}),
+            },
             timestamp: new Date().toISOString(),
           };
         } catch (error) {
@@ -647,6 +673,7 @@ export class AgentSessionService {
 
           let assistantContent = '';
           let assistantMessageSent = false;
+          let completionFailed = false;
 
           const unsubscribe = agent.subscribe((event: { type: string; [key: string]: unknown }) => {
             switch (event.type) {
@@ -709,6 +736,14 @@ export class AgentSessionService {
                     completionFailure: msg.completionFailure === true,
                   });
                   if (extracted) {
+                    if (msg.completionFailure) {
+                      completionFailed = true;
+                      sendToRenderer('error', {
+                        message: extracted,
+                        recoverable: true,
+                      });
+                      break;
+                    }
                     const transition = applyAssistantMessageEnd(
                       { content: assistantContent, sent: assistantMessageSent },
                       {
@@ -722,7 +757,6 @@ export class AgentSessionService {
                       sendToRenderer('assistant_message', {
                         content: assistantContent,
                         isStreaming: false,
-                        completionFailure: msg.completionFailure === true,
                       });
                     }
                   }
@@ -732,14 +766,24 @@ export class AgentSessionService {
               case 'agent_end': {
                 processHealthMonitor.setAgentActivity(request.sessionId, 'completion_check');
                 if (assistantMessageSent) break;
-                const msg = event['message'] as { role?: string; content?: unknown } | undefined;
-                if (msg?.role === 'assistant' && msg.content) {
+                const msg = event['message'] as {
+                  role?: string;
+                  content?: unknown;
+                  completionFailure?: boolean;
+                } | undefined;
+                if (msg?.role === 'assistant' && msg.content && !msg.completionFailure) {
                   const extracted = extractTextContent(msg.content);
                   if (extracted) assistantContent = reconcileFinalStreamContent(assistantContent, extracted);
                 }
-                const msgs = event['messages'] as { role?: string; content?: unknown }[] | undefined;
+                const msgs = event['messages'] as {
+                  role?: string;
+                  content?: unknown;
+                  completionFailure?: boolean;
+                }[] | undefined;
                 if (msgs && Array.isArray(msgs)) {
-                  const lastAssistant = [...msgs].reverse().find((m) => m?.role === 'assistant');
+                  const lastAssistant = [...msgs]
+                    .reverse()
+                    .find((m) => m?.role === 'assistant' && !m.completionFailure);
                   if (lastAssistant?.content) {
                     const extracted = extractTextContent(lastAssistant.content);
                     if (extracted) assistantContent = reconcileFinalStreamContent(assistantContent, extracted);
@@ -779,7 +823,7 @@ export class AgentSessionService {
                 content: assistantContent,
               }, request.projectId);
             }
-            sendToRenderer('done', { content: assistantContent });
+            sendToRenderer('done', { content: assistantContent, failed: completionFailed });
             batcher.dispose();
           }).catch(async (err: unknown) => {
             unsubscribe();

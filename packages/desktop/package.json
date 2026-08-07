@@ -1,6 +1,6 @@
 {
   "name": "@originos/desktop",
-  "version": "0.1.46",
+  "version": "0.1.47",
   "private": true,
   "main": "dist-electron/desktop/src/main/main.js",
   "scripts": {
@@ -17,6 +17,8 @@
     "dist:mac": "pnpm dist:mac:app && NODE_OPTIONS= node scripts/create-mac-dmg.js",
     "dist:mac:publish": "pnpm build:app && electron-builder --config electron-builder.yml --mac --arm64 --x64 --publish always",
     "verify:mac-package": "node scripts/verify-mac-package.js",
+    "verify:pi-task-runtime": "node scripts/verify-pi-task-runtime-package.js --development",
+    "test:pi-task-runtime-package": "vitest run scripts/__tests__/verify-pi-task-runtime-package.test.mjs",
     "verify:mac-signing": "node scripts/verify-mac-signing.js",
     "verify:workspace-upload": "node scripts/verify-workspace-upload-ipc.js",
     "bump-version": "node scripts/bump-release-version.js",
