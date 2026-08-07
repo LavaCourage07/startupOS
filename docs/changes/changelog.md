@@ -2,6 +2,12 @@
 
 ---
 
+## 2026-08-07 — release：OriginOS CE 0.1.47
+
+**类型**：release
+**影响模块**：`.github/workflows/desktop-release.yml`, `packages/core/src/lib/integrations/pi-agent/`, `packages/desktop/`, `packages/agent/`, `docs/changes/releases/v0.1.47/changelog.md`
+**摘要**：发布 OriginOS CE `0.1.47`。修复 Windows 多 Agent worker、CompletionGuard、项目技能补齐和受控 Pi Task Runtime 校验；发布流程每次成功发布都会创建或更新对应的 GitHub Release，并不再要求 `.zip.blockmap`。
+
 ## 2026-07-30 — fix：恢复窗体历史会话与执行上下文
 
 **类型**：fix

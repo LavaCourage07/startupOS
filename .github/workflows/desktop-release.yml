@@ -251,7 +251,7 @@ jobs:
             release/OriginOS CE-*-x64.zip
 
   publish:
-    name: Publish Qiniu
+    name: Publish Qiniu and GitHub Release
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -355,11 +355,17 @@ jobs:
         run: pnpm publish:qiniu
 
       - name: Publish GitHub Release
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="$(node -p "require('./packages/desktop/package.json').version")"
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == refs/tags/desktop-v* ]]; then
+            RELEASE_TAG="$GITHUB_REF_NAME"
+            CREATE_ARGS=(--verify-tag)
+          else
+            RELEASE_TAG="desktop-v${VERSION}"
+            CREATE_ARGS=(--target "$GITHUB_SHA")
+          fi
           CHANGELOG="docs/changes/releases/v${VERSION}/changelog.md"
           PACKAGES=(
             "release/OriginOS CE-${VERSION}-x64.exe"
@@ -389,14 +395,14 @@ jobs:
           shasum -a 256 "${PACKAGES[@]}" > release/SHA256SUMS.txt
           ASSETS=("${PACKAGES[@]}" "${SUPPORTING_ASSETS[@]}" "release/SHA256SUMS.txt")
 
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME" \
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
               --title "OriginOS CE v${VERSION}" \
               --notes-file "$CHANGELOG"
-            gh release upload "$GITHUB_REF_NAME" "${ASSETS[@]}" --clobber
+            gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "${ASSETS[@]}" \
-              --verify-tag \
+            gh release create "$RELEASE_TAG" "${ASSETS[@]}" \
+              "${CREATE_ARGS[@]}" \
               --title "OriginOS CE v${VERSION}" \
               --notes-file "$CHANGELOG"
           fi
