@@ -250,11 +250,30 @@ export class AgentTaskRuntimeCoordinator {
 		await this.publishState();
 
 		try {
-			await this.options.agent.prompt(
-				internalUserMessage(this.buildPlanningPrompt(request)),
-				undefined,
-				{ completionPolicy: "task_runtime", internalMessage: true },
-			);
+			const host = this.requireHost();
+			const scope = host.getScope();
+			const title = request.title?.trim() || request.objective.trim().slice(0, 80);
+			const acceptanceCriteria = request.acceptanceCriteria?.map((item) => item.trim()).filter(Boolean) ?? [];
+			await host.invoke({
+				version: 1,
+				requestId: request.requestId,
+				toolName: "task_plan",
+				scope: {
+					sessionId: scope.sessionId,
+					expectedCursor: scope.cursor,
+					expectedRevision: scope.revision,
+					bridgeEpoch: scope.bridgeEpoch,
+				},
+				input: {
+					title,
+					objective: request.objective.trim(),
+					acceptance_criteria: acceptanceCriteria.length > 0
+						? acceptanceCriteria
+						: ["完成任务目标并提供可验证的交付证据"],
+					initial_steps: ["执行任务目标并验证交付结果"],
+					activate: true,
+				},
+			});
 			const projection = projectPiTaskSnapshot(this.requireHost().getSnapshot());
 			if (!projection) {
 				throw new Error("模型结束 planning turn，但没有调用 task_plan 创建正式任务");

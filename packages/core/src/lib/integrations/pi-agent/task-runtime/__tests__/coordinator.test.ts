@@ -74,7 +74,16 @@ function createHarness(options: { createTaskOnPrompt?: boolean; status?: "active
 			parameters: {},
 			execute: vi.fn(),
 		}],
-		invoke: vi.fn(async () => ({})),
+		invoke: vi.fn(async (command: { toolName?: string }) => {
+			if (command.toolName === "task_plan" && options.createTaskOnPrompt !== false) {
+				hostSnapshot = canonicalSnapshot(options.status ?? "blocked");
+				listener?.({
+					scope: { sessionId: "session-1", cursor: "entry-1", revision: 1, bridgeEpoch: 3 },
+					snapshot: hostSnapshot,
+				});
+			}
+			return {};
+		}),
 		subscribeState: (nextListener: typeof listener) => {
 			listener = nextListener;
 			return () => { listener = null; };
@@ -137,11 +146,14 @@ describe("AgentTaskRuntimeCoordinator", () => {
 			context: "沿用当前 Session 的项目材料",
 		});
 
-		expect(harness.agent.prompt).toHaveBeenCalledWith(
-			expect.objectContaining({ role: "user" }),
-			undefined,
-			{ completionPolicy: "task_runtime", internalMessage: true },
-		);
+		expect(harness.agent.prompt).not.toHaveBeenCalled();
+		expect(harness.host.invoke).toHaveBeenCalledWith(expect.objectContaining({
+			toolName: "task_plan",
+			input: expect.objectContaining({
+				objective: "完成纵向闭环",
+				initial_steps: ["执行任务目标并验证交付结果"],
+			}),
+		}));
 		expect(snapshot.projection?.taskId).toBe("T1");
 		expect(snapshot.execution.draft?.context).toBe("沿用当前 Session 的项目材料");
 		expect(snapshot.execution.status).toBe("waiting_user");
@@ -211,7 +223,7 @@ describe("AgentTaskRuntimeCoordinator", () => {
 		});
 
 		const snapshot = await harness.coordinator.submitUserReply("我确认继续执行");
-		expect(harness.agent.prompt).toHaveBeenCalledTimes(2);
+		expect(harness.agent.prompt).toHaveBeenCalledTimes(1);
 		expect(harness.agent.prompt).toHaveBeenLastCalledWith(
 			[
 				expect.objectContaining({ role: "user" }),
