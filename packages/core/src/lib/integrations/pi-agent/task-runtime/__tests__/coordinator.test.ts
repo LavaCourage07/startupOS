@@ -43,7 +43,7 @@ function canonicalSnapshot(status: "active" | "blocked" | "done" = "active") {
 	};
 }
 
-function createHarness(options: { createTaskOnPrompt?: boolean; status?: "active" | "blocked" | "done" } = {}) {
+function createHarness(options: { createTaskOnPrompt?: boolean; status?: "active" | "blocked" | "done"; initialBridgeEpoch?: number } = {}) {
 	let hostSnapshot: ReturnType<typeof canonicalSnapshot> | { version: 1; stateHash: string; scope: Record<string, unknown>; state: { tasks: Record<string, unknown> } } = {
 		version: 1,
 		stateHash: "empty",
@@ -118,7 +118,7 @@ function createHarness(options: { createTaskOnPrompt?: boolean; status?: "active
 				schemaVersion: 1,
 				mode: "chat",
 				status: "idle",
-				bridgeEpoch: 3,
+				bridgeEpoch: options.initialBridgeEpoch ?? 3,
 				expectedRevision: 0,
 				expectedCursor: null,
 				continuationCount: 0,
@@ -163,6 +163,19 @@ describe("AgentTaskRuntimeCoordinator", () => {
 		]));
 		expect(harness.persist).toHaveBeenCalled();
 		expect(harness.onState).toHaveBeenCalled();
+	});
+
+	it("恢复 legacy epoch 时同步到 runtime bridge epoch，避免 stale-bridge-epoch", async () => {
+		const harness = createHarness({ status: "blocked", initialBridgeEpoch: 0 });
+		const snapshot = await harness.coordinator.createTask({
+			version: 1,
+			requestId: "request-legacy-epoch",
+			sessionId: "session-1",
+			objective: "完成纵向闭环",
+		});
+
+		expect(snapshot.execution.bridgeEpoch).toBe(3);
+		expect(snapshot.execution.lastError).toBeUndefined();
 	});
 
 	it("相同 requestId 幂等，不再次调用模型", async () => {

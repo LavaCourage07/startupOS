@@ -197,6 +197,18 @@ export class AgentTaskRuntimeCoordinator {
 			this.applyHostState(hostState);
 		});
 		const restored = await this.host.restore(entries);
+		// The persisted execution epoch may be absent (legacy state) or stale after
+		// the host rebuilt its generation.  The host scope is authoritative: all
+		// subsequent control/tool requests must use the epoch it actually exposes.
+		if (this.state.execution.bridgeEpoch !== restored.scope.bridgeEpoch) {
+			this.state = {
+				...this.state,
+				execution: {
+					...this.state.execution,
+					bridgeEpoch: restored.scope.bridgeEpoch,
+				},
+			};
+		}
 		this.applyHostState(restored);
 		if (isActiveExecution(this.state.execution.status)) {
 			this.installTaskTools();
@@ -222,6 +234,8 @@ export class AgentTaskRuntimeCoordinator {
 	async createTask(request: CreateAgentTaskRequestV1): Promise<AgentTaskRuntimeSnapshotV1> {
 		await this.initialize();
 		this.assertCreateRequest(request);
+		const host = this.requireHost();
+		const scope = host.getScope();
 		const execution = this.state.execution;
 		if (execution.requestId === request.requestId) {
 			return this.getSnapshot();
@@ -233,7 +247,7 @@ export class AgentTaskRuntimeCoordinator {
 		this.state = {
 			...this.state,
 			execution: {
-				...createIdleAgentTaskExecutionState(execution.bridgeEpoch),
+				...createIdleAgentTaskExecutionState(scope.bridgeEpoch),
 				mode: "task_planning",
 				status: "planning",
 				requestId: request.requestId,
@@ -250,8 +264,6 @@ export class AgentTaskRuntimeCoordinator {
 		await this.publishState();
 
 		try {
-			const host = this.requireHost();
-			const scope = host.getScope();
 			const title = request.title?.trim() || request.objective.trim().slice(0, 80);
 			const acceptanceCriteria = request.acceptanceCriteria?.map((item) => item.trim()).filter(Boolean) ?? [];
 			await host.invoke({
@@ -668,24 +680,6 @@ export class AgentTaskRuntimeCoordinator {
 			context: draft.context,
 			acceptanceCriteria: draft.acceptanceCriteria,
 		});
-	}
-
-	private buildPlanningPrompt(request: CreateAgentTaskRequestV1): string {
-		const criteria = request.acceptanceCriteria?.filter((item) => item.trim()) ?? [];
-		return [
-			"[Internal Task Runtime] 用户已确认创建正式任务。",
-			"必须先调用 task_plan 且只调用一次；不要只返回计划性文本。",
-			`任务标题：${request.title?.trim() || "请根据目标生成简洁标题"}`,
-			`任务目标：${request.objective.trim()}`,
-			request.context?.trim()
-				? `用户补充上下文：\n${request.context.trim()}`
-				: "用户未提供额外上下文，请使用当前 Session 已有上下文。",
-			criteria.length > 0
-				? `用户验收标准：\n${criteria.map((item, index) => `${index + 1}. ${item}`).join("\n")}`
-				: "请生成具体、可验证且需要证据的验收标准。",
-			"plan_steps 必须按依赖顺序排列；每步只包含一个可观察输出和一种验证方式。",
-			"此任务只在当前 Session 执行，不要创建 Workflow、subagent、worker、DAG 或新 Session。",
-		].join("\n\n");
 	}
 
 	private buildContinuationPrompt(): string {
