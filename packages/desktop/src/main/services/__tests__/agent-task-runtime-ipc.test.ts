@@ -418,7 +418,7 @@ describe('AgentTaskRuntimeIpcController', () => {
     });
   });
 
-  it('rejects Skill Sessions and unknown protocol versions', async () => {
+  it('supports Skill Sessions and rejects unknown protocol versions', async () => {
     const skill = makeSession({
       agentType: 'skill',
       projectContext: {
@@ -435,10 +435,10 @@ describe('AgentTaskRuntimeIpcController', () => {
       sessionId: 'session-1',
     });
     expect(skillResponse).toMatchObject({
-      success: false,
-      error: { code: 'TASK_RUNTIME_NOT_SUPPORTED' },
+      success: true,
+      data: { sessionId: 'session-1' },
     });
-    expect(harness.getOrCreateTaskRuntime).not.toHaveBeenCalled();
+    expect(harness.getOrCreateTaskRuntime).toHaveBeenCalled();
 
     const versionResponse = await harness.invoke(IPC_CHANNELS.AGENT_TASK_CREATE, {
       version: 2,

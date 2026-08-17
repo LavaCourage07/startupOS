@@ -94,11 +94,12 @@ function failure<T>(error: unknown): IpcResponse<T> {
 function isTaskEligibleSession(session: AgentSession): boolean {
   const entryType = session.projectContext?.entryType;
   if (entryType) {
-    return entryType === 'agent' || entryType === 'role-agent';
+    return entryType === 'agent' || entryType === 'role-agent' || entryType === 'skill';
   }
   return session.agentType === 'agent'
     || session.agentType === 'assistant'
-    || session.agentType === 'role-agent';
+    || session.agentType === 'role-agent'
+    || session.agentType === 'skill';
 }
 
 function assertSupportedPersistence(session: AgentSession): void {

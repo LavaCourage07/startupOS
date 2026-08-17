@@ -129,11 +129,11 @@ describe('Agent task runtime UI', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
-  it('reuses the entry for Agent and RoleAgent while excluding Skill', () => {
+  it('exposes the long-running entry for assistant, agents, role agents and skills', () => {
     expect(supportsAgentTaskRuntime('assistant')).toBe(true);
     expect(supportsAgentTaskRuntime('agent')).toBe(true);
     expect(supportsAgentTaskRuntime('role-agent')).toBe(true);
-    expect(supportsAgentTaskRuntime('skill')).toBe(false);
+    expect(supportsAgentTaskRuntime('skill')).toBe(true);
     expect(supportsAgentTaskRuntime('project')).toBe(false);
   });
 
