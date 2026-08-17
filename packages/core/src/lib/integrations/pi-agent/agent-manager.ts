@@ -587,15 +587,35 @@ export class AgentManager {
    * archival memory in on_session_end, so destruction must flush that hook
    * before the agent state is cleared.
    */
-  async finalizeAndRemoveAgent(sessionId: string): Promise<boolean> {
+	async finalizeAndRemoveAgent(sessionId: string): Promise<boolean> {
     const entry = this.agents.get(sessionId);
     if (!entry) {
       return false;
-    }
+	}
 
     await this.flushCognitiveSessionEnd(entry);
     return this.removeAgent(sessionId);
   }
+
+	/**
+	 * Flush and destroy every in-process session during application shutdown.
+	 * This is intentionally separate from per-window cleanup so Electron can
+	 * await cognitive persistence before terminating the main process.
+	 */
+	async shutdown(): Promise<void> {
+		const sessionIds = Array.from(this.agents.keys());
+		await Promise.all(sessionIds.map(async (sessionId) => {
+			try {
+				await this.finalizeAndRemoveAgent(sessionId);
+			} catch (error) {
+				console.error(`[AgentManager] Shutdown failed for session ${sessionId}:`, error);
+			}
+		}));
+		for (const taskRuntime of this.taskRuntimes.values()) {
+			taskRuntime.destroy();
+		}
+		this.taskRuntimes.clear();
+	}
 
   private setCognitiveManager(agent: OriginOSAgent, cognitiveManager: CognitiveSessionEndManager): void {
     (agent as unknown as { __originosCognitiveManager?: CognitiveSessionEndManager }).__originosCognitiveManager = cognitiveManager;
