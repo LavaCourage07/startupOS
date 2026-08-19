@@ -34,6 +34,7 @@ import {
 } from './session-transition-guard';
 import { AgentTaskDraftCard } from './AgentTaskDraftCard';
 import { AgentTaskCard } from './AgentTaskCard';
+import { shouldShowAgentTaskPanel } from './agent-task-panel-visibility';
 import {
   supportsAgentTaskRuntime,
   useAgentTaskRuntime,
@@ -550,14 +551,9 @@ export default function AgentDialogContent({ agentId, agentName, agentType: prop
       }}
       onSubmit={() => void submitTaskDraft()}
     />
-  ) : taskRuntime.snapshot
-    && (
-      taskRuntime.snapshot.execution.status !== 'idle'
-      || taskRuntime.snapshot.projection
-      || taskRuntime.snapshot.execution.draft
-    ) ? (
+  ) : shouldShowAgentTaskPanel(taskRuntime.snapshot, taskRuntime.hasActiveTask) ? (
       <AgentTaskCard
-        snapshot={taskRuntime.snapshot}
+        snapshot={taskRuntime.snapshot!}
         error={taskRuntime.error}
         pendingAction={taskRuntime.pendingAction}
         onControl={(action) => void taskRuntime.control(action)}

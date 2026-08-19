@@ -360,13 +360,14 @@ export function usePiAgent(): UseClientPiAgentState {
 		return subscribeAgentEvents((event) => {
 			if (event.type !== 'assistant_message') return;
 			const data = event.data as { content?: unknown; taskRuntimeCompletion?: unknown } | undefined;
-			if (data?.taskRuntimeCompletion !== true || typeof data.content !== 'string' || !data.content.trim()) return;
+			const content = typeof data?.content === 'string' ? data.content.trim() : '';
+			if (data?.taskRuntimeCompletion !== true || !content) return;
 			setMessages((previous) => [
-				...previous.filter((message) => !(message.role === 'assistant' && message.content.trim() === data.content.trim())),
+				...previous.filter((message) => !(message.role === 'assistant' && message.content.trim() === content)),
 				{
 					id: `task-completion-${Date.now()}`,
 					role: 'assistant' as const,
-					content: data.content.trim(),
+					content,
 					timestamp: Date.now(),
 				},
 			]);

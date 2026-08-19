@@ -141,6 +141,22 @@ describe('useAgentTaskRuntime', () => {
     expect(result.current.blocksChat).toBe(false);
   });
 
+  it('treats completed and cancelled tasks as inactive so the task card can close', async () => {
+    vi.mocked(restoreAgentTaskRuntime).mockResolvedValue(snapshot('session-1', 'completed'));
+    const { result } = renderHook(() => useAgentTaskRuntime({
+      sessionId: 'session-1',
+      enabled: true,
+    }));
+
+    await waitFor(() => expect(result.current.snapshot?.execution.status).toBe('completed'));
+    expect(result.current.hasActiveTask).toBe(false);
+    expect(result.current.blocksChat).toBe(false);
+
+    act(() => observer?.(snapshot('session-1', 'cancelled')));
+    expect(result.current.hasActiveTask).toBe(false);
+    expect(result.current.blocksChat).toBe(false);
+  });
+
   it('preserves an editable local draft signal when planning fails', async () => {
     const failed = snapshot('session-1', 'failed');
     failed.execution.lastError = {

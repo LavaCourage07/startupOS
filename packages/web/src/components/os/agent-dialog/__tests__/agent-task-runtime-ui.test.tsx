@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { AgentTaskCard } from '../AgentTaskCard';
 import { AgentTaskDraftCard } from '../AgentTaskDraftCard';
+import { shouldShowAgentTaskPanel } from '../agent-task-panel-visibility';
 import { supportsAgentTaskRuntime } from '../use-agent-task-runtime';
 
 import type { AgentTaskRuntimeSnapshotV1 } from '@originos/core/lib/integrations/pi-agent/task-runtime';
@@ -152,7 +153,7 @@ describe('Agent task runtime UI', () => {
     expect(screen.getByText(/阻塞：缺少岗位模型/)).toBeInTheDocument();
     expect(screen.getByText(/警告：自动续跑次数接近上限/)).toBeInTheDocument();
     expect(screen.getByText('部分内容已按显示上限省略。')).toBeInTheDocument();
-    expect(container.querySelector('section.max-h-96.overflow-y-auto')).not.toBeNull();
+    expect(container.querySelector('section[aria-label="当前任务"]')).not.toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '停止续跑' }));
     expect(onControl).toHaveBeenCalledWith('stop');
@@ -192,6 +193,24 @@ describe('Agent task runtime UI', () => {
     expect(screen.getByText(/请在下方消息输入框回复阻塞问题/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '恢复' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '取消任务' })).toBeInTheDocument();
+  });
+
+  it('hides the task panel after terminal completion even when projection remains cached', () => {
+    const completed = createSnapshot({
+      mode: 'chat',
+      status: 'completed',
+      draft: { objective: '生成交付报告', acceptanceCriteria: ['报告可读取'] },
+    });
+    completed.projection = {
+      ...completed.projection!,
+      status: 'done',
+      progress: 100,
+      actions: [],
+    };
+
+    expect(shouldShowAgentTaskPanel(completed, false)).toBe(false);
+    expect(shouldShowAgentTaskPanel(createSnapshot({ status: 'running' }), true)).toBe(true);
+    expect(shouldShowAgentTaskPanel(createSnapshot({ status: 'failed', mode: 'chat' }), true)).toBe(true);
   });
 
   it('allows title/objective submission without acceptance criteria and captures optional context', () => {
