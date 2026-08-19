@@ -151,6 +151,7 @@ export class AgentTaskRuntimeIpcController {
   private readonly sessionProjects = new Map<string, string>();
   private readonly senders = new Map<string, TaskEventSender>();
   private readonly commandTails = new Map<string, Promise<void>>();
+  private readonly completionMessageKeys = new Map<string, string>();
   private readonly pendingUserMessages = new Set<string>();
   private readonly lastEventKeys = new Map<string, string>();
 
@@ -287,6 +288,7 @@ export class AgentTaskRuntimeIpcController {
         }
       },
       onState: (snapshot) => this.sendState(snapshot),
+      onAssistantMessage: (content) => this.sendAssistantMessage(session.sessionId, content),
       hasPendingUserMessage: () => this.pendingUserMessages.has(session.sessionId),
     });
   }
@@ -341,6 +343,23 @@ export class AgentTaskRuntimeIpcController {
       snapshot,
     };
     sender.send(IPC_CHANNELS.AGENT_TASK_EVENT, event);
+  }
+
+  private sendAssistantMessage(sessionId: string, content: string): void {
+    const sender = this.senders.get(sessionId);
+    if (!sender || sender.isDestroyed() || !content.trim()) return;
+    const normalized = content.trim();
+    if (this.completionMessageKeys.get(sessionId) === normalized) return;
+    this.completionMessageKeys.set(sessionId, normalized);
+    sender.send(IPC_CHANNELS.AGENT_EVENT, {
+      type: 'assistant_message',
+      sessionId,
+      data: {
+        content: normalized,
+        isStreaming: false,
+        taskRuntimeCompletion: true,
+      },
+    });
   }
 
   private runSerialized<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {

@@ -97,7 +97,7 @@ export const AgentTaskCard = ({
     <section
       aria-label="当前任务"
       data-task-status={execution.status}
-      className="max-h-96 overflow-y-auto rounded-lg border border-gray-200 bg-white/90 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900/90"
+      className="rounded-lg border border-gray-200 bg-white/90 p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900/90"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-2">
@@ -105,12 +105,12 @@ export const AgentTaskCard = ({
           <div className="min-w-0">
             <h3 className="break-words text-sm font-semibold text-gray-900 dark:text-white">{title}</h3>
             {objective && (
-              <p className="mt-1 max-h-20 overflow-y-auto break-words text-xs leading-relaxed text-gray-600 dark:text-gray-300">
+              <p className="mt-1 break-words text-xs leading-relaxed text-gray-600 dark:text-gray-300">
                 {objective}
               </p>
             )}
             {draft?.context && (
-              <p className="mt-1 max-h-16 overflow-y-auto break-words text-xs text-gray-500">
+              <p className="mt-1 break-words text-xs text-gray-500">
                 上下文：{draft.context}
               </p>
             )}
@@ -167,7 +167,7 @@ export const AgentTaskCard = ({
                     <div className="min-w-0 flex-1">
                       <p className="break-words text-gray-700 dark:text-gray-300">{step.text}</p>
                       {step.expectedOutput && (
-                        <p className="mt-0.5 max-h-16 overflow-y-auto break-words text-gray-500">
+                        <p className="mt-0.5 break-words text-gray-500">
                           预期：{step.expectedOutput}
                         </p>
                       )}
@@ -192,7 +192,7 @@ export const AgentTaskCard = ({
                       <p className="break-words text-gray-700 dark:text-gray-300">{criterion.text}</p>
                       <p className="mt-0.5 text-gray-400">证据 {criterion.evidenceCount}</p>
                       {criterion.note && (
-                        <p className="mt-0.5 max-h-16 overflow-y-auto break-words text-gray-500">{criterion.note}</p>
+                        <p className="mt-0.5 break-words text-gray-500">{criterion.note}</p>
                       )}
                     </div>
                   </li>

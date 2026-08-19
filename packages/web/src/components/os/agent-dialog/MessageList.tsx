@@ -34,12 +34,8 @@ export default function MessageList({ messages, isLoading, toolExecutions, onQue
         toolExecutions={toolExecutions}
         onQuestionAnswer={onQuestionAnswer}
         answeredQuestions={answeredQuestions}
+        footerContent={taskContent}
       />
-      {taskContent && (
-        <div className="shrink-0 px-4 pb-3">
-          {taskContent}
-        </div>
-      )}
     </div>
   );
 }

@@ -177,9 +177,15 @@ function validateExpectedScope(expectedScope, actualScope) {
 
 function toolErrorResult(error) {
   const mapped = mapPiTaskRuntimeError(error);
+  const reason = mapped.details && typeof mapped.details.reason === 'string'
+    ? mapped.details.reason.slice(0, 500)
+    : undefined;
   return {
     isError: true,
-    content: [{ type: 'text', text: mapped.message }],
+    content: [{
+      type: 'text',
+      text: reason ? `${mapped.message}: ${reason}` : mapped.message,
+    }],
     details: mapped,
   };
 }

@@ -65,6 +65,7 @@ export interface RestoredAgentRuntime {
 export interface AgentTaskRuntimeBindingOptions {
   persist(state: AgentTaskRuntimePersistenceV1): void | Promise<void>;
   onState?(snapshot: AgentTaskRuntimeSnapshotV1): void;
+  onAssistantMessage?(content: string): void;
   hasPendingUserMessage?(): boolean;
   hasBudgetRemaining?(): boolean;
 }

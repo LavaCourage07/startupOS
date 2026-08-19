@@ -125,6 +125,53 @@ test('mutation wrapper 使用真实 extension、actual entry persistence 与 can
   host.invalidate();
 });
 
+test('task_decompose mutation wrapper accepts a valid atomic child plan', async () => {
+  const { host } = await createHost();
+  const planTool = host.getAgentTools().find((tool) => tool.name === 'task_plan');
+  await planTool.execute('decompose-plan-1', taskPlanInput());
+  const decomposeTool = host.getAgentTools().find((tool) => tool.name === 'task_decompose');
+  const result = await decomposeTool.execute('decompose-1', {
+    task_id: 'T1',
+    step_id: 'T1-S1',
+    reason: '拆分为两个可独立验证的步骤',
+    child_steps: [
+      {
+        text: '收集并整理项目资料与来源清单',
+        expectedOutput: '一份带来源标注的项目资料清单',
+        allowedActions: ['read_file'],
+        evidenceRequired: true,
+        decompositionStatus: 'atomic',
+        granularityCheck: {
+          isAtomic: true,
+          reason: '单一收集动作',
+          canBeDoneInOneAgentAction: true,
+          hasSingleObservableOutput: true,
+          hasSingleVerificationMethod: true,
+          hasNoHiddenSubtasks: true,
+        },
+      },
+      {
+        text: '核对资料完整性并记录验证结果',
+        expectedOutput: '一份包含核对结论和缺口的验证记录',
+        allowedActions: ['read_file', 'task_evidence'],
+        evidenceRequired: true,
+        decompositionStatus: 'atomic',
+        granularityCheck: {
+          isAtomic: true,
+          reason: '单一验证动作',
+          canBeDoneInOneAgentAction: true,
+          hasSingleObservableOutput: true,
+          hasSingleVerificationMethod: true,
+          hasNoHiddenSubtasks: true,
+        },
+      },
+    ],
+  });
+  assert.equal(result.isError, false);
+  assert.equal(host.getScope().revision, 2);
+  host.invalidate();
+});
+
 test('invoke 保持 request 幂等并拒绝 stale revision/cursor/epoch', async () => {
   const { host, persistenceCalls } = await createHost();
   const initialScope = host.getScope();

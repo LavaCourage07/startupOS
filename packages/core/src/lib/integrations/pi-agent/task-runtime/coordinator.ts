@@ -89,6 +89,7 @@ export interface AgentTaskRuntimeCoordinatorOptions {
 	initialState?: AgentTaskRuntimePersistenceV1;
 	persist(state: AgentTaskRuntimePersistenceV1): void | Promise<void>;
 	onState?(snapshot: AgentTaskRuntimeSnapshotV1): void;
+	onAssistantMessage?(content: string): void;
 	hasPendingUserMessage?(): boolean;
 	hasBudgetRemaining?(): boolean;
 	hostFactory?: TaskSessionHostFactory;
@@ -167,6 +168,10 @@ export class AgentTaskRuntimeCoordinator {
 	private runningPromise: Promise<void> | null = null;
 	private continuationGeneration = 0;
 	private persistPromise = Promise.resolve();
+	private unsubscribeAgent: (() => void) | null = null;
+	private latestAssistantText: string | null = null;
+	private completionPending = false;
+	private completionMessageSent = false;
 	private state: AgentTaskRuntimePersistenceV1;
 
 	constructor(private readonly options: AgentTaskRuntimeCoordinatorOptions) {
@@ -192,6 +197,20 @@ export class AgentTaskRuntimeCoordinator {
 				this.state = { ...this.state, branchEntries: [...nextEntries] };
 				await this.queuePersist();
 			},
+		});
+		this.unsubscribeAgent = this.options.agent.subscribe((event: unknown) => {
+			if (!event || typeof event !== "object" || (event as { type?: unknown }).type !== "message_end") return;
+			const message = (event as { message?: unknown }).message;
+			if (!message || typeof message !== "object" || (message as { role?: unknown }).role !== "assistant") return;
+			const content = (message as { content?: unknown }).content;
+			const text = Array.isArray(content)
+				? content.filter((block) => Boolean(block) && typeof block === "object" && typeof (block as { text?: unknown }).text === "string")
+					.map((block) => (block as { text: string }).text).join("").trim()
+				: typeof content === "string" ? content.trim() : "";
+			if (text) {
+				this.latestAssistantText = text;
+				this.flushCompletionMessage();
+			}
 		});
 		this.unsubscribeHost = this.host.subscribeState((hostState) => {
 			this.applyHostState(hostState);
@@ -260,6 +279,9 @@ export class AgentTaskRuntimeCoordinator {
 				updatedAt: new Date().toISOString(),
 			},
 		};
+		this.latestAssistantText = null;
+		this.completionPending = false;
+		this.completionMessageSent = false;
 		this.installTaskTools();
 		await this.publishState();
 
@@ -372,6 +394,7 @@ export class AgentTaskRuntimeCoordinator {
 					: "task_running",
 				baseline,
 			);
+			if (nextProjection.status === "done") this.emitCompletionMessage();
 			await this.publishState();
 			if (this.state.execution.status === "running") {
 				this.startContinuationLoop();
@@ -399,6 +422,8 @@ export class AgentTaskRuntimeCoordinator {
 		this.options.agent.abort();
 		this.unsubscribeHost?.();
 		this.unsubscribeHost = null;
+		this.unsubscribeAgent?.();
+		this.unsubscribeAgent = null;
 		this.host?.invalidate();
 		this.host = null;
 		this.restoreBaselineTools();
@@ -545,8 +570,16 @@ export class AgentTaskRuntimeCoordinator {
 				},
 			};
 			await this.publishState();
+			const nextAction = await this.invokeReadOnlyTaskTool(
+				"task_next",
+				`continuation-${generation}-${this.state.execution.continuationCount}`,
+			);
 			await this.options.agent.prompt(
-				internalUserMessage(this.buildContinuationPrompt()),
+				internalUserMessage([
+					this.buildContinuationPrompt(),
+					"运行时已预取 task_next 的当前结果；直接执行其中给出的唯一下一步，不要只描述计划。",
+					`task_next 结果：${nextAction}`,
+				].join("\n\n")),
 				undefined,
 				{ completionPolicy: "task_runtime", internalMessage: true },
 			);
@@ -563,6 +596,7 @@ export class AgentTaskRuntimeCoordinator {
 				projection.status === "done" ? "chat" : "task_running",
 				decision.fingerprint,
 			);
+			if (projection.status === "done") this.emitCompletionMessage();
 			await this.publishState();
 		}
 	}
@@ -574,6 +608,7 @@ export class AgentTaskRuntimeCoordinator {
 			this.state.execution.mode = "chat";
 			this.state.execution.status = "completed";
 			this.restoreBaselineTools();
+			this.emitCompletionMessage();
 		} else if (decision.type === "wait_user") {
 			this.state.execution.status = "waiting_user";
 		} else if (decision.type === "pause") {
@@ -588,6 +623,23 @@ export class AgentTaskRuntimeCoordinator {
 		}
 		this.state.execution.updatedAt = new Date().toISOString();
 		await this.publishState();
+	}
+
+	private emitCompletionMessage(): void {
+		if (this.completionMessageSent) return;
+		// The completion transition can be observed immediately after task_complete,
+		// before the model emits its final natural-language summary. Do not publish
+		// the previous progress message; wait for the next assistant message_end.
+		this.completionPending = true;
+		this.latestAssistantText = null;
+		this.flushCompletionMessage();
+	}
+
+	private flushCompletionMessage(): void {
+		if (!this.completionPending || this.completionMessageSent || !this.latestAssistantText) return;
+		this.completionMessageSent = true;
+		this.completionPending = false;
+		this.options.onAssistantMessage?.(this.latestAssistantText);
 	}
 
 	private async pauseTask(): Promise<void> {
@@ -687,9 +739,39 @@ export class AgentTaskRuntimeCoordinator {
 			"[Internal Task Runtime] 继续当前 canonical pi-tasks 任务。",
 			"先调用 task_focus 或 task_next 获取唯一当前步骤，只执行该步骤。",
 			"完成可验证工作后先用 task_evidence 记录可复现证据，再用 task_update 更新步骤。",
+			"任务规划的最后一步必须是最终交付：读取或确认最终交付物，整理关键结论、文件路径/链接、证据和限制，并直接在当前会话中向用户呈现；仅写入文件或调用 task_complete 不算完成交付。",
 			"只有全部步骤和验收标准具备有效证据且无 blocker 时才能调用 task_complete。",
 			"若确实需要用户或外部条件，记录 blocker 并清楚说明所需输入；不要仅承诺稍后继续。",
 		].join("\n\n");
+	}
+
+	private async invokeReadOnlyTaskTool(toolName: "task_next" | "task_focus", requestId: string): Promise<string> {
+		const host = this.requireHost();
+		const tool = host.getAgentTools().find((candidate) => candidate.name === toolName);
+		if (!tool) {
+			throw new Error(`Task read-only tool is not active: ${toolName}`);
+		}
+		// Read-only tools are intentionally invoked through their agent-tool
+		// descriptor.  The adapter command contract only allowlists mutations;
+		// routing task_next/task_focus through host.invoke would be rejected.
+		const result = await tool.execute(requestId, {});
+		if (result && typeof result === "object" && "content" in result) {
+			const content = (result as { content?: unknown }).content;
+			if (Array.isArray(content)) {
+				const text = content
+					.filter((block): block is { type?: string; text?: string } =>
+						Boolean(block) && typeof block === "object" && typeof (block as { text?: unknown }).text === "string")
+					.map((block) => block.text ?? "")
+					.join("\n")
+					.trim();
+				if (text) return text;
+			}
+		}
+		try {
+			return JSON.stringify(result);
+		} catch {
+			return String(result);
+		}
 	}
 
 	private assertCreateRequest(request: CreateAgentTaskRequestV1): void {

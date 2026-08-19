@@ -45,7 +45,7 @@ export const AgentTaskDraftCard = ({
   return (
     <section
       aria-label="任务草稿"
-      className="max-h-96 overflow-y-auto rounded-lg border border-primary/30 bg-white/80 p-4 shadow-sm dark:bg-gray-900/80"
+      className="rounded-lg border border-primary/30 bg-white/80 p-4 shadow-sm dark:bg-gray-900/80"
     >
       <div className="mb-4 flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
