@@ -840,6 +840,7 @@ export class AgentSessionService {
           });
 
           processHealthMonitor.setAgentActivity(request.sessionId, 'prompt_start');
+          this.taskRuntimeIpc.setActiveStream(request.sessionId, request.streamId);
           routeAgentSessionUserMessage({
             controller: this.taskRuntimeIpc,
             session,
@@ -854,6 +855,7 @@ export class AgentSessionService {
               }
             },
           }).then(async () => {
+            this.taskRuntimeIpc.setActiveStream(request.sessionId);
             unsubscribe();
             if (assistantContent) {
               await agentSessionService.addMessage(request.sessionId, {
@@ -864,6 +866,7 @@ export class AgentSessionService {
             sendToRenderer('done', { content: assistantContent, failed: completionFailed });
             batcher.dispose();
           }).catch(async (err: unknown) => {
+            this.taskRuntimeIpc.setActiveStream(request.sessionId);
             unsubscribe();
             const visibleError = formatVisibleAgentError(err);
             await agentSessionService.addMessage(request.sessionId, {

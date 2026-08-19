@@ -210,6 +210,35 @@ describe('AgentTaskRuntimeIpcController', () => {
     );
   });
 
+  it('emits Task Runtime completion assistant messages on the active stream', async () => {
+    const harness = createHarness();
+    const request: CreateAgentTaskRequestV1 = {
+      version: 1,
+      requestId: 'request-1',
+      sessionId: 'session-1',
+      objective: '完成回归验证',
+    };
+
+    await harness.invoke(IPC_CHANNELS.AGENT_TASK_CREATE, request);
+    harness.controller.setActiveStream('session-1', 'stream-1');
+
+    harness.binding()?.onAssistantMessage?.('最终交付结果');
+
+    expect(harness.sender.send).toHaveBeenCalledWith(
+      IPC_CHANNELS.AGENT_EVENT,
+      expect.objectContaining({
+        type: 'assistant_message',
+        sessionId: 'session-1',
+        streamId: 'stream-1',
+        data: expect.objectContaining({
+          content: '最终交付结果',
+          isStreaming: false,
+          taskRuntimeCompletion: true,
+        }),
+      }),
+    );
+  });
+
   it('passes duplicate requestId to the same runtime and returns the same Task', async () => {
     const harness = createHarness();
     const request: CreateAgentTaskRequestV1 = {

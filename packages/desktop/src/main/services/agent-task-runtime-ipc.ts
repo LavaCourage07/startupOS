@@ -153,6 +153,7 @@ export class AgentTaskRuntimeIpcController {
   private readonly commandTails = new Map<string, Promise<void>>();
   private readonly completionMessageKeys = new Map<string, string>();
   private readonly pendingUserMessages = new Set<string>();
+  private readonly activeStreams = new Map<string, string>();
   private readonly lastEventKeys = new Map<string, string>();
 
   constructor(options: AgentTaskRuntimeIpcControllerOptions = {}) {
@@ -214,6 +215,14 @@ export class AgentTaskRuntimeIpcController {
     this.sessionProjects.set(session.sessionId, session.projectContext.projectId);
     if (sender) {
       this.senders.set(session.sessionId, sender);
+    }
+  }
+
+  setActiveStream(sessionId: string, streamId?: string): void {
+    if (streamId) {
+      this.activeStreams.set(sessionId, streamId);
+    } else {
+      this.activeStreams.delete(sessionId);
     }
   }
 
@@ -354,6 +363,7 @@ export class AgentTaskRuntimeIpcController {
     sender.send(IPC_CHANNELS.AGENT_EVENT, {
       type: 'assistant_message',
       sessionId,
+      streamId: this.activeStreams.get(sessionId),
       data: {
         content: normalized,
         isStreaming: false,
