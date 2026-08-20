@@ -394,7 +394,7 @@ export class AgentTaskRuntimeCoordinator {
 					: "task_running",
 				baseline,
 			);
-			if (nextProjection.status === "done") this.emitCompletionMessage();
+			if (nextProjection.status === "done") this.emitCompletionMessage(true);
 			await this.publishState();
 			if (this.state.execution.status === "running") {
 				this.startContinuationLoop();
@@ -596,7 +596,7 @@ export class AgentTaskRuntimeCoordinator {
 				projection.status === "done" ? "chat" : "task_running",
 				decision.fingerprint,
 			);
-			if (projection.status === "done") this.emitCompletionMessage();
+			if (projection.status === "done") this.emitCompletionMessage(true);
 			await this.publishState();
 		}
 	}
@@ -625,13 +625,13 @@ export class AgentTaskRuntimeCoordinator {
 		await this.publishState();
 	}
 
-	private emitCompletionMessage(): void {
+	private emitCompletionMessage(useCurrentMessage = false): void {
 		if (this.completionMessageSent) return;
 		// The completion transition can be observed immediately after task_complete,
 		// before the model emits its final natural-language summary. Do not publish
 		// the previous progress message; wait for the next assistant message_end.
 		this.completionPending = true;
-		this.latestAssistantText = null;
+		if (!useCurrentMessage) this.latestAssistantText = null;
 		this.flushCompletionMessage();
 	}
 
