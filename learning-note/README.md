@@ -15,6 +15,14 @@
 
 也就是说，12 节课可以把你从“完全不知道怎么下手”带到“能自己读项目、能做小改动、知道继续深挖哪里”。
 
+## 深入学习版
+
+宏观 12 节课之外，另有一版系统深入教程：
+
+- [OriginOS 深入学习教程](deep-dive/README.md)
+
+深入版会按源码、文档、OpenSpec、Codex skills、核心组件、Agent runtime、Skill、Project/Ontology、Memory、多 Agent、Electron、测试和实战改动逐步展开。
+
 ## 课程安排
 
 1. [项目是什么：理解 OriginOS 解决的问题和产品闭环](lesson-01.md)
