@@ -13,9 +13,10 @@
 
 ## 目录
 
-| Part | 主题 | 正式课目录 |
-| --- | --- | --- |
-| A | 系统全景与源码学习起点，6 节 | [part-a-system-foundation](part-a-system-foundation/README.md) |
-| E | Pi Agent 基础运行时，70 节 | [part-e-pi-agent-runtime](part-e-pi-agent-runtime/README.md) |
+| Part | 主题 | 节数 | 正式课目录 |
+| --- | --- | --- | --- |
+| A | 学习起点与全景 | 6 | [part-a-system-foundation](part-a-system-foundation/README.md) |
+| B | 从用户操作看完整链路 | 12 | [part-b-user-operation-chain](part-b-user-operation-chain/README.md) |
+| E | Pi Agent 基础运行时 | 70 | [part-e-pi-agent-runtime](part-e-pi-agent-runtime/README.md) |
 
 每节正式课必须包含：真实源码链接、概念解释、调用链、关键类型、测试入口、练习、验收；Mermaid 与小黑图按理解需要使用，并在图后解释。

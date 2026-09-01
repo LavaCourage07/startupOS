@@ -1,6 +1,6 @@
-# E14：两种服务端流式桥接要给前端相似事件
+# E14：Web 两座流式桥与 Electron IPC 桥怎样统一事件
 
-同样是小林看到文字逐段出现，服务端内部可能有两种不同运行模式：Runtime 模式和 in-process 模式。
+同样是小林看到文字逐段出现，Web 服务端内部可能有两种不同运行模式：Runtime 模式和 in-process 模式；桌面应用还会多经过 Electron 主进程与 renderer 之间的 IPC 边界。
 
 前端不应该被迫理解这两种模式的全部内部差异。它需要的是稳定事件：`text_delta`、`tool_start`、`tool_end`、`assistant_message`、`done`。因此服务端要做一层桥接，把不同来源的运行时事件转换成前端能理解的 SSE 事件。
 
@@ -9,7 +9,11 @@
 | 文件 | 本节关注点 |
 | --- | --- |
 | `packages/web/src/app/api/agent/sessions/[sessionId]/messages/route.ts` | `createEventStream` 如何分派到两种流式实现 |
-| `packages/web/src/app/api/agent/abort/route.ts` | 中断时如何区分 Runtime 模式和 in-process 模式 |
+| `packages/web/src/app/api/agent/abort/route.ts` | Web 中断时如何区分 Runtime 模式和 in-process 模式 |
+| `packages/core/src/lib/integrations/electron/services/agent-session.ts` | renderer 如何在 Web fetch 与 Electron IPC 之间选择 |
+| `packages/desktop/src/main/services/agent-session-service.ts` | Electron 主进程如何恢复 Agent、订阅事件并发送 `AGENT_EVENT` |
+| `packages/desktop/src/main/services/stream-event-batcher.ts` | 高频文本事件如何合并并保持非文本事件顺序 |
+| `packages/desktop/src/main/services/assistant-stream-state.ts` | 最终助手消息如何只发送一次 |
 
 ## 2. 为什么需要两种桥接
 
@@ -139,7 +143,86 @@ in-process 模式下，服务端会订阅 `OriginOSAgent` 的事件。它可能�
 
 这张表不是让前端理解两套内部协议，而是给维护者一份对称性检查表：新增一种前端事件时，必须检查两座桥是否都映射；修复只落在其中一座桥，会让用户在不同运行模式下看到不一致行为。
 
-## 10. 为什么桥接层要负责收尾
+## 10. Electron 不是“把 SSE 换个名字”
+
+浏览器模式通过一次持续打开的 HTTP response 接收 SSE；Electron 模式则由 renderer 先发起 IPC invoke，再由主进程通过独立的 `AGENT_EVENT` channel 持续推送事件。这两种传输在时间关系上并不相同。
+
+renderer 侧的分派位于 [packages/core/src/lib/integrations/electron/services/agent-session.ts 第 227—255 行](../../../../packages/core/src/lib/integrations/electron/services/agent-session.ts#L227)：
+
+```ts
+if (isElectron()) {
+  return getIpcRenderer().invoke(
+    IPC_CHANNELS.AGENT_SESSION_MESSAGE_STREAM,
+    request
+  );
+}
+
+return fetch(`/api/agent/sessions/${request.sessionId}/messages`, {
+  headers: { Accept: 'text/event-stream' },
+  // ...
+});
+```
+
+这段代码表达的是“同一项业务能力有两个传输适配”，不是“Electron 也在解析 SSE”。Web 分支等待并读取 HTTP 流；Electron 分支的 invoke 只负责启动任务，真正的增量事件由 `subscribeAgentEvents` 监听 `AGENT_EVENT`。主进程最后返回的 `{ started: true }` 只是“异步任务已经启动”的确认，并不是 Agent 已经回答完成。
+
+```mermaid
+sequenceDiagram
+    participant UI as Electron renderer
+    participant IPC as ipcRenderer/ipcMain
+    participant Main as AgentSessionService
+    participant Agent as OriginOSAgent
+
+    UI->>IPC: invoke MESSAGE_STREAM(request)
+    IPC->>Main: 校验并启动 prompt
+    Main-->>UI: {started: true}
+    Agent-->>Main: text/tool/message 事件
+    Main-->>UI: AGENT_EVENT（可多次）
+    Agent-->>Main: prompt Promise 完成
+    Main-->>UI: done
+```
+
+图中返回 `{started: true}` 的箭头和后续 `AGENT_EVENT` 箭头属于两条不同的时间线。前者结束一次 invoke；后者承载整轮输出。若把 `{started: true}` 当作完成信号，UI 会在第一个文本片段到来前就错误结束 loading 状态。
+
+## 11. Electron 主进程桥先建立会话边界，再开始流式执行
+
+Electron 主进程的入口位于 [packages/desktop/src/main/services/agent-session-service.ts 第 588—646 行](../../../../packages/desktop/src/main/services/agent-session-service.ts#L588)。它依次完成五件事：
+
+1. 检查 `sessionId` 和 `content`；
+2. 使用 `sessionId + projectId` 读取持久化会话；
+3. 用 `assertSessionMessageOwnership` 校验入口归属；
+4. 用 `getOrRestoreAgentRuntime` 获得可执行 Agent；
+5. 先把用户消息写入会话，再创建事件发送器与批处理器。
+
+这个顺序与 Web route 的核心语义一致：身份和归属要在 prompt 之前确认，用户输入也要先成为持久化事实。IPC 只是传输不同，并没有取消会话边界。
+
+发送 payload 时，主进程同时携带 `sessionId` 和可选的 `streamId`。renderer 的订阅器会先按 `sessionId` 过滤，再把 `streamId` 交给上层识别当前流。两个 ID 分别回答“属于哪段会话”和“属于这段会话的哪次生成”，不能互相代替。
+
+## 12. `StreamEventBatcher` 在延迟、吞吐和顺序之间取平衡
+
+Electron IPC 若为每个字符发送一次跨进程消息，会制造大量序列化和渲染开销。`StreamEventBatcher` 的实现位于 [packages/desktop/src/main/services/stream-event-batcher.ts 第 14—134 行](../../../../packages/desktop/src/main/services/stream-event-batcher.ts#L14)，默认最多等待 32ms，或累计到 16KB 时立即刷新。
+
+| 规则 | 目的 |
+| --- | --- |
+| 第一段文本立即 flush | 降低用户看到首字的等待时间 |
+| 相邻且同类型的文本片段合并 | 减少 IPC 消息数量 |
+| 达到 16KB 立即 flush | 避免缓冲区无界增长 |
+| 最多等待 32ms | 即使内容很少，也不会长期滞留 |
+| 非文本事件发送前先 flush | 防止 `tool_start` 越过尚未发送的文本 |
+| `dispose()` 先 flush 再停用 | 防止结束时遗失尾部片段 |
+
+主进程在 [packages/desktop/src/main/services/agent-session-service.ts 第 648—672 行](../../../../packages/desktop/src/main/services/agent-session-service.ts#L648) 只让 `text_delta` 进入批处理；遇到 `tool_start`、`assistant_message` 或 `done` 等事件，会先刷新已有文本，再单独发送当前事件。因此，批处理改变的是运输颗粒度，不应改变事件的逻辑顺序。
+
+renderer 收到 `batch_events` 后，还会在 [packages/core/src/lib/integrations/electron/services/agent-session.ts 第 273—325 行](../../../../packages/core/src/lib/integrations/electron/services/agent-session.ts#L273) 再合并批次内相邻的 `text_delta`。这不是重复设计：主进程批处理减少跨进程次数，renderer 合并减少上层 listener 调用次数，二者处在不同边界。
+
+## 13. 最终消息收敛与异常收尾
+
+主进程在 [packages/desktop/src/main/services/agent-session-service.ts 第 674—842 行](../../../../packages/desktop/src/main/services/agent-session-service.ts#L674) 同时跟踪 `assistantContent`、`assistantMessageSent` 和 `completionFailed`。`message_end`、`agent_end`、`completion_accepted` 都可能提供最终内容，因此不能简单地见到一个完成事件就重复发送。
+
+辅助函数 [packages/desktop/src/main/services/assistant-stream-state.ts 第 17—33 行](../../../../packages/desktop/src/main/services/assistant-stream-state.ts#L17) 固定了三条规则：空内容不发；`completionFailure` 不作为正常最终消息发；正常内容先与已经累积的流式正文协调，再由 `sent` 保证只发一次。这样，逐段文本与最终快照既不会重复拼接，也不会产生两个最终气泡。
+
+prompt Promise 完成后，主进程会取消订阅、持久化助手内容、发送 `done`、释放 batcher；若 Promise reject，则把可见错误写入会话，并发送 `assistant_message`、`error`、`agent_error`、`done`。这里的多事件不是四次错误，而是分别服务于可见正文、错误状态、兼容事件消费者和生命周期收尾。客户端必须按事件类型处理，不能把所有 payload 都追加成聊天文字。
+
+## 14. 为什么桥接层要负责收尾
 
 一次 SSE 连接不能永远打开。服务端需要在合适时机发送 `done`，并关闭 `ReadableStream`。
 
@@ -152,16 +235,18 @@ in-process 模式下，服务端会订阅 `OriginOSAgent` 的事件。它可能�
 
 因此，`done` 不是可选事件。它是流式生命周期的结束信号。
 
-## 11. 中断接口也要区分运行模式
+## 15. 中断接口还存在平台语义差异
 
 `/api/agent/abort` 同样会根据运行模式处理：
 
 - Runtime 模式下，它会尝试通过全局 spawner 或 registry 找到运行中的 Agent 进程并调用 `abort()`。
 - in-process 模式下，它会通过 `persistentAgentManager` 找到 Agent，再调用内部 Agent 的 `abort()`，并尝试等待它进入 idle。
 
-这说明“停止生成”并不是只取消浏览器请求。浏览器取消连接可以停止接收，但服务端运行时也应尽量收到中断信号，减少无意义的继续执行。
+Electron renderer 则通过 [packages/core/src/lib/integrations/electron/services/agent-session.ts 第 330—343 行](../../../../packages/core/src/lib/integrations/electron/services/agent-session.ts#L330) 发送 `AGENT_SESSION_ABORT`。当前主进程处理器在 [packages/desktop/src/main/services/agent-session-service.ts 第 862—885 行](../../../../packages/desktop/src/main/services/agent-session-service.ts#L862) 调用的是 `agentManager.removeAgent(sessionId)`，而不是对现有 Agent 调用 `abort()`。这意味着桌面端当前“中断”更接近移除内存运行时，语义并不与 Web 分支完全相同。
 
-## 12. 小林案例：同一个页面体验，背后可能不同
+因此，“停止生成”不是只取消浏览器请求，也不能笼统声称所有平台已经完全同构。客户端停止接收、运行时停止计算、运行时实例被移除是三个动作；当前各平台如何组合这些动作，必须分别以源码和测试为准。
+
+## 16. 小林案例：同一个页面体验，背后可能不同
 
 小林看到的都是：
 
@@ -169,13 +254,19 @@ in-process 模式下，服务端会订阅 `OriginOSAgent` 的事件。它可能�
 
 但背后可能是 Runtime 模式，也可能是 in-process 模式。教材读者需要理解：前端体验的一致性不是自然发生的，而是服务端桥接层主动把不同内部事件整理成统一协议。
 
-## 13. 本节小结
+## 17. 测试证据与仍需验证的边界
 
-两种服务端流式桥接的核心目标是：内部可以不同，外部协议尽量稳定。
+[packages/desktop/src/main/services/__tests__/stream-event-batcher.test.ts 第 1 行](../../../../packages/desktop/src/main/services/__tests__/stream-event-batcher.test.ts#L1) 验证首段立即发送、定时刷新、字节阈值、相邻文本合并和 dispose 收尾；[packages/desktop/src/main/services/__tests__/assistant-stream-state.test.ts 第 1 行](../../../../packages/desktop/src/main/services/__tests__/assistant-stream-state.test.ts#L1) 验证累计内容收敛、完成失败抑制与只发送一次。
+
+这些测试证明了两个辅助状态机的局部规则，但没有直接启动 Electron 主进程、renderer 和真实 Agent，因而不能证明完整 IPC 链在窗口关闭、跨会话并发、主进程异常和真实模型返回下都可靠。`AgentSessionService` 的流式 IPC handler 仍需要一组直接的集成测试，尤其要固定 `started` 与 `done` 的先后关系、`sessionId/streamId` 过滤以及 abort 语义。
+
+## 18. 本节小结
+
+Web 两座桥与 Electron IPC 桥的共同目标是：内部传输可以不同，对上层暴露的事件语义尽量稳定。稳定并不意味着实现已经完全等价；启动确认、事件运输、批处理、最终消息和中断仍各有平台边界。
 
 这也是工程分层的价值。前端依赖事件协议，服务端适配运行时差异，Agent 内部继续按自己的事件体系工作。
 
-## 14. 本节源码验收
+## 19. 本节源码验收
 
 读完本节，应能说明：
 
@@ -184,10 +275,14 @@ in-process 模式下，服务端会订阅 `OriginOSAgent` 的事件。它可能�
 3. `promptSent` 与 `assistantMessageSent` 分别防止哪类重复或错发。
 4. in-process 模式中 `message_update` 和 `text_delta` 为什么都可能参与文本输出。
 5. `done` 和 `controller.close()` 的职责区别。
+6. Electron 中 `{ started: true }` 与后续 `AGENT_EVENT` 为什么不是同一个完成信号。
+7. `StreamEventBatcher` 为什么要在非文本事件前 flush。
+8. 当前 Electron abort 与 Web abort 的语义差异。
 
-## 15. 自测问题
+## 20. 自测问题
 
 1. 为什么不应该让 UI 分别理解 Runtime 模式和 in-process 模式的全部内部事件？
 2. `createEventStream` 的分派价值是什么？
 3. 为什么 `done` 是流式生命周期里的必要事件？
 4. 浏览器取消请求和服务端运行时 abort 有什么区别？
+5. 如果 `tool_start` 在尚未 flush 的文本前发送，用户界面可能出现什么顺序错误？
