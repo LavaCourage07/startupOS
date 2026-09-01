@@ -70,7 +70,7 @@ const request: CreateSessionRequest = {
 
 ## 3. 公共会话合同：`AgentSession` 描述一个已经存在的业务会话
 
-同一文件的 [第 180—213 行](../../../../packages/core/src/types/agent.ts#L180) 定义 `AgentSession`。与创建请求相比，它描述的是已经形成的会话整体：
+同一文件的 [packages/core/src/types/agent.ts 第 180—213 行](../../../../packages/core/src/types/agent.ts#L180) 定义 `AgentSession`。与创建请求相比，它描述的是已经形成的会话整体：
 
 ```ts
 export interface AgentSession {
@@ -90,7 +90,7 @@ export interface AgentSession {
 
 这里的 `status` 不是界面上“正在思考”的临时指示灯。它描述会话生命周期，例如 `active`、`archived`；而 E04 中的 `isThinking` 描述一轮运行期间的即时 UI 状态。两者都可能在页面上显示，却不能互相替代。
 
-`messages` 的元素类型是这个公共文件中的 `AgentMessage`，其结构见 [第 142—161 行](../../../../packages/core/src/types/agent.ts#L142)：它有 `id`、字符串 `content`、`timestamp`，并可包含 `toolResults`、`metadata` 和仅助手消息使用的 `thinking`。这个形状对业务层和前端协议很友好：文本内容可以直接展示，消息有稳定 ID，思考信息有明确的可选位置。
+`messages` 的元素类型是这个公共文件中的 `AgentMessage`，其结构见 [packages/core/src/types/agent.ts 第 142—161 行](../../../../packages/core/src/types/agent.ts#L142)：它有 `id`、字符串 `content`、`timestamp`，并可包含 `toolResults`、`metadata` 和仅助手消息使用的 `thinking`。这个形状对业务层和前端协议很友好：文本内容可以直接展示，消息有稳定 ID，思考信息有明确的可选位置。
 
 然而，`AgentSession` 也不等同于磁盘文件。文件系统中的顶层数据需要版本与 ISO 日期字符串，项目的统一数据封装由 `AgentSessionData` 表示：
 
@@ -151,15 +151,15 @@ export interface SessionsListData {
 
 它保存到 `data/sessions/sessions.json`。`currentSessionId` 只记录“当前选中哪一个会话”，它不复制一份 `StoredSession`。因此，若 `currentSessionId` 为 `"trip-2026-xiaolin"`，正确的读取过程是：先用该 ID 在 `sessions` 中查找对应快照；如果 ID 为 `null`，当前没有选中的会话；如果 ID 指向不存在的项，则数据不一致，需要由读取与修复策略处理。
 
-`setCurrentSession(sessionId)` 的实现见 [第 179—195 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L179)：先在 `sessions` 中验证目标存在，找不到则返回 `false` 且不写入；找到后才更新 `currentSessionId` 并调用 `jsonStore.write`。这说明“当前会话”是一个受存在性约束的引用，而不是任意字符串标签。
+`setCurrentSession(sessionId)` 的实现见 [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 179—195 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L179)：先在 `sessions` 中验证目标存在，找不到则返回 `false` 且不写入；找到后才更新 `currentSessionId` 并调用 `jsonStore.write`。这说明“当前会话”是一个受存在性约束的引用，而不是任意字符串标签。
 
 ## 6. 适配器运行时消息：为什么恢复时不能直接把字符串塞回去
 
 `StoredSession.messages` 使用的是适配器的 `AgentMessage[]`。但另一条恢复路径更清楚地展示了“存储形状”到“运行时形状”的转换：
 
-- [core/runtime-history.ts 第 8—12 行](../../../../packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts#L8) 定义 `PersistedRuntimeMessage`，仅保存 `role`、字符串 `content` 和 `timestamp`。
-- [第 57—91 行](../../../../packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts#L57) 的 `mapPersistedMessagesForRuntime` 将它映射为适配器 `AgentMessage[]`。
-- [core/agent.ts 第 1416—1426 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L1416) 的 `replacePersistedMessages` 使用当前运行模型完成映射，并替换内部 `state.messages`。
+- [packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts 第 8—12 行](../../../../packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts#L8) 定义 `PersistedRuntimeMessage`，仅保存 `role`、字符串 `content` 和 `timestamp`。
+- [packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts 第 57—91 行](../../../../packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts#L57) 的 `mapPersistedMessagesForRuntime` 将它映射为适配器 `AgentMessage[]`。
+- [packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 1416—1426 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L1416) 的 `replacePersistedMessages` 使用当前运行模型完成映射，并替换内部 `state.messages`。
 
 映射规则值得逐项阅读：
 
@@ -197,7 +197,7 @@ export interface SessionsListData {
 
 ## 7. `SessionStore` 的显式映射：字段改名发生在哪里
 
-`SessionStore` 没有把持久化对象直接暴露为 `SessionData`。它在 [第 241—288 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L241) 提供三个静态方法：
+`SessionStore` 没有把持久化对象直接暴露为 `SessionData`。它在 [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 241—288 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L241) 提供三个静态方法：
 
 | 方法 | 输入 → 输出 | 关键映射 |
 | --- | --- | --- |
@@ -223,7 +223,7 @@ return {
 
 ## 公共导出边界：类型存在于文件中，不等于调用方一定能导入
 
-[pi-agent/index.ts 第 1—110 行](../../../../packages/core/src/lib/integrations/pi-agent/index.ts#L1) 是集成模块的公共出口之一。它重新导出 `session-store`、公共会话类型、消息协议、健康检查、`llm-config`、Skill 框架与恢复能力，同时用注释标出哪些内容仅适用于服务端或客户端安全路径。这个文件没有创建新会话，也没有改变任何字段；它决定的是“其他模块从哪里合法获得这些能力”。
+[packages/core/src/lib/integrations/pi-agent/index.ts 第 1—110 行](../../../../packages/core/src/lib/integrations/pi-agent/index.ts#L1) 是集成模块的公共出口之一。它重新导出 `session-store`、公共会话类型、消息协议、健康检查、`llm-config`、Skill 框架与恢复能力，同时用注释标出哪些内容仅适用于服务端或客户端安全路径。这个文件没有创建新会话，也没有改变任何字段；它决定的是“其他模块从哪里合法获得这些能力”。
 
 因此，阅读类型边界时必须区分两件事：
 
@@ -236,9 +236,9 @@ return {
 
 ## 8. 测试证据与尚未覆盖的边界
 
-当前 [session-store.test.ts 第 424—454 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts#L424) 对 `fromAgentSession` 和 `toSessionData` 做了基础断言：ID、消息、system prompt 和 project context 能从输入映射到结果。这些测试为最基本的字段去向提供了证据。
+当前 [packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts 第 424—454 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts#L424) 对 `fromAgentSession` 和 `toSessionData` 做了基础断言：ID、消息、system prompt 和 project context 能从输入映射到结果。这些测试为最基本的字段去向提供了证据。
 
-[runtime-history-restore.test.ts 第 52—70 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts#L52) 则分别以 OpenAI 与 Anthropic 运行时模型验证：恢复后的助手消息会使用当前模型的 `api`、`provider`、`model`，并把文本转换成内容块数组。它证明恢复不是单纯的字符串复制。
+[packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts 第 52—70 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts#L52) 则分别以 OpenAI 与 Anthropic 运行时模型验证：恢复后的助手消息会使用当前模型的 `api`、`provider`、`model`，并把文本转换成内容块数组。它证明恢复不是单纯的字符串复制。
 
 但下列风险尚未由这些测试直接覆盖：
 

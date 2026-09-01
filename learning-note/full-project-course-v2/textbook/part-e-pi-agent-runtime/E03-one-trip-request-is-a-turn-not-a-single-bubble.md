@@ -49,7 +49,7 @@ sequenceDiagram
 
 ## 源码窗口一：事件是怎样进入运行时状态的
 
-[OriginOSAgent 的事件处理器（第 947-1024 行）](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L947) 以 `switch` 分发图中的过程事件；每个 `case` 对应一种状态转换。
+[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 947-1024 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L947) 以 `switch` 分发图中的过程事件；每个 `case` 对应一种状态转换。
 
 ```ts
 case 'turn_start':
@@ -77,21 +77,21 @@ case 'turn_end': {
 
 ## 源码窗口二：一条助手消息内部也可能不只含文本
 
-[内容块遍历（第 983-1021 行）](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L983) 检查 `msg.content` 是否为数组，再区分 `text`、`toolCall`、`thinking` 和其他 block。一个助手消息可能同时携带文本、工具调用与推理资料；用户界面显示哪部分，取决于后续的显示内容规则。
+[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 983-1021 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L983) 检查 `msg.content` 是否为数组，再区分 `text`、`toolCall`、`thinking` 和其他 block。一个助手消息可能同时携带文本、工具调用与推理资料；用户界面显示哪部分，取决于后续的显示内容规则。
 
 这解释了为什么不能只写 `message.content.toString()`：复杂消息不是一段普通字符串。也解释了为什么小林看到一段回复，不代表运行时只处理了这一种内容块。
 
 ## 协议工具文件：消息结构为什么还要单独验证与转换
 
-[message.ts 第 1—238 行](../../../../packages/core/src/lib/integrations/pi-agent/message.ts#L1) 还定义了一套 `UserMessage` 与 `AgentResponse` 协议工具。它要求用户消息具有非空 `content`、长度不超过 128 的 `sessionId` 与时间；`validateUserMessage`、`validateAgentResponse`、`createUserMessage`、`agentMessageToAgentResponse` 分别承担验证、构造与适配器消息转展示协议的责任。
+[packages/core/src/lib/integrations/pi-agent/message.ts 第 1—238 行](../../../../packages/core/src/lib/integrations/pi-agent/message.ts#L1) 还定义了一套 `UserMessage` 与 `AgentResponse` 协议工具。它要求用户消息具有非空 `content`、长度不超过 128 的 `sessionId` 与时间；`validateUserMessage`、`validateAgentResponse`、`createUserMessage`、`agentMessageToAgentResponse` 分别承担验证、构造与适配器消息转展示协议的责任。
 
-其中 `agentMessageToAgentResponse` 不直接把复杂内容块转成字符串，而调用 [display-content.ts 第 1—104 行](../../../../packages/core/src/lib/integrations/pi-agent/display-content.ts#L1) 的 `extractDisplayContent`：优先拼接 `text` 内容块，移除 `<think>` 或 `<thinking>` 包裹的隐藏推理；只有显式允许时才会回退到唯一的 `thinking` 块。这是“运行时消息可包含更多内容”与“用户界面只应显示可展示文本”之间的转换边界。
+其中 `agentMessageToAgentResponse` 不直接把复杂内容块转成字符串，而调用 [packages/core/src/lib/integrations/pi-agent/display-content.ts 第 1—104 行](../../../../packages/core/src/lib/integrations/pi-agent/display-content.ts#L1) 的 `extractDisplayContent`：优先拼接 `text` 内容块，移除 `<think>` 或 `<thinking>` 包裹的隐藏推理；只有显式允许时才会回退到唯一的 `thinking` 块。这是“运行时消息可包含更多内容”与“用户界面只应显示可展示文本”之间的转换边界。
 
-必须同时说明当前调用事实：在现有生产源码检索中，`message.ts` 的验证与构造函数没有被当前发送主链调用；其直接消费者主要是 [message.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/message.test.ts)。因此，它是仓库保留的协议工具，不应被叙述为 `usePiAgent → OriginOSAgent` 的已证实生产调用步骤。它仍值得精读，因为未来若复用这套协议，`sessionId` 长度、空消息和展示内容的边界会立即生效。
+必须同时说明当前调用事实：在现有生产源码检索中，`message.ts` 的验证与构造函数没有被当前发送主链调用；其直接消费者主要是 [packages/core/src/lib/integrations/pi-agent/__tests__/message.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/message.test.ts)。因此，它是仓库保留的协议工具，不应被叙述为 `usePiAgent → OriginOSAgent` 的已证实生产调用步骤。它仍值得精读，因为未来若复用这套协议，`sessionId` 长度、空消息和展示内容的边界会立即生效。
 
 ## 源码窗口三：工具开始和结束各自改变什么
 
-[工具事件分支（第 1026-1055 行）](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L1026) 在工具开始时向 `activeTools` 放入 `{ toolName, startTime }`；结束时按 `toolName` 过滤掉对应项，再读取结果、退出码和失败原因。
+[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 1026-1055 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L1026) 在工具开始时向 `activeTools` 放入 `{ toolName, startTime }`；结束时按 `toolName` 过滤掉对应项，再读取结果、退出码和失败原因。
 
 | 事件 | state 变化 | 小林可看到的正确含义 | 不可推出的结论 |
 | --- | --- | --- | --- |
@@ -103,9 +103,9 @@ case 'turn_end': {
 
 ## 测试证据与缺口
 
-[Agent 生命周期测试（第 120—135 行）](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts#L120) 至少证明 `prompt`、`continue`、`abort`、`waitForIdle` 的基础调用不会抛出；[第 665—704 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts#L665) 会模拟一组正常生命周期事件并断言它们走日志路径而非错误日志。它们没有直接断言每个事件后的 `uiState` 转换，也不证明真实杭州酒店资料正确或页面动画正确；这些是本课应明确保留的测试缺口。
+[packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts 第 120—135 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts#L120) 至少证明 `prompt`、`continue`、`abort`、`waitForIdle` 的基础调用不会抛出；[packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts 第 665—704 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts#L665) 会模拟一组正常生命周期事件并断言它们走日志路径而非错误日志。它们没有直接断言每个事件后的 `uiState` 转换，也不证明真实杭州酒店资料正确或页面动画正确；这些是本课应明确保留的测试缺口。
 
-[message.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/message.test.ts) 则覆盖协议工具的字段验证与转换。它证明这套独立工具如何处理输入，并不证明生产发送链正在使用它；测试对象和生产调用对象必须分别确认。
+[packages/core/src/lib/integrations/pi-agent/__tests__/message.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/message.test.ts) 则覆盖协议工具的字段验证与转换。它证明这套独立工具如何处理输入，并不证明生产发送链正在使用它；测试对象和生产调用对象必须分别确认。
 
 ## 小实验与口头验收
 

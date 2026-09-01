@@ -24,11 +24,11 @@ flowchart TD
 | `projectId` | 一项长期工作，例如毕业旅行项目 | 创建项目到删除项目期间 | 项目目录、资料、长期归属与项目级上下文 |
 | `sessionId` | 一段连续 Agent 对话 | 创建会话到归档或删除会话期间 | 消息历史、会话恢复、当前会话选择与请求隔离 |
 
-窗口侧的真实状态可在 [appWindowStore.ts 第 23—124 行](../../../../packages/web/src/store/appWindowStore.ts#L23) 复查：它以 `windows`、`windowOrder`、`focusedWindowId` 管理窗口，创建的 `AppWindowData` 含位置、尺寸、焦点与关闭回调。本课重点源码 `SessionStore` 不保存这些字段；因此，不能因为它管理“当前会话”就把它称作窗口管理器。
+窗口侧的真实状态可在 [packages/web/src/store/appWindowStore.ts 第 23—124 行](../../../../packages/web/src/store/appWindowStore.ts#L23) 复查：它以 `windows`、`windowOrder`、`focusedWindowId` 管理窗口，创建的 `AppWindowData` 含位置、尺寸、焦点与关闭回调。本课重点源码 `SessionStore` 不保存这些字段；因此，不能因为它管理“当前会话”就把它称作窗口管理器。
 
 ## 2. `projectId`：长期归属，不是当前聊天标签
 
-公共创建请求 [CreateSessionRequest](../../../../packages/core/src/types/agent.ts#L216) 要求 `projectId` 与 `projectName`。运行时项目上下文 `ProjectContext` 也以 `projectId` 作为必填信息（见 [pi-agent/types.ts 第 243 行附近](../../../../packages/core/src/lib/integrations/pi-agent/types.ts#L243)）。这说明在创建和运行边界，项目身份都不是可有可无的展示文本。
+公共创建请求 [packages/core/src/types/agent.ts 第 216 行](../../../../packages/core/src/types/agent.ts#L216) 要求 `projectId` 与 `projectName`。运行时项目上下文 `ProjectContext` 也以 `projectId` 作为必填信息（见 [packages/core/src/lib/integrations/pi-agent/types.ts 第 243 行附近](../../../../packages/core/src/lib/integrations/pi-agent/types.ts#L243)）。这说明在创建和运行边界，项目身份都不是可有可无的展示文本。
 
 对于小林而言，`projectId` 可以把“预算讨论”“酒店比较”“行程草案”等多段会话关联到同一个毕业旅行工作目录。项目名“毕业旅行”可以重名、可以修改、可以本地化；稳定 ID 才适合成为关联键。
 
@@ -71,7 +71,7 @@ sessions = [
 
 ## 4. `currentSessionId` 是受约束的引用
 
-`SessionStore.setCurrentSession(sessionId)` 位于 [第 179—195 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L179)：
+`SessionStore.setCurrentSession(sessionId)` 位于 [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 179—195 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L179)：
 
 ```ts
 const session = this.sessionsCache!.sessions.find((s) => s.id === sessionId);
@@ -107,7 +107,7 @@ return true;
 
 ### 关闭窗口时，`sessionId` 与 `projectId` 如何进入同一份元数据
 
-[AppWindowManager.ts 第 27—53 行](../../../../packages/web/src/services/AppWindowManager.ts#L27) 说明某些窗口关闭路径比“从 UI store 删除一个窗口”更复杂。`openWindow(config)` 会读取 `config.metadata` 中的 `entryType`、`entryId`、`sessionId`、`projectId`；当入口属于特定 Agent、项目或 Skill 类型时，它包装原有 `onClose`，并在回调中调用 `destroyAgentSession({ sessionId, projectId })` 与记忆整理。
+[packages/web/src/services/AppWindowManager.ts 第 27—53 行](../../../../packages/web/src/services/AppWindowManager.ts#L27) 说明某些窗口关闭路径比“从 UI store 删除一个窗口”更复杂。`openWindow(config)` 会读取 `config.metadata` 中的 `entryType`、`entryId`、`sessionId`、`projectId`；当入口属于特定 Agent、项目或 Skill 类型时，它包装原有 `onClose`，并在回调中调用 `destroyAgentSession({ sessionId, projectId })` 与记忆整理。
 
 这一事实需要精确解读：
 
@@ -138,13 +138,13 @@ return true;
 | 切换 | `setCurrentSession(id)` | 不新增、不删除 | 目标存在时改为该 ID |
 | 删除 | `deleteSession(id)` | 移除目标项 | 删除当前项时清为 `null` |
 
-`createSession` 的实现见 [第 198—217 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L198)：它为新会话生成 ID、初始化空消息、默认 system prompt 和模型，然后保存。`deleteSession` 位于 [第 125—148 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L125)，并在删掉当前项时将指针清空。
+`createSession` 的实现见 [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 198—217 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L198)：它为新会话生成 ID、初始化空消息、默认 system prompt 和模型，然后保存。`deleteSession` 位于 [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 125—148 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L125)，并在删掉当前项时将指针清空。
 
 这三条流的共同点是都围绕会话列表操作；它们没有直接管理窗口是否显示，也没有删除项目目录。因而，“关闭窗口”“删除会话”“删除项目”必须在产品交互和调用链中分别处理，不能因为按钮都可能标为“关闭”或“删除”就合并实现。
 
 ## 8. 测试证据与待补的跨层验证
 
-[session-store.test.ts 第 191—248 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts#L191) 验证了无当前会话时读取 `null`、创建后可读取当前会话、以及切换存在 ID 的行为；[第 283—330 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts#L283) 还验证删除当前会话会使 `loadCurrentSession()` 返回 `null`，删除非当前会话不影响当前选择。
+[packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts 第 191—248 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts#L191) 验证了无当前会话时读取 `null`、创建后可读取当前会话、以及切换存在 ID 的行为；[packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts 第 283—330 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts#L283) 还验证删除当前会话会使 `loadCurrentSession()` 返回 `null`，删除非当前会话不影响当前选择。
 
 这些测试为 `SessionStore` 内的会话指针语义提供证据，但没有验证：
 

@@ -189,7 +189,7 @@ E03 讨论了一轮交互中用户消息、助手消息和工具结果如何形�
 
 ## 8. 测试证据与尚未覆盖的边界
 
-当前 [agent.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts) 覆盖了 `OriginOSAgent` 的创建、初始化状态与基础生命周期，例如 [第 72—117 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts#L72) 断言 `sessionId`、`projectContext`、初始 `isThinking` 和空的 `activeTools`。这些测试说明 Agent 可使用有效配置创建，但**没有直接断言** `convertToLlm` 在预算耗尽时保留哪些消息，也没有为单条超长数组内容建立断言。
+当前 [packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts) 覆盖了 `OriginOSAgent` 的创建、初始化状态与基础生命周期，例如 [packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts 第 72—117 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts#L72) 断言 `sessionId`、`projectContext`、初始 `isThinking` 和空的 `activeTools`。这些测试说明 Agent 可使用有效配置创建，但**没有直接断言** `convertToLlm` 在预算耗尽时保留哪些消息，也没有为单条超长数组内容建立断言。
 
 因此，本课关于裁剪顺序和 40% 单条上限的依据是 `agent.ts` 的实际实现，而不是现有自动化测试的行为证明。一个更完整的测试集至少应补充以下案例：
 
@@ -199,7 +199,7 @@ E03 讨论了一轮交互中用户消息、助手消息和工具结果如何形�
 4. 超长字符串与超长内容块数组分别断言截断文本和截断标记。
 5. 使用真实模型分词器或适配器集成测试，评估 `/ 3` 估算与实际请求限制的差异。
 
-这些不是当前仓库已经通过的结论，而是由当前实现暴露出的测试缺口。技术教材必须把“代码存在”与“行为已被测试固定”区分开来。
+这些不是当前仓库已经通过的结论，而是由当前实现暴露出的测试缺口。“代码存在”与“行为已被测试固定”必须分开判断。
 
 ## 9. 小实验：用纸面预算模拟一次裁剪
 

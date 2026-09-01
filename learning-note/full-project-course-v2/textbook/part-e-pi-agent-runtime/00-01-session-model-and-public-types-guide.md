@@ -98,7 +98,7 @@ flowchart TD
 | 会话 | 连续消息历史和当前选择 | `sessionId`、`currentSessionId` | 会话 ID 可以替代窗口 ID |
 | 运行时 | 当前进程中正在处理的 Agent 实例 | `OriginOSAgent` 状态 | 运行时存在就表示历史已保存 |
 
-源码中也能看到这种分工。窗口状态在 [appWindowStore.ts](../../../../packages/web/src/store/appWindowStore.ts#L23) 中管理，重点是 `windows`、`windowOrder` 和 `focusedWindowId`。会话快照在 [session-store.ts](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L16) 中管理，重点是 `StoredSession` 和 `currentSessionId`。
+源码中也能看到这种分工。窗口状态在 [packages/web/src/store/appWindowStore.ts 第 23 行](../../../../packages/web/src/store/appWindowStore.ts#L23) 中管理，重点是 `windows`、`windowOrder` 和 `focusedWindowId`。会话快照在 [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 16 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L16) 中管理，重点是 `StoredSession` 和 `currentSessionId`。
 
 这两个文件不在同一层，也不管理同一种身份。把它们混起来，会直接导致“关窗口是否删会话”“切项目是否切会话”“当前会话是否等于当前窗口”这些问题无法判断。
 
@@ -115,7 +115,7 @@ flowchart TD
 
 一条消息可能会被保存；一次轮次则是处理过程。事件告诉 UI “现在发生了什么”；`uiState` 是这些事件在当前进程中的归纳结果。
 
-事件到状态的核心处理位于 [agent.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L947)。`turn_start` 会进入思考状态，工具开始和结束会更新活动工具列表，`turn_end` 和异常路径会清理状态。它们能解释为什么窗口显示“正在思考”，但不能证明业务任务已经完成。
+事件到状态的核心处理位于 [packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 947 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L947)。`turn_start` 会进入思考状态，工具开始和结束会更新活动工具列表，`turn_end` 和异常路径会清理状态。它们能解释为什么窗口显示“正在思考”，但不能证明业务任务已经完成。
 
 ### 3.3 完整历史、恢复材料、本轮上下文
 
@@ -127,7 +127,7 @@ flowchart TD
 | 恢复后的运行时消息 | 用于让 Agent 继续处理旧材料 | 需要经过映射 |
 | 本轮模型上下文 | 用于组成当前模型请求 | 只是被选中的子集 |
 
-“历史里有”不是“模型看见了”。长会话里，`convertToLlm` 会过滤角色、预留输出空间、估算 token、限制超长单条消息，再从最新消息向前保留。对应源码是 [agent.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L325)。
+“历史里有”不是“模型看见了”。长会话里，`convertToLlm` 会过滤角色、预留输出空间、估算 token、限制超长单条消息，再从最新消息向前保留。对应源码是 [packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 325 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L325)。
 
 这里要特别注意：当前实现使用 `chars / 3` 做近似估算。它是实现中的启发式规则，不是供应商模型的精确分词器。教材需要讲清这个事实，不能把估算写成模型层面的精确保证。
 
@@ -143,7 +143,7 @@ flowchart TD
 | `StoredSession` | `SessionStore` 当前快照 | 公共会话的无损副本 |
 | `PersistedRuntimeMessage` | 恢复运行时消息的最小材料 | 完整适配器消息 |
 
-这些类型都和“对话”有关，但使用边界不同。`AgentSession` 使用 `sessionId`，`StoredSession` 使用 `id`；恢复历史时， [runtime-history.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts#L8) 还会把持久化文本补成适配器需要的运行时消息。
+这些类型都和“对话”有关，但使用边界不同。`AgentSession` 使用 `sessionId`，`StoredSession` 使用 `id`；恢复历史时， [packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts 第 8 行](../../../../packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts#L8) 还会把持久化文本补成适配器需要的运行时消息。
 
 所以，类型名相近不代表可以互相赋值。安全的做法是通过明确转换函数处理字段改名、默认值、丢失语义和兼容测试。
 
@@ -153,14 +153,14 @@ E01—E08 不是八个孤立知识点。它们按“从可见窗口到模型上�
 
 | 课次 | 本课解决的判断问题 | 核心源码锚点 | 学完后的判断能力 |
 | --- | --- | --- | --- |
-| E01 | 窗口出现后，何时才跨过客户端到 Agent 的边界 | [client-hooks.ts](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts#L210) | 能区分窗口渲染、会话请求和 Agent 工作 |
-| E02 | 启动 Agent 前为什么需要配置包 | [types.ts](../../../../packages/core/src/lib/integrations/pi-agent/types.ts#L203) | 能区分用户输入、提示词、模型、工具和项目上下文 |
-| E03 | 一次用户请求为什么不是一个聊天气泡 | [agent.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L963) | 能区分消息、轮次、工具调用和事件 |
-| E04 | “正在思考”由什么事实决定 | [agent.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L947) | 能判断 `isThinking` 是即时状态，不是持久结论 |
-| E05 | 多个 ID 为什么不能混用 | [session-store.ts](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L179) | 能区分窗口、项目、会话和当前会话指针 |
-| E06 | 完整历史为什么不会原样进入模型 | [agent.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L325) | 能解释上下文选择、预算和截断 |
-| E07 | 同一段对话为什么有多种类型形状 | [runtime-history.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts#L57) | 能识别类型转换边界和字段差异 |
-| E08 | 不连接真实模型怎样验证会话骨架 | [session-store.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts#L83) | 能用测试和纸面推演验证基础会话结构 |
+| E01 | 窗口出现后，何时才跨过客户端到 Agent 的边界 | [packages/core/src/lib/integrations/pi-agent/client-hooks.ts 第 210 行](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts#L210) | 能区分窗口渲染、会话请求和 Agent 工作 |
+| E02 | 启动 Agent 前为什么需要配置包 | [packages/core/src/lib/integrations/pi-agent/types.ts 第 203—239 行](../../../../packages/core/src/lib/integrations/pi-agent/types.ts#L203)、[packages/core/src/lib/integrations/pi-agent/system/prompt.ts 第 15—148 行](../../../../packages/core/src/lib/integrations/pi-agent/system/prompt.ts#L15) | 能区分用户输入、提示词、模型、工具和项目上下文，也能识别两份同名配置接口 |
+| E03 | 一次用户请求为什么不是一个聊天气泡 | [packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 963 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L963) | 能区分消息、轮次、工具调用和事件 |
+| E04 | “正在思考”由什么事实决定 | [packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 947 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L947) | 能判断 `isThinking` 是即时状态，不是持久结论 |
+| E05 | 多个 ID 为什么不能混用 | [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 179 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L179) | 能区分窗口、项目、会话和当前会话指针 |
+| E06 | 完整历史为什么不会原样进入模型 | [packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 325 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L325) | 能解释上下文选择、预算和截断 |
+| E07 | 同一段对话为什么有多种类型形状 | [packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts 第 57 行](../../../../packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts#L57) | 能识别类型转换边界和字段差异 |
+| E08 | 不连接真实模型怎样验证会话骨架 | [packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts 第 83 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts#L83) | 能用测试和纸面推演验证基础会话结构 |
 
 这条链的停止边界也要清楚。E01—E08 还没有详细讲浏览器怎样发送 HTTP 请求、服务端怎样创建 Agent、流式事件怎样回到 UI。那些问题进入后续网络与流式单元再展开。
 
@@ -172,16 +172,16 @@ E01—E08 不是八个孤立知识点。它们按“从可见窗口到模型上�
 
 | 课次 | 已直接精读的生产源码 | 配对测试或验证入口 | 本单元只证明什么 |
 | --- | --- | --- | --- |
-| E01 | [client-hooks.ts](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts)、[hooks.ts](../../../../packages/core/src/lib/integrations/pi-agent/hooks.ts)、[app-window.ts](../../../../packages/core/src/types/app-window.ts) | [client-hooks-session-isolation.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts)；窗口类型暂无配对测试 | Hook 出口、窗口配置、窗口身份 |
-| E02 | [types.ts](../../../../packages/core/src/lib/integrations/pi-agent/types.ts)、[llm-config.ts](../../../../packages/core/src/lib/integrations/pi-agent/llm-config.ts)、[config.ts](../../../../packages/core/src/lib/integrations/pi-agent/config.ts) | 配置归一化和真实供应商连通性仍需后续测试 | 运行配置合同、归一化、配置存在性检查 |
-| E03 | [agent.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts)、[message.ts](../../../../packages/core/src/lib/integrations/pi-agent/message.ts)、[display-content.ts](../../../../packages/core/src/lib/integrations/pi-agent/display-content.ts) | [agent.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts)、[message.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/message.test.ts) | 一轮处理、协议工具、展示文本边界 |
-| E04 | [agent.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts) 的事件窗口、[tool-event-status.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/tool-event-status.ts) | [agent.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts)、[tool-event-status.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/tool-event-status.test.ts) | 事件到即时状态、工具失败结果归一化 |
-| E05 | [session-store.ts](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts)、[appWindowStore.ts](../../../../packages/web/src/store/appWindowStore.ts)、[AppWindowManager.ts](../../../../packages/web/src/services/AppWindowManager.ts) | [session-store.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts)；窗口管理联动暂无配对测试 | 三类 ID、当前会话指针、关闭窗口与运行时销毁边界 |
-| E06 | [agent.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts) 的上下文窗口 | [agent.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts)；上下文裁剪暂无直接断言 | 角色过滤、token 预算、单条截断、尾部保留 |
-| E07 | [types/agent.ts](../../../../packages/core/src/types/agent.ts)、[runtime-history.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts)、[index.ts](../../../../packages/core/src/lib/integrations/pi-agent/index.ts) | [runtime-history-restore.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts)、[session-store.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts) | 公共类型、恢复映射、公共导出边界 |
-| E08 | 不新增生产逻辑；复用上述会话与恢复边界 | [session-store.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts)、[message.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/message.test.ts)、[tool-event-status.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/tool-event-status.test.ts) | 将已读源码转成可验证的会话骨架 |
+| E01 | [packages/core/src/lib/integrations/pi-agent/client-hooks.ts](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts)、[packages/core/src/lib/integrations/pi-agent/hooks.ts](../../../../packages/core/src/lib/integrations/pi-agent/hooks.ts)、[packages/core/src/types/app-window.ts](../../../../packages/core/src/types/app-window.ts) | [packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts)；窗口类型暂无配对测试 | Hook 出口、窗口配置、窗口身份 |
+| E02 | [packages/core/src/lib/integrations/pi-agent/types.ts 第 203—280 行](../../../../packages/core/src/lib/integrations/pi-agent/types.ts#L203)、[packages/core/src/lib/integrations/pi-agent/system/config.ts 第 13—143 行](../../../../packages/core/src/lib/integrations/pi-agent/system/config.ts#L13)、[packages/core/src/lib/integrations/pi-agent/system/prompt.ts 第 15—148 行](../../../../packages/core/src/lib/integrations/pi-agent/system/prompt.ts#L15)、[packages/core/src/lib/integrations/pi-agent/llm-config.ts 第 1—151 行](../../../../packages/core/src/lib/integrations/pi-agent/llm-config.ts#L1)、[packages/core/src/lib/integrations/pi-agent/config.ts 第 412—441 行](../../../../packages/core/src/lib/integrations/pi-agent/config.ts#L412) | [packages/core/src/lib/integrations/pi-agent/system/__tests__/config.test.ts 第 97—263 行](../../../../packages/core/src/lib/integrations/pi-agent/system/__tests__/config.test.ts#L97)、[packages/core/src/lib/integrations/pi-agent/__tests__/intent-understanding.test.ts 第 52—137 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/intent-understanding.test.ts#L52)；真实供应商连通性仍需集成验证 | 核心运行配置与并存配置工厂的差异、提示词替换、归一化和配置存在性检查 |
+| E03 | [packages/core/src/lib/integrations/pi-agent/core/agent.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts)、[packages/core/src/lib/integrations/pi-agent/message.ts](../../../../packages/core/src/lib/integrations/pi-agent/message.ts)、[packages/core/src/lib/integrations/pi-agent/display-content.ts](../../../../packages/core/src/lib/integrations/pi-agent/display-content.ts) | [packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts)、[packages/core/src/lib/integrations/pi-agent/__tests__/message.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/message.test.ts) | 一轮处理、协议工具、展示文本边界 |
+| E04 | [packages/core/src/lib/integrations/pi-agent/core/agent.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts) 的事件窗口、[packages/core/src/lib/integrations/pi-agent/core/tool-event-status.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/tool-event-status.ts) | [packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts)、[packages/core/src/lib/integrations/pi-agent/core/__tests__/tool-event-status.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/tool-event-status.test.ts) | 事件到即时状态、工具失败结果归一化 |
+| E05 | [packages/core/src/lib/integrations/pi-agent/session-store.ts](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts)、[packages/web/src/store/appWindowStore.ts](../../../../packages/web/src/store/appWindowStore.ts)、[packages/web/src/services/AppWindowManager.ts](../../../../packages/web/src/services/AppWindowManager.ts) | [packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts)；窗口管理联动暂无配对测试 | 三类 ID、当前会话指针、关闭窗口与运行时销毁边界 |
+| E06 | [packages/core/src/lib/integrations/pi-agent/core/agent.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts) 的上下文窗口 | [packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts)；上下文裁剪暂无直接断言 | 角色过滤、token 预算、单条截断、尾部保留 |
+| E07 | [packages/core/src/types/agent.ts](../../../../packages/core/src/types/agent.ts)、[packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts)、[packages/core/src/lib/integrations/pi-agent/index.ts](../../../../packages/core/src/lib/integrations/pi-agent/index.ts) | [packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts)、[packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts) | 公共类型、恢复映射、公共导出边界 |
+| E08 | 不新增生产逻辑；复用上述会话与恢复边界 | [packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts)、[packages/core/src/lib/integrations/pi-agent/__tests__/message.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/message.test.ts)、[packages/core/src/lib/integrations/pi-agent/core/__tests__/tool-event-status.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/tool-event-status.test.ts) | 将已读源码转成可验证的会话骨架 |
 
-本单元相邻但尚未精读的文件也要明说。`session-restore.ts`、`client.ts`、`store.ts` 属于后续会话恢复与客户端请求链路；`server.ts`、`server-config.ts` 属于服务端创建与流式通信；`stream-dedupe.ts`、`stream-render-scheduler.ts` 属于流式稳定性；`core/index.ts` 需要结合 Skills 能力再讲。
+本单元相邻但尚未精读的文件也要明说。`session-restore.ts` 与 `store.ts` 属于后续会话恢复和 UI 状态单元；`server-config.ts` 属于服务端模型创建；`stream-dedupe.ts`、`stream-render-scheduler.ts` 属于流式稳定性。`client.ts`、`server.ts`、`core/index.ts` 和 `system/index.ts` 主要承担再导出责任，将在 Part E 末尾的公共入口复盘中统一说明，不应把再导出文件误算成另一套业务实现。
 
 这不是遗漏，而是边界管理。一个单元必须知道自己讲到哪里，也必须知道哪里还没有讲。
 
@@ -250,10 +250,10 @@ currentSessionId = trip-hotels
 
 | 测试入口 | 已经证明 | 没有证明 |
 | --- | --- | --- |
-| [client-hooks-session-isolation.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts) | 多个 Hook 会话的初始化与流事件可按 session 隔离 | 真实浏览器与远程模型服务一定连通 |
-| [agent.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts) | Agent 初始状态、基础生命周期和部分事件路径 | 每个事件分支的完整 UI 状态机 |
-| [session-store.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts) | 创建、选择、删除、重命名和基础转换 | 项目删除、窗口关闭、运行中请求之间的跨层协同 |
-| [runtime-history-restore.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts) | 部分模型下助手历史可补成运行时消息 | 工具角色、异常 API、损坏文件的完整恢复策略 |
+| [packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts) | 多个 Hook 会话的初始化与流事件可按 session 隔离 | 真实浏览器与远程模型服务一定连通 |
+| [packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts) | Agent 初始状态、基础生命周期和部分事件路径 | 每个事件分支的完整 UI 状态机 |
+| [packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts) | 创建、选择、删除、重命名和基础转换 | 项目删除、窗口关闭、运行中请求之间的跨层协同 |
+| [packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts) | 部分模型下助手历史可补成运行时消息 | 工具角色、异常 API、损坏文件的完整恢复策略 |
 
 读测试时保持三个问题：
 

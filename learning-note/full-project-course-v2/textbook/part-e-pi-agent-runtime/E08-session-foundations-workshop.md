@@ -14,12 +14,12 @@
 
 | 项目 | 应能写出的结论 | 对应的源码依据 |
 | --- | --- | --- |
-| 项目身份 | 旅行项目通过 `projectId` 归属，不用标题代替稳定 ID | [CreateSessionRequest](../../../../packages/core/src/types/agent.ts#L216) 与 [ProjectContext](../../../../packages/core/src/lib/integrations/pi-agent/types.ts#L243) |
-| 会话身份 | 公共与运行路径使用 `sessionId`；当前存储快照用 `id`，转换时显式映射 | [StoredSession](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L22) 与 [SessionData 转换](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L278) |
-| 当前选择 | `currentSessionId` 是指向会话列表中某项的引用 | [SessionsListData](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L16) 与 [setCurrentSession](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L179) |
-| 存储内容 | 会话快照保存消息、提示词、模型信息与可选项目上下文 | [StoredSession](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L22) |
-| 恢复内容 | 持久化文本会按当前模型 API 转成适配器运行时消息 | [mapPersistedMessagesForRuntime](../../../../packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts#L57) |
-| 模型可见内容 | 完整历史还会经过过滤、预算和尾部保留 | [convertToLlm](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L325) |
+| 项目身份 | 旅行项目通过 `projectId` 归属，不用标题代替稳定 ID | [packages/core/src/types/agent.ts 第 216 行](../../../../packages/core/src/types/agent.ts#L216) 与 [packages/core/src/lib/integrations/pi-agent/types.ts 第 243 行](../../../../packages/core/src/lib/integrations/pi-agent/types.ts#L243) |
+| 会话身份 | 公共与运行路径使用 `sessionId`；当前存储快照用 `id`，转换时显式映射 | [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 22 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L22) 与 [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 278 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L278) |
+| 当前选择 | `currentSessionId` 是指向会话列表中某项的引用 | [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 16 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L16) 与 [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 179 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L179) |
+| 存储内容 | 会话快照保存消息、提示词、模型信息与可选项目上下文 | [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 22 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L22) |
+| 恢复内容 | 持久化文本会按当前模型 API 转成适配器运行时消息 | [packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts 第 57 行](../../../../packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts#L57) |
+| 模型可见内容 | 完整历史还会经过过滤、预算和尾部保留 | [packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 325 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L325) |
 
 ```mermaid
 flowchart TD
@@ -59,7 +59,7 @@ const tripSession = {
 };
 ```
 
-这是一份帮助理解 `StoredSession` 的教学对象，不应直接当作生产环境的适配器消息类型样例。实际 [StoredSession 定义](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L22) 使用从 `@originos/pi-agent-adapter` 导入的 `AgentMessage[]`；不同适配器版本可能对助手消息的字段有额外要求。本课先使用字符串形式把注意力放在会话层的关系上。
+这是一份帮助理解 `StoredSession` 的教学对象，不应直接当作生产环境的适配器消息类型样例。实际 [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 22 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L22) 使用从 `@originos/pi-agent-adapter` 导入的 `AgentMessage[]`；不同适配器版本可能对助手消息的字段有额外要求。本课先使用字符串形式把注意力放在会话层的关系上。
 
 将它与一个列表外层放在一起：
 
@@ -74,7 +74,7 @@ const sessionsList = {
 
 ## 3. 实验一：从“新会话”观察哪些事实尚未发生
 
-阅读 [SessionStore.createSession 第 198—217 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L198)。它会构造一个新的 `StoredSession`，关键字段如下：
+阅读 [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 198—217 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L198)。它会构造一个新的 `StoredSession`，关键字段如下：
 
 ```ts
 const session: StoredSession = {
@@ -100,7 +100,7 @@ const session: StoredSession = {
 
 `createSession` 的最后调用 `saveSession(session)`；而 `saveSession` 会将 `this.sessionsCache!.currentSessionId = sessionData.id`。因此，新建会话会成为当前会话。这不是由窗口标题推断出来的，而是由写入逻辑决定的行为。
 
-已有 [session-store.test.ts 第 83—106 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts#L83) 覆盖了生成 ID、默认名称以及“新建会话成为当前会话”的事实。测试名称说明了验证意图；实际断言才是可重复的证据。
+已有 [packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts 第 83—106 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts#L83) 覆盖了生成 ID、默认名称以及“新建会话成为当前会话”的事实。测试名称说明了验证意图；实际断言才是可重复的证据。
 
 ## 4. 实验二：在两段旅行会话之间切换
 
@@ -114,7 +114,7 @@ sessions = [
 currentSessionId = "trip-backup"
 ```
 
-阅读 [setCurrentSession 第 179—195 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L179)，然后按顺序推演：
+阅读 [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 179—195 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L179)，然后按顺序推演：
 
 1. 方法先在 `sessions` 中查找传入 ID。
 2. 若找不到，返回 `false`，不会改写当前指针。
@@ -128,21 +128,21 @@ currentSessionId = "trip-backup"
 | `setCurrentSession("does-not-exist")` 返回 `false` | 存储层拒绝悬空引用 | 网络、模型或工具调用发生错误 |
 | 关闭一个聊天窗口 | 窗口实例可能消失 | `sessions.json` 中的快照必然被删除 |
 
-[session-store.test.ts 第 219—248 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts#L219) 针对存在的目标与多次切换进行断言。该测试支持“切换当前会话指针”的结论，但它不覆盖浏览器窗口行为，也不覆盖真实服务端会话路由，因此不能扩大解释范围。
+[packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts 第 219—248 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts#L219) 针对存在的目标与多次切换进行断言。该测试支持“切换当前会话指针”的结论，但它不覆盖浏览器窗口行为，也不覆盖真实服务端会话路由，因此不能扩大解释范围。
 
 ## 5. 实验三：删除当前会话时，系统为什么要清空指针
 
-继续阅读 [deleteSession 第 125—148 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L125)。删除逻辑先从 `sessions` 数组移除目标；如果被删 ID 正好等于 `currentSessionId`，再把当前指针设置为 `null`。
+继续阅读 [packages/core/src/lib/integrations/pi-agent/session-store.ts 第 125—148 行](../../../../packages/core/src/lib/integrations/pi-agent/session-store.ts#L125)。删除逻辑先从 `sessions` 数组移除目标；如果被删 ID 正好等于 `currentSessionId`，再把当前指针设置为 `null`。
 
 这是引用完整性的基本规则。假设当前值仍然保留 `"trip-main"`，但数组中已经没有该对象，后续 `loadCurrentSession` 会找不到会话。清空为 `null` 明确表达“目前没有选择任何有效会话”，比保留一个过期 ID 更可诊断。
 
-已有 [session-store.test.ts 第 283—330 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts#L283) 覆盖了删除存在与不存在会话、删除当前会话后 `loadCurrentSession()` 返回 `null`、删除非当前会话不影响当前选择。这是本工作坊中最适合用自动化测试复核的异常路径之一。
+已有 [packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts 第 283—330 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-store.test.ts#L283) 覆盖了删除存在与不存在会话、删除当前会话后 `loadCurrentSession()` 返回 `null`、删除非当前会话不影响当前选择。这是本工作坊中最适合用自动化测试复核的异常路径之一。
 
 删除存储快照也不等于已经中断正在运行的模型请求。`SessionStore` 的职责是会话文件与缓存管理；请求中断、工具执行与 UI 状态应沿 E03、E04 的 Agent 运行时路径分析。跨层副作用若没有显式调用链，就不能假定必然发生。
 
 ## 6. 实验四：把已保存文本恢复为运行时消息
 
-前面的 `StoredSession` 描述的是一个存储快照。运行时恢复的另一条路径由 [core/runtime-history.ts 第 57—91 行](../../../../packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts#L57) 的 `mapPersistedMessagesForRuntime` 展示。它接受最小持久化消息：
+前面的 `StoredSession` 描述的是一个存储快照。运行时恢复的另一条路径由 [packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts 第 57—91 行](../../../../packages/core/src/lib/integrations/pi-agent/core/runtime-history.ts#L57) 的 `mapPersistedMessagesForRuntime` 展示。它接受最小持久化消息：
 
 ```ts
 type PersistedRuntimeMessage = {
@@ -181,7 +181,7 @@ sequenceDiagram
 
 因此，恢复之后的历史可以支持继续对话，但未必保留了历史执行过程的全部机器可读细节。若产品要求精确重放工具调用，当前映射规则不足以满足要求，需要另外设计持久化协议与状态恢复机制。
 
-[runtime-history-restore.test.ts 第 52—70 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts#L52) 已验证 OpenAI 和 Anthropic 两种模型下，助手消息会继承当前模型的 `api`、`provider`、`model`，并使用文本内容块。该测试没有覆盖工具角色与不受支持 API 的异常路径；本实验应把它们列为未验证边界，而非默认认为已正确处理。
+[packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts 第 52—70 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts#L52) 已验证 OpenAI 和 Anthropic 两种模型下，助手消息会继承当前模型的 `api`、`provider`、`model`，并使用文本内容块。该测试没有覆盖工具角色与不受支持 API 的异常路径；本实验应把它们列为未验证边界，而非默认认为已正确处理。
 
 ## 7. 实验五：恢复成功，不等于早期预算已进入本轮输入
 
@@ -208,7 +208,7 @@ pnpm --filter @originos/core exec vitest run src/lib/integrations/pi-agent/__tes
 
 即使命令通过，得到的证据范围也仅限该测试文件的断言：新建、保存、加载、重命名、删除、当前会话和静态转换等。真实 API 请求、浏览器交互、模型 API 兼容性和历史裁剪仍需要对应的集成测试或人工验证。
 
-本单元新增的协议与工具状态阅读还对应两项独立测试：[message.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/message.test.ts) 验证消息协议工具的验证与转换，[tool-event-status.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/tool-event-status.test.ts) 验证工具结果形状到失败状态的归一化。两项测试均不替代真实客户端发送链或窗口错误提示的端到端验证。
+本单元新增的协议与工具状态阅读还对应两项独立测试：[packages/core/src/lib/integrations/pi-agent/__tests__/message.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/message.test.ts) 验证消息协议工具的验证与转换，[packages/core/src/lib/integrations/pi-agent/core/__tests__/tool-event-status.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/tool-event-status.test.ts) 验证工具结果形状到失败状态的归一化。两项测试均不替代真实客户端发送链或窗口错误提示的端到端验证。
 
 ## 9. 工作坊验收表
 

@@ -28,9 +28,9 @@ flowchart LR
 
 ## 2. 事件从哪里进入 `OriginOSAgent`
 
-[agent.ts 第 513—517 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L513) 在内部 Agent 上注册订阅：每收到一个事件，先调用 `handleAgentEvent(event)`，再调用 `routeAgentEvent(event)`。前者维护本课的运行时状态，后者继续完成事件路由。这个调用顺序说明，界面能订阅到事件并不意味着它必须自己维护所有状态；`OriginOSAgent` 已经先记录了部分共同事实。
+[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 513—517 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L513) 在内部 Agent 上注册订阅：每收到一个事件，先调用 `handleAgentEvent(event)`，再调用 `routeAgentEvent(event)`。前者维护本课的运行时状态，后者继续完成事件路由。这个调用顺序说明，界面能订阅到事件并不意味着它必须自己维护所有状态；`OriginOSAgent` 已经先记录了部分共同事实。
 
-事件处理器位于 [agent.ts 第 947—1055 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L947)，核心形式是一个 `switch ((event as any).type)`。`as any` 让实现可以读取不同事件携带的专有字段，但也削弱了编译器对事件形状的保护。因此，阅读每个分支时必须看它实际访问了哪些字段，不能假定所有事件都有相同结构。
+事件处理器位于 [packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 947—1055 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L947)，核心形式是一个 `switch ((event as any).type)`。`as any` 让实现可以读取不同事件携带的专有字段，但也削弱了编译器对事件形状的保护。因此，阅读每个分支时必须看它实际访问了哪些字段，不能假定所有事件都有相同结构。
 
 ## 3. 一次旅行请求的事件时间线
 
@@ -82,7 +82,7 @@ case "turn_start":
 
 ## 5. `turn_end`：停止思考，不等于完成所有业务动作
 
-[第 969—1023 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L969) 处理 `turn_end`。它读取事件中的 `message`、`toolResults`，计算工具调用与结果数量，然后执行：
+[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 969—1023 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L969) 处理 `turn_end`。它读取事件中的 `message`、`toolResults`，计算工具调用与结果数量，然后执行：
 
 ```ts
 this.state.uiState.isThinking = false;
@@ -126,7 +126,7 @@ case "tool_execution_end":
 
 ### 工具结束事件中的失败判定来自哪里
 
-[tool-event-status.ts 第 1—119 行](../../../../packages/core/src/lib/integrations/pi-agent/core/tool-event-status.ts#L1) 将工具事件的多种结果形状压缩为 `ToolEventStatus`：`failed`、可选 `exitCode` 与可选 `reason`。它依次检查 `result.details`、结果对象本身、文本内容中可解析的 JSON；若发现 `success: false`、非零 `exitCode` 或非空 `error`，便返回失败。若结构化结果没有失败信号，但事件的 `isError` 为真，则回退为 SDK 报告的失败。
+[packages/core/src/lib/integrations/pi-agent/core/tool-event-status.ts 第 1—119 行](../../../../packages/core/src/lib/integrations/pi-agent/core/tool-event-status.ts#L1) 将工具事件的多种结果形状压缩为 `ToolEventStatus`：`failed`、可选 `exitCode` 与可选 `reason`。它依次检查 `result.details`、结果对象本身、文本内容中可解析的 JSON；若发现 `success: false`、非零 `exitCode` 或非空 `error`，便返回失败。若结构化结果没有失败信号，但事件的 `isError` 为真，则回退为 SDK 报告的失败。
 
 这解释了为什么 `tool_execution_end` 不能只看一个布尔字段。小林的酒店查询工具可能把失败写在 `details.exitCode`，也可能把 JSON 放在文本内容块；状态解析器负责统一读取，`handleAgentEvent` 负责从 `activeTools` 移除已结束项并记录日志，UI 负责决定如何呈现。三层责任不应合并。
 
@@ -141,13 +141,13 @@ this.healthMonitor.markProcessingEnd();
 this.healthMonitor.recordMessageHandled();
 ```
 
-这比 `turn_end` 多了一步：清空全部活动工具。它防止某些路径遗漏工具结束事件时，Agent 已结束却仍残留“正在查询”的界面状态。另一个兜底位于请求异常处理处：[agent.ts 第 1286—1290 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L1286) 也会把 `isThinking` 设为 `false`、清空 `activeTools` 并记录错误。
+这比 `turn_end` 多了一步：清空全部活动工具。它防止某些路径遗漏工具结束事件时，Agent 已结束却仍残留“正在查询”的界面状态。另一个兜底位于请求异常处理处：[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 1286—1290 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L1286) 也会把 `isThinking` 设为 `false`、清空 `activeTools` 并记录错误。
 
 这类清理是运行时一致性策略，不是持久化策略。重启应用后不能原样恢复旧 `activeTools`：旧进程已经不存在，旧的“正在查询”既不能代表当前网络连接，也不能代表工具仍在执行。把短时状态错误地保存并恢复，反而会向用户显示过期进度。
 
 ## 8. 初始状态、可验证证据与测试缺口
 
-`OriginOSAgent` 的初始 `state` 在 [agent.ts 第 280—288 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L280) 中设置为 `isThinking: false` 与 `activeTools: []`。对应的 [agent.test.ts 第 72—117 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts#L72) 会创建实例并断言这两个初值，以及 `sessionId`、`projectContext`。
+`OriginOSAgent` 的初始 `state` 在 [packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 280—288 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L280) 中设置为 `isThinking: false` 与 `activeTools: []`。对应的 [packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts 第 72—117 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts#L72) 会创建实例并断言这两个初值，以及 `sessionId`、`projectContext`。
 
 这些测试能够支持“新建 Agent 初始不是思考中、没有活动工具”的结论，却没有逐分支模拟 `agent_start`、`tool_execution_start`、`turn_end`、`agent_end` 后的状态变化，也没有对同名并发工具的清理语义建立断言。因此，事件映射本身主要以源代码为证据；若未来改动事件处理器，应补充状态机式单元测试，至少覆盖：
 
@@ -157,7 +157,7 @@ this.healthMonitor.recordMessageHandled();
 4. 同名工具的并发或重复事件对列表的影响。
 5. 订阅者收到事件的顺序与 UI 实际渲染的集成验证。
 
-[tool-event-status.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/tool-event-status.test.ts) 是工具失败归一化的配对测试入口。它只能证明不同结果形状怎样生成 `ToolEventStatus`，不能证明旅行窗口一定会把该失败渲染成用户可理解的提示。
+[packages/core/src/lib/integrations/pi-agent/core/__tests__/tool-event-status.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/tool-event-status.test.ts) 是工具失败归一化的配对测试入口。它只能证明不同结果形状怎样生成 `ToolEventStatus`，不能证明旅行窗口一定会把该失败渲染成用户可理解的提示。
 
 ## 9. 小实验：手工演算酒店查询的一次状态变化
 

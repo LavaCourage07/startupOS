@@ -41,9 +41,9 @@ sequenceDiagram
 
 四者不是可任选的“附加信息”。没有提示词，Agent 不知道应怎样工作；没有模型，它不能生成；没有明确项目上下文，运行时无法可靠判断工作归属；没有工具，模型最多只能建议，不能执行外部动作。
 
-## 第一段源码：配置合同先规定什么可以进入运行时
+## 第一段源码：运行时真正使用哪一份配置合同
 
-[OriginOSAgentConfig（第 203-239 行）](../../../../packages/core/src/lib/integrations/pi-agent/types.ts#L203) 将运行配置划分为必填字段、可选字段和行为开关：
+[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 16—24 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L16) 显示，`OriginOSAgent` 从 `../types` 导入 `OriginOSAgentConfig`，只从 `../system/config` 导入 `ProjectContext`。因此，阅读构造函数时应以 [packages/core/src/lib/integrations/pi-agent/types.ts 第 203—239 行](../../../../packages/core/src/lib/integrations/pi-agent/types.ts#L203) 为配置合同：
 
 ```ts
 export interface OriginOSAgentConfig {
@@ -69,9 +69,52 @@ export interface OriginOSAgentConfig {
 
 `thinkingLevel` 是联合类型，不允许随便写 `'very-smart'`。`completionGuardEnabled` 默认语义在注释中说明：一般开启，但项目访谈可显式关闭，避免把正常追问错判为任务未完成。它是行为策略开关，不是“模型能力等级”。
 
-## 配置进入运行时前：为什么需要归一化，而不是原样透传
+### 仓库中还有一份同名接口，为什么不能混用
 
-`OriginOSAgentConfig.model` 描述的是已可用的运行时模型；而页面、用户偏好或恢复数据带来的 `llmConfig` 仍可能含有别名、空白字符串、旧字段或不同凭证写法。 [llm-config.ts 第 1—151 行](../../../../packages/core/src/lib/integrations/pi-agent/llm-config.ts#L1) 的 `normalizeRuntimeLLMConfig` 正是这层输入整理器。
+[packages/core/src/lib/integrations/pi-agent/system/config.ts 第 13—43 行](../../../../packages/core/src/lib/integrations/pi-agent/system/config.ts#L13) 也声明了一个 `OriginOSAgentConfig`。名称相同，不代表类型相同：
+
+| 比较项 | `types.ts` 中的运行时配置 | `system/config.ts` 中的配置工厂类型 |
+| --- | --- | --- |
+| `sessionId` | 可选 | 必填 |
+| `projectContext` | 可选，类型来自 `types.ts` | 必填，类型定义在本文件 |
+| `tools` | `AgentTool<any>[]`，是真正可执行的工具对象 | `string[]`，只是工具名称 |
+| 完成度保护 | 有 `completionGuardEnabled` | 没有该字段 |
+| 核心 `OriginOSAgent` 是否直接使用 | 是 | 否 |
+
+这个分叉会带来两个重要结论。
+
+第一，不能因为 `system/config.ts` 的 `sessionId` 必填，就断言低层 `OriginOSAgent` 构造参数也必填；核心类实际接受的是另一份接口。第二，工具名称数组不能直接交给核心类执行。模型真正能够调用的工具必须是带有定义和 `execute` 实现的 `AgentTool` 对象。
+
+[packages/core/src/lib/integrations/pi-agent/system/config.ts 第 78—118 行](../../../../packages/core/src/lib/integrations/pi-agent/system/config.ts#L78) 的 `DEFAULT_CONFIG` 与 `createOriginOSAgentConfig` 仍是可阅读、可测试的配置工厂，但当前核心类没有导入它。教材因此把它称为“并存的配置工厂路径”，而不把它误写成所有会话都会经过的唯一生产入口。若后续重构，应先统一这两个公共名字和字段语义，再迁移调用方。
+
+## 第二段源码：默认系统提示词怎样从模板变成文本
+
+配置合同要求 `systemPrompt` 是字符串，但字符串从哪里来，要看具体启动路径。 [packages/core/src/lib/integrations/pi-agent/system/prompt.ts 第 15—91 行](../../../../packages/core/src/lib/integrations/pi-agent/system/prompt.ts#L15) 提供了一份基础模板 `ORIGINOS_SYSTEM_PROMPT`，其中包含五类内容：
+
+1. Agent 的身份与能力说明；
+2. 文件、本体、查询和编辑等意图分类；
+3. 从自然语言中提取工具参数的规则；
+4. 多工具执行与信息不足时的澄清规则；
+5. 当前项目名称、项目 ID、本体 ID和项目路径等占位符。
+
+提示词中的一句“可以调用某工具”只是在指导模型，不能授予真实能力。真实能力仍由运行时注册的工具对象决定。如果提示词列出 `delete_file`，而 Agent 的工具列表没有它，模型并不会因此获得删除文件的能力；反过来，工具已注册但提示词完全没有说明，模型也可能不知道何时使用它。提示词与工具注册是两份必须一致、但职责不同的材料。
+
+[packages/core/src/lib/integrations/pi-agent/system/prompt.ts 第 96—136 行](../../../../packages/core/src/lib/integrations/pi-agent/system/prompt.ts#L96) 定义变量并执行替换：
+
+```ts
+return ORIGINOS_SYSTEM_PROMPT.replace(/{(\w+)}/g, (_match, key): string => {
+  const value = variables[key as keyof SystemPromptVariables];
+  return value ?? `{${key}}`;
+});
+```
+
+这段代码会替换模板中形如 `{projectName}` 的标记；若变量缺失，则原样保留占位符，而不是替换成空字符串。例如小林没有 `ontologyId` 时，最终提示词可能仍含 `{ontologyId}`。这避免了无声丢失字段位置，但也意味着“成功返回字符串”不等于“所有上下文都已填好”。调用方若要求完整提示词，还需要检查是否存在未解析占位符。
+
+[packages/core/src/lib/integrations/pi-agent/system/config.ts 第 92—117 行](../../../../packages/core/src/lib/integrations/pi-agent/system/config.ts#L92) 展示了这份模板的一条使用路径：配置工厂先为项目名和项目 ID 补默认值，再调用 `buildSystemPrompt`。Skill 窗口还会构建自己的会话提示词，后续 E36 会单独分析；不能把基础模板误认为每一种 Agent 入口最终都使用的完整提示词。
+
+## 第三段源码：配置进入运行时前为什么需要归一化
+
+`OriginOSAgentConfig.model` 描述的是已可用的运行时模型；而页面、用户偏好或恢复数据带来的 `llmConfig` 仍可能含有别名、空白字符串、旧字段或不同凭证写法。 [packages/core/src/lib/integrations/pi-agent/llm-config.ts 第 1—151 行](../../../../packages/core/src/lib/integrations/pi-agent/llm-config.ts#L1) 的 `normalizeRuntimeLLMConfig` 正是这层输入整理器。
 
 | 原始情况 | 归一化行为 | 小林旅行案例中的意义 |
 | --- | --- | --- |
@@ -83,11 +126,11 @@ export interface OriginOSAgentConfig {
 
 这个函数不创建模型实例，也不向供应商发送请求；它只返回标准化的 `RuntimeLLMConfig`。因此，“归一化成功”不能证明 API Key 有效或模型可连通。
 
-另一层 [config.ts 第 412—441 行](../../../../packages/core/src/lib/integrations/pi-agent/config.ts#L412) 的 `validateConfig` 和 `injectBrowserConfig` 则处理配置存在性与浏览器注入。它检查当前状态中是否存在 Anthropic 或 Google 凭证，并对自定义 Base URL 给出警告；它不会替代服务端实际建模，也不会验证代理一定可用。E02 的配置链因而有三个不可互换的阶段：输入归一化、配置存在性检查、运行时模型创建。
+另一层 [packages/core/src/lib/integrations/pi-agent/config.ts 第 412—441 行](../../../../packages/core/src/lib/integrations/pi-agent/config.ts#L412) 的 `validateConfig` 和 `injectBrowserConfig` 则处理配置存在性与浏览器注入。它检查当前状态中是否存在 Anthropic 或 Google 凭证，并对自定义 Base URL 给出警告；它不会替代服务端实际建模，也不会验证代理一定可用。E02 的配置链因而有三个不可互换的阶段：输入归一化、配置存在性检查、运行时模型创建。
 
-## 第二段源码：项目上下文里最容易混淆的三个字段
+## 第四段源码：项目上下文里最容易混淆的三个字段
 
-[ProjectContext（第 243-280 行）](../../../../packages/core/src/lib/integrations/pi-agent/types.ts#L243) 中的字段可用下列旅行案例说明：
+[packages/core/src/lib/integrations/pi-agent/types.ts 第 243-280 行](../../../../packages/core/src/lib/integrations/pi-agent/types.ts#L243) 中的字段可用下列旅行案例说明：
 
 ```ts
 const travelContext = {
@@ -111,9 +154,9 @@ const travelContext = {
 
 特别注意：`currentPath` 与 `outputDir` 都像路径，但生命周期不同。项目工作根可被多个会话共享；“住宿草案”和“路线草案”可以各有自己的输出目录。把两者合并为一个变量，会在产物隔离和恢复时失去信息。
 
-## 第三段源码：客户端怎样把材料交给会话创建边界
+## 第五段源码：客户端怎样把材料交给会话创建边界
 
-[client-hooks 的初始化请求（第 210-248 行）](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts#L210) 对 `entryType` 与 `entryId` 采用已有上下文优先的规则；缺失时才根据 `agentType` 和项目 ID 补齐。随后构造请求：
+[packages/core/src/lib/integrations/pi-agent/client-hooks.ts 第 210-248 行](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts#L210) 对 `entryType` 与 `entryId` 采用已有上下文优先的规则；缺失时才根据 `agentType` 和项目 ID 补齐。随后构造请求：
 
 ```ts
 const response = await createAgentSession({
@@ -133,9 +176,9 @@ const response = await createAgentSession({
 
 `as unknown as Record<string, unknown>` 是类型适配，不是运行时校验。它使当前请求接口可以用通用对象承载上下文，却不确认每个字段真实有效。编译器允许与运行时已验证属于不同层次。
 
-## 第四段源码：配置怎样进入运行时
+## 第六段源码：配置怎样进入运行时
 
-[OriginOSAgent 构造与初始化（第 291-320 行）](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L291) 先把配置保存到实例，取出 `sessionId` 与 `projectContext`，同步写入公开 `state`，建立健康监控器，再调用 `initialize`。
+[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 291-320 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L291) 先把配置保存到实例，取出 `sessionId` 与 `projectContext`，同步写入公开 `state`，建立健康监控器，再调用 `initialize`。
 
 这段顺序意味着：运行时必须先知道“我是谁、为谁工作”，才进入模型和工具准备。初始化前有两个明确错误分支：
 
@@ -146,11 +189,13 @@ const response = await createAgentSession({
 
 ## 测试证据：它究竟证明什么
 
-[Agent 初始化测试（第 72-117 行）](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts#L72) 提供 `basicConfig`，创建 `OriginOSAgent`，并断言 state 已初始化、保存会话 ID 和项目上下文，初始 `isThinking` 为 `false` 且活动工具为空。
+[packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts 第 72—117 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts#L72) 提供 `basicConfig`，创建 `OriginOSAgent`，并断言 state 已初始化、保存会话 ID 和项目上下文，初始 `isThinking` 为 `false` 且活动工具为空。
 
 它证明配置进入运行时后的初始状态；没有证明真实模型能给杭州行程、工具能写文件、API 路由可达，或用户会看到正确界面。把测试的证明范围说小，才是严谨的技术教学。
 
-`llm-config.ts` 的归一化分支与 `config.ts` 的浏览器配置注入在当前目录中没有发现一一对应的直接单元测试入口；它们在本课以源码事实讲解，而非宣称已被测试固定。后续服务端配置与客户端请求单元需要分别补足 provider 别名、无效 `maxTokens`、JSON 形式凭证和缺少 API Key 的验证用例。
+[packages/core/src/lib/integrations/pi-agent/system/__tests__/config.test.ts 第 97—263 行](../../../../packages/core/src/lib/integrations/pi-agent/system/__tests__/config.test.ts#L97) 覆盖了配置工厂的默认值、覆盖值与项目上下文组合； [packages/core/src/lib/integrations/pi-agent/__tests__/intent-understanding.test.ts 第 52—137 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/intent-understanding.test.ts#L52) 覆盖提示词变量替换。它们证明的是“这条配置工厂路径按声明工作”，不能证明所有创建会话的入口都调用了这条路径。
+
+`llm-config.ts` 的归一化分支与浏览器配置注入还需要分别核对 provider 别名、无效 `maxTokens`、JSON 形式凭证和缺少 API Key 等用例。测试文件存在并不自动补齐尚未断言的分支。
 
 可在依赖完整时运行：
 
@@ -163,8 +208,10 @@ pnpm --filter @originos/core exec vitest run src/lib/integrations/pi-agent/core/
 1. 用表格为小林的“五日杭州旅行”填写提示词、模型、工具、项目上下文，并写出每项不负责的事。
 2. 比较 `currentPath` 与 `outputDir`：如果它们相同，系统仍能运行；为什么教材仍要求把含义分开？
 3. 假设 `projectName` 缺失，指出代码怎样处理；再假设 `projectId` 缺失，解释为什么不能用同样方式兜底。
-4. 从 `createAgentSession` 请求开始，画出配置进入 `OriginOSAgent` 的控制流；在每根箭头上写一个真实字段名。
+4. 比较两份同名 `OriginOSAgentConfig`，解释为什么 `string[]` 工具名称不能替代 `AgentTool[]`。
+5. 给 `buildSystemPrompt` 缺少 `ontologyId` 的输入，写出占位符会怎样变化，并说明这一结果能证明什么、不能证明什么。
+6. 从 `createAgentSession` 请求开始，画出配置进入 `OriginOSAgent` 的控制流；在每根箭头上写一个真实字段名。
 
-合上本页后，能准确回答“配置包不是一条消息”“类型适配不是运行时验证”“运行时抛错不等于 UI 已提示”三句话，并用代码位置说明原因，才算完成 E02。
+合上本页后，应能准确说明“配置包不是一条消息”“同名接口不等于同一合同”“提示词声明不等于工具授权”“类型适配不是运行时验证”“运行时抛错不等于 UI 已提示”，并能为每个判断指出源码依据。
 
 下一课将跟随小林的第一条旅行需求，区分一轮工作中的用户消息、助手消息、工具调用、工具结果与运行时事件。
