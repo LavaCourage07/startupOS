@@ -59,12 +59,13 @@ flowchart LR
 | 恢复合同与校验 | [packages/core/src/lib/integrations/pi-agent/session-restore.ts](../../../../packages/core/src/lib/integrations/pi-agent/session-restore.ts) | 讲归属校验、历史过滤、恢复结果、错误码 |
 | 服务端恢复边界 | [packages/web/src/app/api/agent/sessions/[sessionId]/route.ts](<../../../../packages/web/src/app/api/agent/sessions/[sessionId]/route.ts>) | 讲 GET 恢复、PUT 更新、DELETE 删除的边界责任 |
 | 摘要与统计接口 | [packages/web/src/app/api/agent/sessions/[sessionId]/summary/route.ts](<../../../../packages/web/src/app/api/agent/sessions/[sessionId]/summary/route.ts>) 、 [packages/web/src/app/api/agent/sessions/[sessionId]/statistics/route.ts](<../../../../packages/web/src/app/api/agent/sessions/[sessionId]/statistics/route.ts>) | 讲管理型读取接口与当前项目路径风险 |
+| Electron 会话管理边界 | [packages/desktop/src/main/services/agent-session-service.ts](../../../../packages/desktop/src/main/services/agent-session-service.ts) | 对照 IPC list/create/get/update/delete/destroy/summary/statistics 与 Web Route 的字段、副作用和返回语义 |
 | 前端恢复 Hook | [packages/core/src/lib/integrations/pi-agent/client-hooks.ts](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts) | 讲 `restoreSession`、abort、epoch、最新请求提交 |
 | 运行时恢复 | [packages/core/src/lib/integrations/pi-agent/agent-manager.ts](../../../../packages/core/src/lib/integrations/pi-agent/agent-manager.ts) | 讲 `restoreAgentRuntime` 与 `replacePersistedMessages` |
 | 启动器复用会话 | [packages/core/src/lib/features/services/launcher/base.ts](../../../../packages/core/src/lib/features/services/launcher/base.ts) | 讲有 sessionId 时优先复用已有持久化会话 |
 | 测试证据 | `session-restore.test.ts`、`session-store.test.ts`、`client-hooks-session-isolation.test.ts` | 把“应该如此”落到可验证行为 |
 
-读源码时要注意：`session-service.ts` 和 `session-store.ts` 都在“保存会话”，但它们不是同一层。前者是 feature 层的业务会话服务，支持项目目录、列表、摘要与统计；后者是 Pi Agent 适配层的简单快照管理，保存到固定 `data/sessions/sessions.json`，并维护 `currentSessionId`。教材会分别讲，不会把二者混成一个万能存储。
+读源码时要注意：`session-service.ts` 和 `session-store.ts` 都在“保存会话”，但它们不是同一层。前者是 feature 层的业务会话服务，支持项目目录、列表、摘要与统计；后者是 Pi Agent 适配层的简单快照管理，保存到固定 `data/sessions/sessions.json`，并维护 `currentSessionId`。二者必须分别判断，不能合并成一个万能存储。
 
 ## 4. E21-E30 的学习路线
 
@@ -78,7 +79,7 @@ flowchart LR
 | E26 | 恢复结果是一份有边界的合同 | `RestoreAgentSessionResult` 为什么要同时给 UI 和 Runtime 信息 |
 | E27 | 服务端恢复要先校验再 hydrate | 为什么不能先创建运行时再发现 session 不属于当前入口 |
 | E28 | 前端只提交最新恢复结果 | abort、epoch、destroy 如何防止串台 |
-| E29 | 更新、删除、摘要、统计不是同一类接口 | 管理接口的能力边界与当前风险点 |
+| E29 | 更新、删除、摘要、统计不是同一类接口 | Web Route 与 Electron IPC 管理接口的能力边界、额外副作用与当前风险点 |
 | E30 | 工作坊：从 bug 反推恢复链路 | 如何用源码和测试定位恢复类问题 |
 
 这一组课的重点不是背 API 名称，而是建立恢复系统的判断顺序：先确认快照是否存在，再确认是否属于当前入口，再确认能否映射成安全展示，再确认运行时是否恢复，最后确认前端是否把正确结果提交到了当前页面。

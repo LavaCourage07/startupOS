@@ -57,7 +57,7 @@ const frontmatter: T = frontmatterText.split(/\r?\n/).reduce((acc, line) => {
 }, {} as Record<string, unknown>) as T;
 ```
 
-这段代码给出一个重要边界：这里不是完整 YAML 解析器。它主要支持简单 `key: value`。如果读者在 `SKILL.md` 里写复杂嵌套 YAML，不应默认认为这里能正确解析。教材要如实讲源码能力，不能把“看起来像 YAML”扩大成“完整 YAML 支持”。
+这段代码给出一个重要边界：这里不是完整 YAML 解析器。它主要支持简单 `key: value`。如果在 `SKILL.md` 里写复杂嵌套 YAML，不能默认认为这里能正确解析；“文本看起来像 YAML”不等于当前解析器支持完整 YAML 语法。
 
 ## 3. `loadSkillFromFile` 决定一个文件能不能成为 Skill
 

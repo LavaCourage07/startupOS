@@ -252,7 +252,7 @@ Electron renderer 则通过 [packages/core/src/lib/integrations/electron/service
 
 > 第一段出现，第二段出现，工具状态更新，最终回答完成。
 
-但背后可能是 Runtime 模式，也可能是 in-process 模式。教材读者需要理解：前端体验的一致性不是自然发生的，而是服务端桥接层主动把不同内部事件整理成统一协议。
+但背后可能是 Runtime 模式，也可能是 in-process 模式。前端体验的一致性不是自然发生的，而是桥接层主动把不同内部事件整理成统一协议。
 
 ## 17. 测试证据与仍需验证的边界
 

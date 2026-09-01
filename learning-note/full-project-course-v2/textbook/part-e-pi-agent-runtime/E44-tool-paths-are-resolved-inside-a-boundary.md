@@ -117,9 +117,9 @@ rawPath = link/secret.txt
 | 词法边界 | 规范化后的路径字符串是否包含逃逸 | `resolveToolPath` 已实现 |
 | 真实路径边界 | 解开软链接后的目标是否仍在允许目录 | `resolveToolPath` 未实现，调用工具需另行检查 |
 
-E47 的递归 `list_files` 会对每个目录项调用 `fs.realpath` 并跳过越界项，这是具体工具的额外保护；不能反推所有文件工具都自动具有同样保护。`read_file`、写入/编辑和删除路径若经过边界内软链接，还需要专门测试与修复。教材因此不能把当前 helper 描述成完整沙箱。
+E47 的递归 `list_files` 会对每个目录项调用 `fs.realpath` 并跳过越界项，这是具体工具的额外保护；不能反推所有文件工具都自动具有同样保护。`read_file`、写入/编辑和删除路径若经过边界内软链接，还需要专门测试与修复。因此当前 helper 不能被描述成完整沙箱。
 
-一个更完整的实现通常需要：对已存在目标求 `realpath`；对即将创建的文件求最近存在父目录的 `realpath`；再与真实 boundary 比较；同时考虑检查后到使用前目标被替换的竞态。这里记录的是安全边界，不在教材修改生产实现。
+一个更完整的实现通常需要：对已存在目标求 `realpath`；对即将创建的文件求最近存在父目录的 `realpath`；再与真实 boundary 比较；同时考虑检查后到使用前目标被替换的竞态。本节只确认当前安全边界，不把建议中的防护误写成现有实现。
 
 ## 6. 失败边界
 
@@ -151,9 +151,9 @@ E47 的递归 `list_files` 会对每个目录项调用 `fs.realpath` 并跳过�
 
 这个函数还负责把返回路径转换成 `displayPath`。这不是小细节。模型继续调用工具时，如果看到的是 `/Users/.../data/skills/...` 这类绝对路径，跨平台、打包环境和用户隐私都会变差；如果看到 `data/skills/...` 或相对路径，就更稳定。
 
-## 8. 源码链路补强与练习
+## 9. 源码链路补强与练习
 
-### 8.1 路径解析不是拼接字符串，而是先排除词法逃逸
+### 9.1 路径解析不是拼接字符串，而是先排除词法逃逸
 
 `resolveToolPath(rawPath)` 是本单元最值得逐行读的函数之一。它先从 [packages/core/src/lib/integrations/pi-agent/tools/path-utils.ts 第 54 行](../../../../packages/core/src/lib/integrations/pi-agent/tools/path-utils.ts#L54) 读取 tool context 里的 `workingDirectory`。如果没有 `workingDirectory`，它直接抛错：`Tool boundary not configured`。这条错误很重要，因为它拒绝了“没有词法边界也继续执行”的隐式 fallback。
 
@@ -197,6 +197,6 @@ flowchart TD
 
 口头验收：读者应能解释为什么工具返回 `displayPath`，而不是直接把系统绝对路径交给模型继续使用。
 
-## 9. 本节小结
+## 10. 本节小结
 
 路径解析的第一步不是“把字符串拼成路径”，而是排除规范化后的词法逃逸。`resolveToolPath` 能拒绝 `../` 和边界外绝对路径，却不解析软链接；具体文件工具仍需承担真实路径检查。下一节开始看读取工具怎样使用这个边界，并继续保留这项限制。

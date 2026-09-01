@@ -57,7 +57,7 @@ async function resolveWorkingDirectory(paramsWorkingDirectory?: string): Promise
 | context 缺失，参数是绝对路径 | 原样使用 | 当前没有 dataRoot 边界限制 |
 | 两者都缺失 | dataRoot | 使用可写运行时数据根 |
 
-正常生产会话应由 agent-manager 注入 tool context，降低模型控制 cwd 的机会；但测试和其他调用方仍可能走 fallback。教材不能把“多数主链有 context”写成“任意调用都不能离开工作目录”。
+正常生产会话应由 agent-manager 注入 tool context，降低模型控制 cwd 的机会；但测试和其他调用方仍可能走 fallback。因此，“多数主链有 context”不能推出“任意调用都不能离开工作目录”。
 
 ## 3. 危险命令会被拦截
 
@@ -186,7 +186,7 @@ flowchart TD
 | `stdoutTruncated` / `stderrTruncated` | 输出是否被截断 | true 时不能声称看到了完整输出 |
 | `stdoutHash` / `stderrHash` | 原始输出 hash | 用于日志追踪和截断后比对 |
 
-小林要求“检查预算文件是否存在”。命令 `test -f output/budget.csv` 成功时可能没有 stdout，失败时也可能没有 stdout。此时判断依据是 `exitCode`，不是有没有文字输出。再比如 `grep` 找不到关键词返回 `exitCode=1`，这可能表示“没有匹配”，不一定表示系统异常。教材要教读者读懂工具结果，而不是机械地把非 0 都翻译成“程序坏了”。
+小林要求“检查预算文件是否存在”。命令 `test -f output/budget.csv` 成功时可能没有 stdout，失败时也可能没有 stdout。此时判断依据是 `exitCode`，不是有没有文字输出。再比如 `grep` 找不到关键词返回 `exitCode=1`，这可能表示“没有匹配”，不一定表示系统异常。工具结果必须结合命令语义阅读，不能机械地把非 0 都翻译成“程序坏了”。
 
 输出边界也很关键。[packages/core/src/lib/integrations/pi-agent/tools/bash-tools.ts 第 340 行](../../../../packages/core/src/lib/integrations/pi-agent/tools/bash-tools.ts#L340) 的 `BoundedTextBuffer` 会保留头部和尾部，中间超长部分用截断标记替代，同时记录原始长度和 hash。这样既避免把巨大日志塞满上下文，又保留排查价值。模型看到 `stdoutTruncated:true` 时，应继续用更精确的命令缩小范围，而不是基于片段得出全局结论。
 

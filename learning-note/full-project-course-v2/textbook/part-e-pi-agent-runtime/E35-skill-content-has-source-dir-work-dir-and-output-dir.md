@@ -139,7 +139,40 @@ route 注释中的“Get raw markdown content”只描述默认分支，不能�
 
 错误响应也保持相同分叉：raw 请求返回纯文本错误，JSON 请求返回结构化错误对象。客户端解析方式必须与请求格式一致，不能总是假设响应是 JSON。
 
-## 6. materialize：系统 Skill 打开时可能先复制到数据目录
+## 6. `SkillDialog` 还有一条 Agent 内容 fallback
+
+`SkillDialog` 的加载顺序位于 [packages/web/src/components/skills/SkillDialog.tsx 第 65—97 行](../../../../packages/web/src/components/skills/SkillDialog.tsx#L65)。它先调用 `getAvailableSkillContent` 读取普通 Skill；失败或没有正文时，再调用 `getAgentContent(skillName)`。第二条路径用于“以 Skill 入口启动的 Role Agent”等内容，不是同一个 skills content API 的重复请求。
+
+```mermaid
+flowchart TD
+    A[SkillDialog.loadSkillContent] --> B[getAvailableSkillContent]
+    B --> C{成功且有 content?}
+    C -- 是 --> D[使用 SkillContentResponse]
+    C -- 否 --> E[getAgentContent]
+    E --> F{找到 Agent.md?}
+    F -- 是 --> G[使用 Agent content + baseDir + outputDir]
+    F -- 否 --> H[返回空 content，保留 systemManaged]
+```
+
+图中的 fallback 改变了“内容来自哪里”，也改变了目录合同。普通 Skill 路径可能返回 `workingDir` 和 `systemManaged`；Agent 内容合同中的 `workingDir` 是可选字段。`SkillDialog` 不能假设两条路径字段完全相同，它只能在可用字段基础上构建 prompt 和会话目录。
+
+## 7. Agent 内容 fallback 在 Web 与 Electron 中各有入口
+
+renderer 适配函数位于 [packages/core/src/lib/integrations/electron/services/agent-session.ts 第 346—357 行](../../../../packages/core/src/lib/integrations/electron/services/agent-session.ts#L346)：Web 环境请求 `/api/agents/{id}?format=json`，Electron 环境 invoke `AGENT_CONTENT_GET`。
+
+Web Route 在 [packages/web/src/app/api/agents/[id]/route.ts 第 71—148 行](../../../../packages/web/src/app/api/agents/%5Bid%5D/route.ts#L71) 先查 `data/agents/{id}/Agent.md`，再回退到 `.claude/skills/{id}/Agent.md`。JSON 响应包含 `content`、实际定义所在的 `baseDir`，以及始终指向 `data/agents/{id}` 的 `outputDir`。这保持了“定义可来自只读目录，产物仍写到数据目录”的原则。
+
+Electron 主进程的同类 handler 位于 [packages/desktop/src/main/services/agent-session-service.ts 第 887—935 行](../../../../packages/desktop/src/main/services/agent-session-service.ts#L887)，使用相同的目录优先级与 outputDir 规则。两端当前都没有返回明确 `workingDir`，而接口把它声明为可选。因此，fallback 成功只能确认正文、源目录和产物目录，不能凭普通 Skill 合同补造一个工作目录。
+
+| 入口 | 首选定义 | fallback 定义 | outputDir | workingDir |
+| --- | --- | --- | --- | --- |
+| 普通 Skill content | data/user/project/bundled Skill 解析结果 | materialize bundled Skill | 由 Skill 规则计算 | 必填 |
+| Web Agent content | `data/agents/{id}/Agent.md` | `.claude/skills/{id}/Agent.md` | `data/agents/{id}` | 当前未返回 |
+| Electron Agent content | `data/agents/{id}/Agent.md` | `.claude/skills/{id}/Agent.md` | `data/agents/{id}` | 当前未返回 |
+
+这张表说明“SkillDialog 最后拿到了 content”还不够。调试工作目录时，必须先判断命中了普通 Skill 还是 Agent fallback，再看该合同实际提供哪些目录字段。
+
+## 8. materialize：系统 Skill 打开时可能先复制到数据目录
 
 [packages/core/src/lib/features/skills/service.ts 第 263—274 行](../../../../packages/core/src/lib/features/skills/service.ts#L263) 的 `findSkillForContent` 有一个特殊逻辑：
 
@@ -158,18 +191,20 @@ return skill ?? materializeBundledSkill(name) ?? undefined;
 
 它会先看数据目录里是否已经有同名 Skill；如果找不到，再看普通加载结果；系统托管 Skill 会尝试 materialize 到数据目录。这样做是为了让打包态、系统模板和运行时数据目录之间有明确边界。
 
-## 7. 测试证据与缺口
+## 9. 测试证据与缺口
 
 `service.test.ts` 覆盖了 Windows 兼容路径下按目录名读取已有 data skill，以及从 Electron resources materialize bundled skill 后返回内容。`skill-output-dir.test.ts` 覆盖了 bundled skill 返回 `data/skills/{name}` 作为 outputDir、项目 skill 保留自己的 baseDir 等目录规则。
 
 这些测试证明目录解析核心规则存在，但不证明所有真实 Skill 的 frontmatter 都写得正确，也没有证明任意绝对 `outputDir` 都符合授权策略。内容 route 还需要覆盖 raw/JSON 成功和错误四个分支，避免客户端按错误内容类型解析。
 
-## 8. 小实验与口头验收
+当前也没有发现同时驱动 `SkillDialog → getAgentContent → Web Route/Electron IPC` 的直接集成测试。因此源码可以证明两条 fallback 已存在，不能证明 Web 与 Electron 返回字段永远保持一致，也不能证明 fallback 后的上传和工具 CWD 正确。测试应分别构造 `data/agents` 命中、`.claude/skills` 回退、两者缺失和平台切换四类场景。
+
+## 10. 小实验与口头验收
 
 纸面推演：一个 bundled Skill 的 `baseDir` 在 `templates/skills/trip-planner`，没有声明 `outputDir`。它的 workingDir 应该在哪里？合格答案是：`data/skills/{skillCode}`，而不是模板目录。因为 bundled Skill 的源目录不能作为用户产物目录。
 
-口头验收：读者应能解释 `baseDir`、`workingDir`、`outputDir` 的区别，并说明路径解析为什么不等于路径授权；还应能判断默认 raw 响应为什么不足以初始化完整 Skill 会话。
+口头验收：读者应能解释 `baseDir`、`workingDir`、`outputDir` 的区别，并说明路径解析为什么不等于路径授权；还应能判断默认 raw 响应为什么不足以初始化完整 Skill 会话，以及 Agent fallback 为什么不能凭空补出 `workingDir`。
 
-## 9. 本节小结
+## 11. 本节小结
 
-Skill 内容接口返回的不只是 `SKILL.md` 正文，还返回源目录、工作目录、输出目录和系统托管标记。目录边界是 Skill 能否安全运行的基础：读参考文件走源目录，写用户产物走工作目录或输出目录。
+普通 Skill 内容接口返回的不只是 `SKILL.md` 正文，还返回源目录、工作目录、输出目录和系统托管标记。`SkillDialog` 在普通 Skill 加载失败时还会进入 Agent 内容 fallback，Web 与 Electron 分别通过 Route 和 IPC 提供正文、源目录与输出目录。目录合同取决于实际命中的路径，不能把一条入口的字段假定为另一条入口也必然存在。

@@ -128,11 +128,11 @@ expect(settled).toBe(true);
 
 [packages/core/src/lib/integrations/pi-agent/__tests__/session-restore.test.ts 第 312—339 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-restore.test.ts#L312) 构造 1,000 条可见消息，断言数量与首尾内容，并要求投影耗时低于 500ms。
 
-这个测试能发现明显的算法退化，例如不必要的平方级遍历。它不是跨机器稳定的产品 SLA：测试运行器负载、CI 硬件和计时精度都会影响结果；它也不含磁盘读取、网络响应和 React 渲染。教材应称其为“纯投影预算测试”，不能写成“1,000 条历史端到端恢复低于 500ms”。
+这个测试能发现明显的算法退化，例如不必要的平方级遍历。它不是跨机器稳定的产品 SLA：测试运行器负载、CI 硬件和计时精度都会影响结果；它也不含磁盘读取、网络响应和 React 渲染。准确名称应是“纯投影预算测试”，不能据此声称“1,000 条历史端到端恢复低于 500ms”。
 
 ## 9. 运行时历史恢复还要检查模型身份来源
 
-[packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts 第 1—约 80 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts#L1) 验证恢复助手消息时，`api`、`provider` 和 `model` 从当前运行时模型派生，而不是盲信旧消息中可能过期的元数据。
+[packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts 第 1—69 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/runtime-history-restore.test.ts#L1) 验证恢复助手消息时，`api`、`provider` 和 `model` 从当前运行时模型派生，而不是盲信旧消息中可能过期的元数据。
 
 这与 display snapshot 属于不同方向：前者构造可继续执行的内部历史，后者构造可安全展示的外部历史。两者都叫“恢复消息”，但字段责任不同，不能用一个数组直接替代另一个。
 

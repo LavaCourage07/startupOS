@@ -165,6 +165,10 @@ export function _updateSessionState(sessionId: string, updates: Partial<SessionS
 
 这条边界带来两个设计结果。第一，Hook 调用的是统一函数，不携带 IPC channel 或 fetch 细节。第二，统一返回类型不等于底层语义完全相同：Electron 主进程和 Next Route 仍可能有不同生命周期、错误和事件时序，后续必须分别测试。
 
+分支判断本身定义在 [packages/core/src/lib/integrations/electron/env.ts 第 1—29 行](../../../../packages/core/src/lib/integrations/electron/env.ts#L1)。`isElectron()` 只检查浏览器 `window` 上是否存在预加载桥 `electron`；`getElectronBridge()` 在非 Electron 环境主动抛错；`getIpcRenderer()` 再暴露受类型约束的 `send`、`invoke` 和 `on`。因此，“桌面环境”在这段适配代码中的准确含义是“preload bridge 已经挂载”，不是读取操作系统名称。
+
+IPC channel 名集中在 [packages/core/src/lib/integrations/electron/ipc-protocol.ts 第 1 行](../../../../packages/core/src/lib/integrations/electron/ipc-protocol.ts#L1)。该文件同时包含窗口、文件、本体、项目和 Agent 等大量 channel；本单元只直接使用 `AGENT_SESSION_*` 与 `AGENT_EVENT`。共享常量可以防止 renderer 与主进程手写字符串漂移，但它只统一名字，不自动证明对应 handler 已注册、请求 payload 匹配或响应类型一致。
+
 ### 本课的测试证据
 
 [packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts 第 176—262 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts#L176) 同时挂载两个 Hook，证明带明确 session/stream 身份的事件不会进入另一窗口。[packages/core/src/lib/integrations/electron/services/__tests__/agent-session.test.ts 第 14 行开始](../../../../packages/core/src/lib/integrations/electron/services/__tests__/agent-session.test.ts#L14) 则验证 Electron 订阅指定 `sessionId` 后，会忽略缺少身份或身份不匹配的事件。

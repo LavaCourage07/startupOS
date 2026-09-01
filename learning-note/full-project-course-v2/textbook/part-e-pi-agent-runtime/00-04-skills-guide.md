@@ -18,7 +18,7 @@
 | 技能列表是怎样从磁盘和 API 读出来的？ | E32 |
 | `SKILL.md` 的 frontmatter 怎样变成 `Skill` 对象？ | E33 |
 | 为什么 Skill 要被格式化进 Prompt，而不是直接执行？ | E34 |
-| 技能源目录和输出目录为什么必须分开？ | E35 |
+| 技能源目录和输出目录为什么必须分开？SkillDialog 的 Agent fallback 在 Web 与 Electron 中怎样取内容？ | E35 |
 | SkillDialog 初始化会话时具体传了哪些字段？ | E36 |
 | Skill 的历史会话为什么用 `skill-${name}` 作为项目范围？ | E37 |
 | `skill-tools.ts` 里的 Skill 调用和 SkillDialog 有什么不同？ | E38 |
@@ -34,6 +34,7 @@
 | 首页入口 | [packages/web/src/config/homeApps.ts](../../../../packages/web/src/config/homeApps.ts) | 解释 `type: 'skill'` 和 `skillName` 如何把卡片连接到 SkillDialog |
 | 前端弹窗 | [packages/web/src/components/skills/SkillDialog.tsx](../../../../packages/web/src/components/skills/SkillDialog.tsx) | 解释技能内容加载、系统提示词构建、会话初始化、历史恢复和上传目录 |
 | 浏览器/Electron 适配 | [packages/core/src/lib/integrations/electron/services/skill.ts](../../../../packages/core/src/lib/integrations/electron/services/skill.ts) | 解释 Web fetch 与 Electron IPC 的同一调用口 |
+| Agent 内容 fallback | [packages/core/src/lib/integrations/electron/services/agent-session.ts](../../../../packages/core/src/lib/integrations/electron/services/agent-session.ts)、[packages/web/src/app/api/agents/[id]/route.ts](<../../../../packages/web/src/app/api/agents/[id]/route.ts>)、[packages/desktop/src/main/services/agent-session-service.ts](../../../../packages/desktop/src/main/services/agent-session-service.ts) | 解释普通 Skill 内容失败后，Role Agent/Agent.md 怎样经 Web Route 或 Electron IPC 返回 |
 | Web API | [packages/web/src/app/api/skills/route.ts](../../../../packages/web/src/app/api/skills/route.ts) 、 [packages/web/src/app/api/skills/[name]/content/route.ts](<../../../../packages/web/src/app/api/skills/[name]/content/route.ts>) 、 [packages/web/src/app/api/skill-sessions/route.ts](../../../../packages/web/src/app/api/skill-sessions/route.ts) | 解释列表、内容、历史会话入口 |
 | Core 服务 | [packages/core/src/lib/features/skills/service.ts](../../../../packages/core/src/lib/features/skills/service.ts) | 解释列表、内容、目录解析、历史会话、legacy execution |
 | 核心加载器 | [packages/core/src/lib/integrations/pi-agent/core/skills.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/skills.ts) | 解释 `SKILL.md` 查找、frontmatter、默认目录、冲突诊断、Prompt 格式化 |

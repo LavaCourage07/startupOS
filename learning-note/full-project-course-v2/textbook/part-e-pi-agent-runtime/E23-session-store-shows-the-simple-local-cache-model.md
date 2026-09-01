@@ -136,7 +136,7 @@ this.sessionsCache!.currentSessionId = sessionData.id;
 | 保存多条消息 | `loadSession(id)` | 消息数组完全相同 | 历史顺序不被存储破坏 |
 | 删除当前会话 | `loadCurrentSession()` | 返回 `null` | 当前指针不会悬空 |
 
-这张表把测试从“覆盖了 CRUD”推进到“证明了哪些系统不变量”。教材读测试时要用这种方式，而不是只列测试文件名。
+这张表把测试从“覆盖了 CRUD”推进到“证明了哪些系统不变量”。阅读测试时应沿着断言提取不变量，而不是只列测试文件名。
 
 ## 9. 小实验与口头验收
 

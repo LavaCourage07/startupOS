@@ -74,7 +74,7 @@ flowchart TD
 | E59 | 历史太长时应该丢掉什么 | 为什么最近失败、用户纠正和下一步不能被摘要抹掉 |
 | E60 | “我将为你生成”为什么不是完成 | 规则 guard、语义 judge、恢复次数和误伤边界 |
 | E61 | 重复工具怎样从感觉变成证据 | 调用签名、阈值、warning、circuit breaker 与失败归一化 |
-| E62 | 运行时内部状态怎样被人和界面看见 | 健康快照、通知、上传记录分别能证明什么 |
+| E62 | 运行时内部状态怎样被人和界面看见 | Agent 健康、Electron 进程健康、通知、上传记录分别能证明什么 |
 | E63 | 多种机制怎样组合成一次故障演练 | 用时间线、状态快照和测试证据复盘旅行任务 |
 
 E57 与 E58 会再次出现 E15、E16 的源码，但教学问题不同。前面的单元关注流式传输主链；本单元把相同实现放进“故障与压力”视角，检查重复、突发输入、完成冲刷和性能证据。重复引用必须增加新的推理责任，不能只是重复定义。
@@ -89,7 +89,7 @@ E57 与 E58 会再次出现 E15、E16 的源码，但教学问题不同。前面
 | 最近轨迹 | [packages/core/src/lib/integrations/pi-agent/recent-trace-compression.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/recent-trace-compression.ts#L1)、[packages/core/src/lib/integrations/pi-agent/runtime-working-summary.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/runtime-working-summary.ts#L1) | [packages/core/src/lib/integrations/pi-agent/__tests__/recent-trace-compression.test.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/recent-trace-compression.test.ts#L1)、[packages/core/src/lib/integrations/pi-agent/__tests__/long-session-stability.test.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/long-session-stability.test.ts#L1) | 保留关键词不能证明模型一定正确利用 |
 | 完成度保护 | [packages/core/src/lib/integrations/pi-agent/core/completion-guard.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/core/completion-guard.ts#L1)、[packages/core/src/lib/integrations/pi-agent/core/completion-judge.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/core/completion-judge.ts#L1) | 两个对应测试文件 | judge 返回 JSON 不能证明任务产物真实存在 |
 | 循环与工具状态 | [packages/core/src/lib/integrations/pi-agent/tools/loop-detector.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/tools/loop-detector.ts#L1)、[packages/core/src/lib/integrations/pi-agent/core/tool-event-status.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/core/tool-event-status.ts#L1) | loop detector 与 tool event status 测试 | 达到阈值只证明重复模式，不证明用户意图错误 |
-| 观察面 | [packages/core/src/lib/integrations/pi-agent/health.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/health.ts#L1)、[packages/core/src/lib/integrations/pi-agent/notification-system.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/notification-system.ts#L1)、[packages/core/src/lib/integrations/pi-agent/upload-tracker.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/upload-tracker.ts#L1) | health 测试；通知与上传仍需补直接测试 | 状态记录存在不等于 UI 已正确展示 |
+| 观察面 | [packages/core/src/lib/integrations/pi-agent/health.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/health.ts#L1)、[packages/desktop/src/main/services/process-health-monitor.ts 第 3—200 行](../../../../packages/desktop/src/main/services/process-health-monitor.ts#L3)、[packages/core/src/lib/integrations/pi-agent/notification-system.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/notification-system.ts#L1)、[packages/core/src/lib/integrations/pi-agent/upload-tracker.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/upload-tracker.ts#L1) | core health 与 desktop process health 测试；通知与上传仍需补直接测试 | Agent 逻辑健康、宿主进程响应和 UI 展示不能互相替代 |
 
 ## 6. 四组最容易混淆的概念
 
@@ -107,7 +107,7 @@ E57 与 E58 会再次出现 E15、E16 的源码，但教学问题不同。前面
 
 ### 6.4 健康状态、通知、上传进度
 
-健康状态服务于运行诊断，通知服务于用户可见提醒，上传记录服务于某项传输任务。三者都带“状态”，但主键、生命周期和消费者不同。一个上传记录达到 100%，不能证明 Agent 健康，也不能证明通知已经被用户看见。
+core 健康状态服务于 Agent 逻辑生命周期诊断，desktop process health 服务于主事件循环、renderer 和任务阶段诊断，通知服务于用户可见提醒，上传记录服务于输入材料追踪。它们都带“状态”，但主键、生命周期和消费者不同。一个上传记录存在，不能证明 Agent 健康；Agent 显示 RUNNING，也不能证明 renderer 正常响应。
 
 ## 7. 一条可复用的故障排查路径
 

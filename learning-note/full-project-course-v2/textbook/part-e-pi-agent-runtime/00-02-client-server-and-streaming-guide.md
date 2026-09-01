@@ -18,7 +18,7 @@ E09-E20 分成六个小阶段。每个阶段都只解决一个问题，但合起
 | --- | --- | --- | --- |
 | 边界 | E09-E10 | 浏览器拥有什么，服务端拥有什么？一次会话怎样跨过第一个 HTTP 边界？ | `client-hooks.ts`、`agent-session.ts`、`sessions/route.ts` |
 | 发送 | E11-E12 | 为什么发送消息有普通 JSON 和 SSE 流式两条路径？服务端为什么要先恢复运行时再执行 prompt？ | `client-hooks.ts`、`messages/route.ts`、`agent-manager.ts` |
-| 事件 | E13-E14 | SSE 事件是什么？Runtime 模式和 in-process 模式为什么能给前端近似一致的事件？ | `messages/route.ts` |
+| 事件 | E13-E14 | SSE 事件是什么？Web 两座桥与 Electron IPC 桥为什么能给前端近似一致的事件？ | `messages/route.ts`、桌面 `agent-session-service.ts`、`stream-event-batcher.ts` |
 | 前端合并 | E15-E16 | 模型或运行时发来重复片段时如何去重？高频片段为什么不能每次都直接 setState？ | `stream-dedupe.ts`、`stream-render-scheduler.ts` |
 | 隔离与停止 | E17-E18 | 多窗口、多会话、旧流、停止生成、关闭窗口之间怎样互不污染？ | `client-hooks.ts`、`agent-session.ts`、`abort/route.ts`、`destroy/route.ts` |
 | 故障与验收 | E19-E20 | HTTP 错误、SSE 错误、最终消息缺失、测试覆盖和剩余风险怎样判断？ | `messages/route.ts`、相关测试 |
@@ -102,7 +102,7 @@ sequenceDiagram
 
 ## 4. 源码覆盖台账
 
-这一组课的源码范围如下。写课时不会只凭主题联想，而是按这张表把文件逐个覆盖。
+这一组课的源码范围如下。表中的每项都对应后续代码窗口，不能用主题相近或文件名出现代替实际调用链。
 
 | 课号 | 主题 | 主要源码 |
 | --- | --- | --- |
@@ -111,7 +111,7 @@ sequenceDiagram
 | E11 | 普通消息与流式消息两条发送路径 | `client-hooks.ts`、`packages/web/src/app/api/agent/sessions/[sessionId]/messages/route.ts` |
 | E12 | 服务端消息 route 的校验、恢复与 prompt | `messages/route.ts`、`agent-manager.ts` |
 | E13 | SSE 事件流的格式与事件词汇 | `messages/route.ts`、`client-hooks.ts` |
-| E14 | Runtime 模式与 in-process 模式的事件桥接 | `messages/route.ts`、`abort/route.ts` |
+| E14 | Web Runtime/in-process 桥与 Electron IPC 桥 | `messages/route.ts`、`abort/route.ts`、renderer `agent-session.ts`、桌面 `agent-session-service.ts`、`stream-event-batcher.ts`、`assistant-stream-state.ts` |
 | E15 | 流式文本去重与最终消息校准 | `stream-dedupe.ts`、`client-hooks.ts`、`stream-dedupe.test.ts` |
 | E16 | 流式渲染调度 | `stream-render-scheduler.ts`、`client-hooks.ts`、`stream-render-scheduler.test.ts` |
 | E17 | 会话隔离、流身份与旧事件防护 | `client-hooks.ts`、`agent-session.ts`、`client-hooks-session-isolation.test.ts` |
@@ -137,6 +137,8 @@ sequenceDiagram
 | SSE 分派窗口 | `messages/route.ts` 的 `createEventStream` | Runtime 模式与 in-process 模式怎样分派 |
 | Runtime 桥接窗口 | `createRuntimeEventStream` | queue、waiter、eventInterceptor、promptSent、done 怎样合作 |
 | in-process 桥接窗口 | `createInProcessEventStream` | agent.subscribe、message_update、tool_execution、message_end、agent_end 怎样变成 SSE |
+| Electron IPC 桥窗口 | 桌面 `AgentSessionService` 的 MESSAGE_STREAM handler | invoke 启动确认、会话校验、AGENT_EVENT、批处理、最终消息和 done 怎样协作 |
+| IPC 批处理窗口 | `stream-event-batcher.ts`、renderer `coalesceAgentEventBatch` | 首字延迟、32ms/16KB 阈值、事件顺序与两级合并 |
 | 去重窗口 | `stream-dedupe.ts` | 纯增量、累计帧、重叠片段、最终消息、尾部重复怎样处理 |
 | 渲染窗口 | `stream-render-scheduler.ts` | schedule、finish、flush、cancel、UTF-16 安全边界 |
 | 停止窗口 | `client-hooks.ts` 的 `abort` / `destroy` 与 API abort/destroy route | 停止当前流、销毁运行时、保留会话数据的差异 |
@@ -151,6 +153,8 @@ sequenceDiagram
 - 为什么一次发送之前必须先有服务端认可的 `sessionId`？
 - 为什么客户端要同时保存 `activeStreamIdRef`、`activeStreamSessionIdRef` 和 `AbortController`？
 - 为什么服务端在 `/messages` route 里要做会话归属校验？
+- 为什么 Electron 的 `{ started: true }` 不是本轮回答已经完成？
+- 为什么 Web SSE 与 Electron IPC 应统一事件语义，却不能假定启动、中断和收尾实现完全相同？
 - 为什么 SSE 里的 `data: {...}\n\n` 不是普通 JSON 响应？
 - 为什么流式回复需要 `appendStreamDelta` 和 `reconcileFinalStreamContent`？
 - 为什么不能每收到一个字符就无节制地更新 React 状态？

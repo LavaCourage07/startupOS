@@ -134,7 +134,7 @@ A😀B
 
 安全截断位于 [packages/core/src/lib/integrations/pi-agent/stream-render-scheduler.ts 第 177—228 行](../../../../packages/core/src/lib/integrations/pi-agent/stream-render-scheduler.ts#L177)。如果计划切点前一个 code unit 是 high surrogate，切点向后移动一位，把配对的 low surrogate 一起提交；计算公共前缀时则反向退一位，避免保留半个字符。
 
-它保护的是 surrogate pair，而不是完整的 Unicode grapheme cluster。由多个 code point 组合的复杂 emoji 仍可能在视觉单元内部断开。正式教材既要说明已解决的边界，也要说明尚未覆盖的更大边界。
+它保护的是 surrogate pair，而不是完整的 Unicode grapheme cluster。由多个 code point 组合的复杂 emoji 仍可能在视觉单元内部断开。已解决的 surrogate pair 边界与尚未覆盖的 grapheme cluster 边界必须分开描述。
 
 ## 11. 小林案例：为什么旅行长回答更需要调度
 

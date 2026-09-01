@@ -45,7 +45,7 @@ const session: AgentSession = {
 };
 ```
 
-这段代码里最容易被忽略的是 `projectContext` 的合并顺序。它先写入 `projectId` 和 `projectName`，再展开 `request.projectContext`。这意味着如果调用方在 `request.projectContext` 中也传入 `projectId`，后者会覆盖前者。教材在这里不能只说“服务补了 projectId”，还要提醒：边界调用方必须保持请求顶层字段与上下文字段一致，否则可能造成保存归属和恢复归属不一致。
+这段代码里最容易被忽略的是 `projectContext` 的合并顺序。它先写入 `projectId` 和 `projectName`，再展开 `request.projectContext`。这意味着如果调用方在 `request.projectContext` 中也传入 `projectId`，后者会覆盖前者。因此不能只理解成“服务补了 projectId”；边界调用方必须保持请求顶层字段与上下文字段一致，否则可能造成保存归属和恢复归属不一致。
 
 - `sessionId`：优先使用请求给的 ID，否则生成 UUID；
 - `createdAt`、`updatedAt`：使用当前时间；

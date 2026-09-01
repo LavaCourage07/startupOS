@@ -85,7 +85,7 @@ export interface OriginOSAgentConfig {
 
 第一，不能因为 `system/config.ts` 的 `sessionId` 必填，就断言低层 `OriginOSAgent` 构造参数也必填；核心类实际接受的是另一份接口。第二，工具名称数组不能直接交给核心类执行。模型真正能够调用的工具必须是带有定义和 `execute` 实现的 `AgentTool` 对象。
 
-[packages/core/src/lib/integrations/pi-agent/system/config.ts 第 78—118 行](../../../../packages/core/src/lib/integrations/pi-agent/system/config.ts#L78) 的 `DEFAULT_CONFIG` 与 `createOriginOSAgentConfig` 仍是可阅读、可测试的配置工厂，但当前核心类没有导入它。教材因此把它称为“并存的配置工厂路径”，而不把它误写成所有会话都会经过的唯一生产入口。若后续重构，应先统一这两个公共名字和字段语义，再迁移调用方。
+[packages/core/src/lib/integrations/pi-agent/system/config.ts 第 78—118 行](../../../../packages/core/src/lib/integrations/pi-agent/system/config.ts#L78) 的 `DEFAULT_CONFIG` 与 `createOriginOSAgentConfig` 仍是可阅读、可测试的配置工厂，但当前核心类没有导入它。因此它是“并存的配置工厂路径”，不是所有会话都会经过的唯一生产入口。若后续重构，应先统一这两个公共名字和字段语义，再迁移调用方。
 
 ## 第二段源码：默认系统提示词怎样从模板变成文本
 
@@ -130,7 +130,7 @@ return ORIGINOS_SYSTEM_PROMPT.replace(/{(\w+)}/g, (_match, key): string => {
 
 ## 第四段源码：项目上下文里最容易混淆的三个字段
 
-[packages/core/src/lib/integrations/pi-agent/types.ts 第 243-280 行](../../../../packages/core/src/lib/integrations/pi-agent/types.ts#L243) 中的字段可用下列旅行案例说明：
+[packages/core/src/lib/integrations/pi-agent/types.ts 第 243—280 行](../../../../packages/core/src/lib/integrations/pi-agent/types.ts#L243) 中的字段可用下列旅行案例说明：
 
 ```ts
 const travelContext = {
@@ -156,7 +156,7 @@ const travelContext = {
 
 ## 第五段源码：客户端怎样把材料交给会话创建边界
 
-[packages/core/src/lib/integrations/pi-agent/client-hooks.ts 第 210-248 行](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts#L210) 对 `entryType` 与 `entryId` 采用已有上下文优先的规则；缺失时才根据 `agentType` 和项目 ID 补齐。随后构造请求：
+[packages/core/src/lib/integrations/pi-agent/client-hooks.ts 第 210—248 行](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts#L210) 对 `entryType` 与 `entryId` 采用已有上下文优先的规则；缺失时才根据 `agentType` 和项目 ID 补齐。随后构造请求：
 
 ```ts
 const response = await createAgentSession({
@@ -178,7 +178,7 @@ const response = await createAgentSession({
 
 ## 第六段源码：配置怎样进入运行时
 
-[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 291-320 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L291) 先把配置保存到实例，取出 `sessionId` 与 `projectContext`，同步写入公开 `state`，建立健康监控器，再调用 `initialize`。
+[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 291—320 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L291) 先把配置保存到实例，取出 `sessionId` 与 `projectContext`，同步写入公开 `state`，建立健康监控器，再调用 `initialize`。
 
 这段顺序意味着：运行时必须先知道“我是谁、为谁工作”，才进入模型和工具准备。初始化前有两个明确错误分支：
 
@@ -206,7 +206,7 @@ pnpm --filter @originos/core exec vitest run src/lib/integrations/pi-agent/core/
 ## 小实验与口头验收
 
 1. 用表格为小林的“五日杭州旅行”填写提示词、模型、工具、项目上下文，并写出每项不负责的事。
-2. 比较 `currentPath` 与 `outputDir`：如果它们相同，系统仍能运行；为什么教材仍要求把含义分开？
+2. 比较 `currentPath` 与 `outputDir`：如果它们相同，系统仍能运行；为什么二者的责任仍必须分开？
 3. 假设 `projectName` 缺失，指出代码怎样处理；再假设 `projectId` 缺失，解释为什么不能用同样方式兜底。
 4. 比较两份同名 `OriginOSAgentConfig`，解释为什么 `string[]` 工具名称不能替代 `AgentTool[]`。
 5. 给 `buildSystemPrompt` 缺少 `ontologyId` 的输入，写出占位符会怎样变化，并说明这一结果能证明什么、不能证明什么。

@@ -2,7 +2,7 @@
 
 恢复接口解决“重新接上这段对话”。但会话系统还需要管理能力：修改会话、删除会话、查看摘要、统计项目会话数量。这些接口都围绕 session，却不是同一类动作。如果把它们都当成“读写 session”，很容易忽略路径、项目范围和副作用差异。
 
-本节阅读三个 API 文件：主 route 的 PUT/DELETE、summary route、statistics route。
+本节先阅读三个 Web API 文件：主 route 的 PUT/DELETE、summary route、statistics route；随后把它们与 Electron 主进程的 IPC handler 对照。只有两个入口一起阅读，才能判断“会话管理能力”在不同运行环境中是否真的同构。
 
 ## 1. PUT：局部更新会话
 
@@ -43,7 +43,7 @@ const deleted = await agentSessionService.deleteSession(sessionId);
 
 这里有一个需要如实记录的风险：当前实现没有把 query 中的 `projectId` 传给 `deleteSession`。而 `AgentSessionService` 的项目会话路径规则要求项目会话使用 `projects/{projectId}/sessions/{sessionId}.json`。因此，如果目标是项目目录下的 session，仅凭 `sessionId` 删除可能找不到正确文件。
 
-教材不能把这个点写成“删除一定覆盖项目会话”。源码能证明的是：当前 DELETE route 调用了不带 `projectId` 的删除。它可能适用于全局 session，但对项目 session 的覆盖需要进一步修正或测试证明。
+因此不能断言“删除一定覆盖项目会话”。源码能证明的是：当前 DELETE route 调用了不带 `projectId` 的删除。它可能适用于全局 session，但对项目 session 的覆盖需要进一步修正或测试证明。
 
 服务方法本身其实支持 `projectId`，证据在 [packages/core/src/lib/features/agent/session-service.ts 第 180—185 行](../../../../packages/core/src/lib/features/agent/session-service.ts#L180)。问题不在存储能力缺失，而在 Route 没有读取并传递范围。这种“下层支持、边界丢参”的问题，只有把调用链两端放在一起才看得出来。
 
@@ -138,7 +138,62 @@ flowchart TD
 
 还应增加两个容易遗漏的边界：PUT body 含非法 `status` 或损坏 messages 时是否应返回 400/422，而不是把异常数据写入快照；DELETE 项目会话时是否同时处理仍在运行的 Agent，还是明确规定“删除持久化数据”和“销毁 Runtime”必须由调用方组合。接口合同必须选择一种语义并用测试固定，不能让 UI 猜测。
 
-## 8. 这不是“顺手修一下”的问题
+## 8. Electron 主进程提供了另一组会话管理入口
+
+Electron renderer 不会为了每个会话操作都绕回 Next.js Route。主进程中的 [packages/desktop/src/main/services/agent-session-service.ts 第 69—394 行](../../../../packages/desktop/src/main/services/agent-session-service.ts#L69) 注册了 list、create、get、update、delete、destroy、statistics 和 summary 等 IPC handler。它们调用同一个 core `agentSessionService`，但请求形状和范围处理并不与 Web route 自动一致。
+
+```mermaid
+flowchart LR
+    UI[同一个会话界面] --> A{运行环境}
+    A -->|Web| B[fetch Next API Route]
+    A -->|Electron| C[invoke IPC channel]
+    B --> D[core AgentSessionService]
+    C --> D
+    D --> E[JSON 会话文件]
+```
+
+这张图表达的是“下层服务复用”，不是“上层合同相同”。Web route 解析 path、query 和 body；IPC handler 解析一个对象参数。只要其中一侧少传字段，同一个 core 方法就可能表现不同。
+
+## 9. Web 与 Electron 管理合同逐项对照
+
+| 操作 | Web 边界 | Electron IPC 边界 | 当前观察 |
+| --- | --- | --- | --- |
+| list | `GET /sessions?projectId=...` | `{ projectId? }` | 两边都能把项目范围交给 core |
+| create | HTTP body | `{ projectId, projectName, ... }` | IPC 会持久化 LLM 配置、可复用指定 sessionId，并确保 agentBaseDir 存在 |
+| get/restore | path + 四个 query 身份字段 | `RestoreAgentSessionRequest` | 两边都经过 `restoreSessionAtBoundary` 后 hydrate runtime |
+| update | query `projectId` + body updates | `{ sessionId, updates, projectId? }` | 两边都能传项目范围，但都需要运行时数据校验 |
+| delete | 只把 `sessionId` 交给 core | `{ sessionId }` | 两边当前都没有把 projectId 传给 delete |
+| summary | 只把 `sessionId` 交给 core | `{ sessionId }` | 两边都有项目会话查找风险 |
+| statistics | 先按 sessionId 读取，再反推 projectId | 同样先按 sessionId 读取 | 两边共享同一断点 |
+| destroy | 独立 destroy route | `{ sessionId?, projectId? }` | IPC 会按 sessionId、会话中的 projectId、显式 projectId 依次尝试移除 runtime |
+
+表中最值得注意的不是相同项，而是“相同缺口被复制到了两个边界”。例如 Electron delete handler 在 [packages/desktop/src/main/services/agent-session-service.ts 第 246—276 行](../../../../packages/desktop/src/main/services/agent-session-service.ts#L246) 同样只调用 `deleteSession(request.sessionId)`；summary 和 statistics 在第 331—394 行也先使用不带 projectId 的读取。这说明问题不只是某个 Web route 写漏了 query，而是跨平台接口合同尚未统一表达项目范围。
+
+## 10. Electron create 与 destroy 还有额外副作用
+
+Electron create handler 位于 [packages/desktop/src/main/services/agent-session-service.ts 第 89—178 行](../../../../packages/desktop/src/main/services/agent-session-service.ts#L89)。除创建持久化会话外，它还会：
+
+- 调用 `persistRuntimeLLMConfig` 保存本次模型配置；
+- 若请求携带已有 `sessionId`，先按 `sessionId + projectId` 查找并更新已有会话；
+- 若携带 `agentBaseDir`，同步创建该目录；
+- 把 `agentBaseDir` 写成 `projectContext.currentPath`，把 `outputDir` 写入项目上下文。
+
+因此 create 不是一个纯粹的 JSON insert。它同时影响运行配置、工作目录和会话上下文。读者在调试“为什么工具落到这个目录”时，也需要回到创建请求，而不能只看工具函数。
+
+Electron destroy handler 位于 [packages/desktop/src/main/services/agent-session-service.ts 第 278—329 行](../../../../packages/desktop/src/main/services/agent-session-service.ts#L278)。它先按 sessionId 调用 `finalizeAndRemoveAgent`；失败后可能从持久化 session 反查 projectId，再遍历 manager；最后还可以按显式 projectId 查找。返回值中的 `success: true` 只表示 handler 正常执行，`agentDestroyed` 才表示是否真的找到了并移除了运行时。
+
+这是一个很典型的双层结果：
+
+```ts
+{
+  success: true,
+  data: { agentDestroyed: false }
+}
+```
+
+它不是网络失败，也不是异常；它表示“销毁请求被正确处理，但没有运行时可销毁”。若 UI 只检查外层 `success`，就可能错误提示“已销毁”。
+
+## 11. 这不是“顺手修一下”的问题
 
 虽然本节指出了风险，但正式修改代码前还要确认调用方契约。原因是 API 变更可能影响前端调用、Electron 集成或已有数据。正确工程顺序应是：
 
@@ -147,14 +202,27 @@ flowchart TD
 3. 再决定是给接口增加 `projectId` query，还是在 service 内提供跨目录查找。
 4. 修改后同时验证全局 session 与项目 session。
 
-教材在这里保持克制：指出源码证据和风险，但不把未实施的修复写成已经存在的能力。
+准确结论应停留在源码证据和已确认的风险，不能把尚未实施的修复写成现有能力。
 
-## 9. 小实验与口头验收
+## 12. 测试证据与缺口
+
+恢复合同已有 core 边界测试，Web route 也有相应的局部验证；但当前没有一组直接覆盖 `AgentSessionService.registerHandlers()` 全部会话 IPC 合同的测试。辅助流式状态机有测试，不等于 list/create/update/delete/summary/statistics/destroy 已经过 Electron 集成验证。
+
+后续测试至少应固定四类行为：
+
+1. Web 与 Electron 对同一项目会话使用相同的项目范围；
+2. create 的目录创建和 LLM 配置持久化副作用可控；
+3. destroy 同时断言外层 `success` 与内层 `agentDestroyed`；
+4. delete、summary、statistics 对全局会话与项目会话分别给出确定结果。
+
+在这些测试补齐前，只能确认 handler 的当前源码路径，不能断言跨平台管理合同已经完全一致。
+
+## 13. 小实验与口头验收
 
 纸面推演：假设 `s1` 只存在于 `projects/skill-travel-planner/sessions/s1.json`，不在全局 `sessions/s1.json`。读者应分别判断恢复、更新、删除、摘要、统计五个接口当前最可能的行为。合格答案应指出：恢复和更新有项目范围入口；删除、摘要、统计当前源码没有等价传入项目范围，因此需要测试或修正来证明它们覆盖项目会话。
 
 口头验收：读者应能说出为什么 GET restore 必须带 `entryType` 和 `entryId`，而 DELETE/summary/statistics 的当前风险主要是 `projectId` 范围不足。二者不是同一种问题。前者是归属安全，后者是路径一致性。
 
-## 10. 本节小结
+## 14. 本节小结
 
-更新、删除、摘要、统计都是会话管理能力，但它们不是同一个责任。恢复 GET 已经强制要求入口范围；PUT 支持项目范围；DELETE、summary、statistics 当前存在项目路径传递不足的风险。阅读这些接口时，必须区分“源码已经保证的行为”和“根据路径规则可以确认的风险”。
+更新、删除、摘要、统计都是会话管理能力，但它们不是同一个责任。Web Route 与 Electron IPC 最终复用同一个 core service，却没有因此自动获得相同且完整的边界合同。恢复和更新能表达项目范围；两端的 DELETE、summary、statistics 当前都存在项目路径传递不足的风险。阅读跨平台接口时，必须同时核对请求形状、core 调用参数、副作用和双层返回值。

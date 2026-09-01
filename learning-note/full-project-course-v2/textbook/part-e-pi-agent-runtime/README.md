@@ -6,6 +6,8 @@
 
 > 每个大板块都先阅读对应的“单元导读”。导读不替代正式课；它先建立问题、词汇和学习终点，避免在源码细节中失去方向。
 
+Part E 的源码范围、并行实现、延后主题和复审状态统一记录在 [Part E 源码范围与全局审查台账](../../04-part-e-source-coverage-audit.md) 。正文负责教学，台账负责防止生产路径、测试证据和未接入实现被静默遗漏。
+
 | 范围 | 课号 | 问题 |
 | --- | --- | --- |
 | 会话心智模型与公共类型 | E01-E08 | 阅读 [单元导读与复盘](00-01-session-model-and-public-types-guide.md) ，理解一次 Agent 对话由哪些对象组成。已写： [E01](E01-a-trip-window-is-not-yet-a-conversation.md) 、 [E02](E02-the-configuration-that-starts-a-trip-agent.md) 、 [E03](E03-one-trip-request-is-a-turn-not-a-single-bubble.md) 、 [E04](E04-events-become-the-thinking-indicator.md) 、 [E05](E05-identities-that-must-not-be-confused.md) 、 [E06](E06-from-history-to-model-context.md) 、 [E07](E07-three-shapes-of-a-conversation.md) 、 [E08](E08-session-foundations-workshop.md) 。 |
@@ -16,4 +18,4 @@
 | 稳定性与可观测性 | E56-E63 | 先读 [单元导读六](00-06-stability-and-observability-guide.md) 。已写： [E56](E56-errors-must-be-classified-before-they-can-be-recovered.md) 、 [E57](E57-stream-dedupe-prevents-duplicate-text-from-becoming-truth.md) 、 [E58](E58-stream-rendering-needs-a-scheduler-not-unlimited-state-updates.md) 、 [E59](E59-long-session-compression-must-preserve-recent-failure-traces.md) 、 [E60](E60-completion-guard-catches-promise-only-stops.md) 、 [E61](E61-loop-detector-and-tool-status-turn-repetition-into-evidence.md) 、 [E62](E62-health-notification-and-upload-records-make-runtime-state-visible.md) 、 [E63](E63-stability-and-observability-workshop.md) 。 |
 | 测试与端到端验收 | E64-E70 | 先读 [单元导读七](00-07-testing-and-end-to-end-acceptance-guide.md) 。已写： [E64](E64-a-test-is-a-bounded-piece-of-evidence.md) 、 [E65](E65-core-lifecycle-and-ui-store-need-separate-contracts.md) 、 [E66](E66-restoration-tests-prove-order-not-only-output.md) 、 [E67](E67-hook-tests-must-control-concurrency-and-event-ownership.md) 、 [E68](E68-input-display-and-prompt-tests-define-different-boundaries.md) 、 [E69](E69-cross-boundary-contract-tests-prove-public-integration-rules.md) 、 [E70](E70-pi-agent-runtime-end-to-end-acceptance-workshop.md) 。 |
 
-每一节会以独立文件写入本目录，使用 `E01-...md` 至 `E70-...md` 命名。正式文件写完后，本表会补充每节的直接链接和源码范围。
+每一节均以独立文件写入本目录，使用 `E01-...md` 至 `E70-...md` 命名。阅读单节前先用对应单元导读建立整体路径；审查源码覆盖时以全局台账为准，不能用“文件已经列出”代替代码窗口级精读。

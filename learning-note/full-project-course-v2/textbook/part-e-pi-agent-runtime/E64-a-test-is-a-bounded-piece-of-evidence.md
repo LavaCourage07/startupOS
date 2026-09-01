@@ -68,7 +68,7 @@ pnpm --filter @originos/core exec vitest run \
   src/lib/integrations/pi-agent/core/__tests__/agent.test.ts
 ```
 
-命令写进教材只表示可复现入口；只有实际执行成功并保留输出，才能写“本次运行通过”。
+命令本身只表示可复现入口；只有实际执行成功并保留输出，才能写“本次运行通过”。
 
 ## 3. 全局 mock 模拟了什么
 

@@ -123,7 +123,7 @@ const isActiveStream = () =>
 
 过滤实现位于 [packages/core/src/lib/integrations/electron/services/agent-session.ts 第 290—326 行](../../../../packages/core/src/lib/integrations/electron/services/agent-session.ts#L290)。当订阅传入 `sessionId` 时，payload 未携带字符串 sessionId 也会被拒绝，而不是把“缺失”视为通配。这一默认拒绝策略正是会话级订阅的隔离边界。
 
-该函数的 `catch {}` 会吞掉 JSON 解析或分发异常。这避免坏 payload 冲击渲染进程，却会降低故障可见性；正式排错时不能只看 UI，还要检查主进程事件是否格式异常。教材应同时解释保护效果和诊断代价。
+该函数的 `catch {}` 会吞掉 JSON 解析或分发异常。这避免坏 payload 冲击渲染进程，却会降低故障可见性；正式排错时不能只看 UI，还要检查主进程事件是否格式异常。保护效果与诊断代价必须同时计入判断。
 
 ## 7. 源码窗口三：批量事件合并 `coalesceAgentEventBatch`
 

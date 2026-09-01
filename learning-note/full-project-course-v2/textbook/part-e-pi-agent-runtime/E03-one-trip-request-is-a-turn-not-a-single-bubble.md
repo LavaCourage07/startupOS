@@ -49,7 +49,7 @@ sequenceDiagram
 
 ## 源码窗口一：事件是怎样进入运行时状态的
 
-[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 947-1024 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L947) 以 `switch` 分发图中的过程事件；每个 `case` 对应一种状态转换。
+[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 947—1024 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L947) 以 `switch` 分发图中的过程事件；每个 `case` 对应一种状态转换。
 
 ```ts
 case 'turn_start':
@@ -77,7 +77,7 @@ case 'turn_end': {
 
 ## 源码窗口二：一条助手消息内部也可能不只含文本
 
-[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 983-1021 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L983) 检查 `msg.content` 是否为数组，再区分 `text`、`toolCall`、`thinking` 和其他 block。一个助手消息可能同时携带文本、工具调用与推理资料；用户界面显示哪部分，取决于后续的显示内容规则。
+[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 983—1021 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L983) 检查 `msg.content` 是否为数组，再区分 `text`、`toolCall`、`thinking` 和其他 block。一个助手消息可能同时携带文本、工具调用与推理资料；用户界面显示哪部分，取决于后续的显示内容规则。
 
 这解释了为什么不能只写 `message.content.toString()`：复杂消息不是一段普通字符串。也解释了为什么小林看到一段回复，不代表运行时只处理了这一种内容块。
 
@@ -91,7 +91,7 @@ case 'turn_end': {
 
 ## 源码窗口三：工具开始和结束各自改变什么
 
-[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 1026-1055 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L1026) 在工具开始时向 `activeTools` 放入 `{ toolName, startTime }`；结束时按 `toolName` 过滤掉对应项，再读取结果、退出码和失败原因。
+[packages/core/src/lib/integrations/pi-agent/core/agent.ts 第 1026—1055 行](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts#L1026) 在工具开始时向 `activeTools` 放入 `{ toolName, startTime }`；结束时按 `toolName` 过滤掉对应项，再读取结果、退出码和失败原因。
 
 | 事件 | state 变化 | 小林可看到的正确含义 | 不可推出的结论 |
 | --- | --- | --- | --- |

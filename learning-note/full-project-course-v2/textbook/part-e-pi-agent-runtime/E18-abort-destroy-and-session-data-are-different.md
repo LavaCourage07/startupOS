@@ -19,6 +19,7 @@
 | `packages/web/src/app/api/agent/abort/route.ts` | 服务端中断运行中 Agent |
 | `packages/web/src/app/api/agent/sessions/destroy/route.ts` | 按 sessionId 或 projectId 销毁运行时 |
 | `packages/web/src/app/api/agent/sessions/[sessionId]/destroy/route.ts` | 按路径 sessionId 销毁运行时 |
+| `packages/desktop/src/main/services/agent-session-service.ts` | Electron abort/destroy 的真实主进程语义 |
 
 ## 2. 三个动作的差异
 
@@ -64,11 +65,13 @@
 
 浏览器侧 abort 可以停止当前 fetch 或停止读取事件，但它不一定保证服务端模型调用立刻停止。如果服务端运行时继续执行，就会浪费资源，甚至可能继续调用工具。
 
-所以 `abortAgentSession` 会向 `/api/agent/abort` 发送请求。这里要注意一个源码级细节：客户端 helper 当前发送的是 `{ sessionId }`，而 `/api/agent/abort` 的注释和实现读取的是 `agentId`。这意味着这条路径存在字段命名不一致的风险，需要后续代码层面进一步核准或修复。教材正文不能把它讲成已经完全闭合的强保证。
+所以 `abortAgentSession` 会向 `/api/agent/abort` 发送请求。这里要注意一个源码级细节：客户端 helper 当前发送的是 `{ sessionId }`，而 `/api/agent/abort` 的注释和实现读取的是 `agentId`。这意味着这条路径存在字段命名不一致的风险，需要后续代码层面进一步核准或修复；当前实现不能被视为已经完全闭合的服务端中断保证。
 
 两端证据分别位于 [packages/core/src/lib/integrations/electron/services/agent-session.ts 第 330—344 行](../../../../packages/core/src/lib/integrations/electron/services/agent-session.ts#L330) 和 [packages/web/src/app/api/agent/abort/route.ts 第 21—35 行](../../../../packages/web/src/app/api/agent/abort/route.ts#L21)。按当前代码，Web helper 发出的 body 没有 `agentId`，Route 会返回 400 `INVALID_REQUEST`。这不是“潜在可能”，而是静态源码已经能确认的契约不一致；在修复前，Web 侧停止只能可靠地立即停止本地接收，不能宣称服务端执行已被中断。
 
-服务端再根据当前模式查找运行中的 Agent：
+服务端再根据当前模式查找运行中的 Agent。Web Runtime 进程入口保存于 [packages/web/src/app/api/agent/_runtime-agent-registry.ts 第 1—37 行](../../../../packages/web/src/app/api/agent/_runtime-agent-registry.ts#L1) 的 `globalThis.__runtimeAgents`，借此避免 Next.js HMR 创建彼此隔离的 Map；进程内长驻 Agent 则通过 [packages/core/src/lib/integrations/pi-agent/persistent-agent-manager.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/persistent-agent-manager.ts#L1) 查询。本节只引用后者的 abort 查找接口，其完整长驻生命周期属于后续专门单元。
+
+服务端的查找顺序是：
 
 - Runtime 模式：通过 spawner、registry 或进程列表定位并 abort。
 - in-process 模式：通过 `persistentAgentManager` 找到 Agent，调用内部 `abort()`，并尝试等待 idle。
@@ -114,7 +117,7 @@ flowchart TD
 | `/api/agent/sessions/destroy` | body 中的 `sessionId` / `projectId` | 直接查 sessionId；必要时通过 session DB 找 UUID；再用模糊匹配兜底 |
 | `/api/agent/sessions/[sessionId]/destroy` | path 中的 `sessionId` | 直接查 path sessionId；查全部进程；必要时用 session DB 找 projectId 对应会话 |
 
-这里的兜底策略说明了运行时生命周期管理的复杂性。但它也带来一个风险：模糊匹配必须谨慎，否则理论上可能误伤不相关进程。当前教材应把它作为“需要关注的集成风险”，不能只写成优点。
+这里的兜底策略说明了运行时生命周期管理的复杂性。但它也带来一个风险：模糊匹配必须谨慎，否则理论上可能误伤不相关进程。这是一项需要关注的集成风险，不能只把兜底描述成优点。
 
 ## 9. 两个 destroy route 为什么都存在
 
@@ -160,7 +163,26 @@ abort 不是故事结束。即使前端调用了 abort，旧事件也可能已�
 
 两者缺一不可。
 
-## 13. 本节小结
+## 13. Electron 中 abort 与 destroy 也不能合并
+
+Electron renderer 的 `abortAgentSession` 会 invoke `AGENT_SESSION_ABORT`。当前主进程 handler 位于 [packages/desktop/src/main/services/agent-session-service.ts 第 862—885 行](../../../../packages/desktop/src/main/services/agent-session-service.ts#L862)，实际调用 `agentManager.removeAgent(sessionId)`。它没有显式等待当前 prompt idle，也没有在这里调用 Agent 实例的 `abort()`。因此当前桌面 abort 的代码语义更接近“从 manager 移除运行时”，不能直接套用 Web abort 的说明。
+
+Electron destroy handler 位于 [packages/desktop/src/main/services/agent-session-service.ts 第 278—329 行](../../../../packages/desktop/src/main/services/agent-session-service.ts#L278)，调用 `finalizeAndRemoveAgent`，并提供按 sessionId、从 session 反查 projectId、显式 projectId 三层查找。`finalize` 这个动作说明 destroy 允许先执行生命周期收尾；abort handler 当前没有同样过程。
+
+| Electron 操作 | 当前主进程调用 | 可以确认 | 不能直接确认 |
+| --- | --- | --- | --- |
+| abort | `removeAgent(sessionId)` | manager 中的运行时被移除 | 正在执行的底层模型/工具是否立刻终止 |
+| destroy | `finalizeAndRemoveAgent(...)` | 尝试做收尾并移除运行时 | 一定找到了目标；要看 `agentDestroyed` |
+
+这项差异需要通过代码修正或集成测试进一步统一。在此之前，不能用相同按钮名称掩盖平台差异。
+
+## 14. 测试证据与缺口
+
+[packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts#L1) 对 Hook 使用 mock `abortAgentSession`，可证明本地会话隔离与调用意图；它不会启动真实 Web route 或 Electron IPC handler。当前也没有直接覆盖桌面 `AGENT_SESSION_ABORT` 与 `AGENT_SESSION_DESTROY` handler 的集成测试。
+
+所以源码已经足以确认 Web body 字段不匹配和 Electron handler 的当前调用方式，却不能证明真实模型请求、子进程或工具进程一定在用户点击停止后立即终止。后续验收必须同时观察：客户端不再接收、运行时停止产生事件、Agent 是否从 manager 移除、持久化 session 是否保留。
+
+## 15. 本节小结
 
 停止、销毁、删除会话分别作用在不同层级：
 
@@ -170,7 +192,7 @@ abort 不是故事结束。即使前端调用了 abort，旧事件也可能已�
 
 正式工程里必须把它们分开实现、分开命名、分开测试。
 
-## 14. 本节源码验收
+## 16. 本节源码验收
 
 读完本节，应能说明：
 
@@ -179,8 +201,9 @@ abort 不是故事结束。即使前端调用了 abort，旧事件也可能已�
 3. Runtime 模式和 in-process 模式的 abort 查找方式有什么不同。
 4. destroy 为什么保留会话数据。
 5. destroy route 的模糊匹配为什么既是兜底，也是需要测试的风险点。
+6. Electron abort 与 destroy 当前分别调用什么，为什么不能写成同一语义。
 
-## 15. 自测问题
+## 17. 自测问题
 
 1. 为什么关闭窗口不应该默认删除会话历史？
 2. 浏览器 abort 和服务端 abort 分别解决什么问题？

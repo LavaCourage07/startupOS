@@ -34,7 +34,7 @@ sequenceDiagram
 
 ## 第一段源码：窗口为什么使用 Hook
 
-[packages/core/src/lib/integrations/pi-agent/client-hooks.ts 第 276-300 行](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts#L276) 给出了客户端 Hook 的最小使用形态：
+[packages/core/src/lib/integrations/pi-agent/client-hooks.ts 第 276—300 行](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts#L276) 给出了客户端 Hook 的最小使用形态：
 
 ```tsx
 const { sendMessage, isThinking, uiState } = usePiAgent();
@@ -50,7 +50,7 @@ const handleSend = async (text: string) => {
 
 ## 第二段源码：初始化请求带着哪些旅行资料
 
-[packages/core/src/lib/integrations/pi-agent/client-hooks.ts 第 210-248 行](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts#L210) 整理 `projectContext`，调用 `createAgentSession`，并传入 `sessionId`、`projectId`、`projectName`、`systemPrompt`、`llmConfig`、`agentBaseDir` 与 `outputDir`。
+[packages/core/src/lib/integrations/pi-agent/client-hooks.ts 第 210—248 行](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts#L210) 整理 `projectContext`，调用 `createAgentSession`，并传入 `sessionId`、`projectId`、`projectName`、`systemPrompt`、`llmConfig`、`agentBaseDir` 与 `outputDir`。
 
 | 请求字段 | 小林的例子 | 它的责任 |
 | --- | --- | --- |
@@ -77,7 +77,7 @@ interface AppWindowData { id: string; /* 已创建窗口的数据 */ }
 
 ## 第三段源码：成功、失败、等待是三种状态
 
-[packages/core/src/lib/integrations/pi-agent/client-hooks.ts 第 241-248 行](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts#L241) 区分会话初始化的成功、失败与等待状态：
+[packages/core/src/lib/integrations/pi-agent/client-hooks.ts 第 241—248 行](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts#L241) 区分会话初始化的成功、失败与等待状态：
 
 ```ts
 if (!response.success) {
@@ -100,7 +100,7 @@ return { sessionId: response.data.sessionId, projectContext: scopedProjectContex
 
 ## 测试证据与边界
 
-[packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts) 用 mock API 检查不同会话的初始化和流标识不会互相覆盖；[packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts 第 72-117 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts#L72) 验证有效配置的 state 含正确会话 ID、项目上下文，且初始不在思考。当前小节未找到 `AppWindowManager` 或 `appWindowStore` 的配对自动化测试；窗口 ID 的类型约束来自 `app-window.ts`，窗口生命周期与会话生命周期的联动需要以 E05 的源码路径和后续集成测试继续验证。
+[packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts) 用 mock API 检查不同会话的初始化和流标识不会互相覆盖；[packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts 第 72—117 行](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/agent.test.ts#L72) 验证有效配置的 state 含正确会话 ID、项目上下文，且初始不在思考。当前小节未找到 `AppWindowManager` 或 `appWindowStore` 的配对自动化测试；窗口 ID 的类型约束来自 `app-window.ts`，窗口生命周期与会话生命周期的联动需要以 E05 的源码路径和后续集成测试继续验证。
 
 这些证据不证明真实模型一定连通、旅行 Skill 已加载或行程文件已落盘。每个测试只证明自己的边界。
 

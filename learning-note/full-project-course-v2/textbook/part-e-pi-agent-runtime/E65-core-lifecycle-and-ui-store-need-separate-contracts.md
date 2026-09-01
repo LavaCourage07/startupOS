@@ -179,7 +179,34 @@ DEFAULT_CONFIG
 
 测试只验证 prompt 文本包含正确约束，仍不证明模型遵守，更不证明生成命令在真实 PowerShell/cmd 中执行成功。真实 shell 行为应由命令工具集成测试承担。
 
-## 10. 小林案例：一次看似成功的错误验收
+## 10. 配置诊断 Route 会发真实请求，不能当成纯读取接口
+
+仓库还提供 [packages/web/src/app/api/agent/test-llm/route.ts 第 14—334 行](../../../../packages/web/src/app/api/agent/test-llm/route.ts#L14) 诊断模型配置。它不是 `server-config.test.ts` 那样的 mock 单测，也不是简单返回环境变量：一次 GET 会根据当前配置依次尝试 OpenAI-compatible 原生 HTTP、OpenAI-compatible fetch、Anthropic `x-api-key` 和 Anthropic bearer 等端点，每次请求都有 15 秒超时。
+
+```mermaid
+flowchart TD
+    A[GET /api/agent/test-llm] --> B[读取 server config]
+    B --> C{key 与 baseUrl 是否存在}
+    C -- 否 --> G[返回配置状态与诊断]
+    C -- 是 --> D[尝试 OpenAI 两种传输]
+    D --> E[尝试 Anthropic 两种认证]
+    E --> F[选择第一个 2xx 端点]
+    F --> G
+```
+
+图中的多个尝试是顺序 `await`，不是并行竞速。上游持续超时时，整个诊断请求可能等待多轮超时；因此不能把它当作频繁轮询的健康接口。GET 还产生真实外部网络副作用，从 HTTP 语义上也不是纯粹的只读缓存查询。
+
+返回结果会包含脱敏后的 key、key 长度和前缀分析、base URL、modelId、每种端点的状态、推荐 provider 与诊断文本。源码不会返回完整 key，但“前 8 位 + 后 4 位”、token 格式和内部 base URL 仍属于敏感诊断信息。该 Route 是否受开发环境、权限或部署边界限制，需要额外检查；仅凭“已经 mask”不能推导它适合公开访问。
+
+| 证据 | 能证明 | 不能证明 |
+| --- | --- | --- |
+| `server-config.test.ts` | 配置怎样映射成模型参数 | 真实端点可达 |
+| `GET /test-llm` 某端点 2xx | 本次网络、凭证、URL 组合得到成功响应 | 正常 Agent runtime 使用完全相同协议与长期稳定 |
+| 所有端点失败 | 本次诊断没有找到可用组合 | 一定是供应商故障；也可能是 URL、凭证、网络或协议配置错误 |
+
+当前没有发现直接覆盖这条 Route 的测试。尤其需要测试缺失配置不发网络、不同认证头、URL `/v1` 拼接、超时清理、响应脱敏，以及未授权调用者不能获得诊断信息。在这些边界固定前，它应作为人工诊断工具谨慎使用，不能充当自动化验收的唯一证据。
+
+## 11. 小林案例：一次看似成功的错误验收
 
 假设测试只执行：
 
@@ -190,13 +217,13 @@ expect(usePiAgentStore.getState().isInitialized).toBe(true);
 
 这只证明 Zustand 能保存布尔值。它绕过了 Agent 构造、配置映射、订阅建立和错误处理，不能作为“旅行助手初始化成功”的证据。更合格的 Store 测试应调用公开 `initialize`，mock 核心边界，并断言调用参数与状态迁移；更高一层集成测试则应减少 mock，让真实 `OriginOSAgent` 参与。
 
-## 11. 测试证据与缺口
+## 12. 测试证据与缺口
 
 本课测试证明：核心包装器能用合法配置建立初始状态；Store 能管理初始化、发送、事件状态、上下文更新、reset 与 destroy；服务器模型配置能把多种凭证映射到运行时模型参数。
 
 它们没有证明：真实模型可调用、React 组件正确渲染 Store、浏览器与服务端建立 SSE、会话落盘成功。`store.test.ts` 还依赖 mock 核心对象，必须避免把“调用 mock 成功”写成“核心运行成功”。
 
-## 12. 小实验与口头验收
+## 13. 小实验与口头验收
 
 画出“小林初始化旅行助手”的双层状态表：左列写核心 Agent 状态，右列写 Store 状态。分别为初始化成功、模型配置失败、工具执行中、abort、destroy 填值，并圈出哪些状态组合不应出现。
 
@@ -206,5 +233,6 @@ expect(usePiAgentStore.getState().isInitialized).toBe(true);
 2. 为什么模拟事件序列比直接设置最终布尔值更有证明力。
 3. `createRuntimeModel` 的参数断言为何不证明供应商可用。
 4. 部分上下文更新需要同时断言“新值写入”和“旧值保留”的原因。
+5. 为什么 `/api/agent/test-llm` 的一次 2xx 不能替代正常会话端到端测试。
 
 下一课进入最容易被“单测都绿了”掩盖的边界：磁盘中的旧会话必须先通过 schema 与所有权校验，再恢复运行时，最后才允许返回可显示消息。

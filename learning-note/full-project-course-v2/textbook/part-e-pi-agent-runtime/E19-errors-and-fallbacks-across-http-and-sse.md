@@ -87,7 +87,7 @@ return payload;
 
 如果客户端只看 `response.statusText`，错误会很粗糙；读取 payload 后，调用方至少能拿到业务错误码和消息。
 
-但也要注意：有些函数并没有统一使用 `readJsonResponse`。例如恢复会话的 GET 分支会直接读取 JSON，再由调用方检查 `success`。所以教材不能简单说“所有 HTTP 错误都由 readJsonResponse 处理”。
+但也要注意：有些函数并没有统一使用 `readJsonResponse`。例如恢复会话的 GET 分支会直接读取 JSON，再由调用方检查 `success`。因此不能概括成“所有 HTTP 错误都由 readJsonResponse 处理”。
 
 此外，`response.json()` 自己位于 `response.ok` 判断之前。如果网关返回 HTML 错误页、空 body 或损坏 JSON，函数会先抛出 JSON 解析错误，得不到 `statusText` 兜底。这是当前 helper 的真实边界；调用方看到的错误可能不是后端业务错误结构。
 
