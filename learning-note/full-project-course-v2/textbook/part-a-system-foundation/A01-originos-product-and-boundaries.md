@@ -1,91 +1,180 @@
-# A01：OriginOS 不是“聊天页面加 API”
+# A01：OriginOS 为什么不能理解成“聊天页面加一个 API”
 
-## 从首页看得见的现象开始
+## 从一个看得见却解释不完的现象开始
 
-打开 OriginOS 首页，你会同时看到「创建 Agent」「创建角色」「技能市场」「工作区」「头脑风暴」「工作流构建」六个入口。它们不是同一类东西的六种皮肤：有的入口点进去会打开一个对话窗口，有的入口点进去会打开文件工作区。这个差异本身就在说明：OriginOS 不是把一切都塞进一个聊天框。
+首页上的“头脑风暴”和“工作区”都是卡片。点击前者会打开技能对话，点击后者会打开项目文件窗口。视觉上相似的入口，后续却需要完全不同的能力：一个要准备 Agent、会话、工具和产物目录；另一个只需打开已有工作空间。
 
-想象两种产品。
+如果把 OriginOS 理解成“输入一句话，模型返回一句话”，就解释不了四个问题：
 
-**产品甲**只有消息列表。你说一句话，服务端返回一段文字；刷新页面后这次交流是否存在，由另一个系统决定。你的请求、模型的回复、可能产生的文件之间没有稳定关系。
+1. 为什么无需模型的工作区也属于首页应用？
+2. 为什么关闭窗口后历史仍可能存在？
+3. 为什么同一项能力既能在浏览器运行，也能进入 Electron 桌面？
+4. 为什么模型说“文件已保存”仍不能证明磁盘真的有文件？
 
-**产品乙**要完成「帮我为课程设计一个项目」：它需要读取模板、追问缺失信息、创建文件、把过程保存在某个工作目录、让你稍后从项目窗口继续编辑。OriginOS 讨论的是第二类产品。
+本章建立最小产品模型，只讲清系统需要哪些角色以及它们的边界；各角色内部实现留到后续章节。
 
-这里的难点不是模型能否写出一句好话，而是系统能否回答五个问题：
+## 第一个概念阶梯：模型、Agent、应用与操作系统
 
-| 问题 | 若系统答不上来会怎样 | OriginOS 把责任放在哪里 |
-|------|----------------------|--------------------------|
-| 用户从哪里开始 | 所有能力挤进一个聊天框 | 首页卡片、Dock、窗口与路由 |
-| 模型能做什么 | 模型只能输出文本 | 技能与工具定义可执行能力 |
-| 结果放在哪里 | 文本离开页面就丢失 | 会话、项目和本地文件存储 |
-| 用户怎样继续 | 每次都从零开始描述上下文 | 会话恢复、工作区和记忆 |
-| 桌面怎样参与 | 浏览器不能直接承担原生窗口职责 | Electron main、IPC、原生窗口 |
+| 名称 | 最小准确解释 | 在头脑风暴案例中的作用 | 不能把它误认为 |
+| --- | --- | --- | --- |
+| 模型 | 根据上下文生成内容的推理引擎 | 生成创意文本或工具调用意图 | 会话管理器、文件系统 |
+| Agent | 组织提示词、消息、工具和生命周期的运行主体 | 把用户要求变成若干轮推理与操作 | 一个聊天气泡 |
+| 应用入口 | 告诉首页“展示什么、点击后走哪条路径”的配置 | `bmad-brainstorming` Skill 入口 | 已加载的 Skill 实例 |
+| OriginOS | 协调入口、窗口、运行时、工具、存储和桌面形态的系统 | 让一次请求成为可恢复、可执行的工作 | 单一模型 SDK 的包装页 |
 
-这张表建立了本书反复使用的一条判断：遇到一段 Agent 代码时，先问它是在解决「理解用户」「决定动作」「执行动作」「保存结果」中的哪一个问题。不要把所有问题都归给模型。
+模型只负责推理，不自动拥有文件权限，也不知道哪个窗口正在关闭。Agent 管理一次工作的上下文，却仍需要 UI 提供入口、存储保存状态、工具执行外部动作。OriginOS 的“OS”价值正是在这些责任之间建立长期稳定的边界。
 
-## 四个角色与一本规约
+## 一张图只回答一个问题：为什么模型外面还需要系统
 
 ```mermaid
 flowchart LR
-    U[用户动作] --> W[Web 界面]
-    W --> C[共享 Core]
-    C --> R[Pi Agent 运行时]
-    R --> M[模型与工具]
-    C --> F[本地文件数据]
-    D[Electron 桌面壳] --> W
-    D --> C
+    U[用户目标] --> E[入口与窗口]
+    E --> A[Agent 运行时]
+    A --> M[模型]
+    A --> T[工具]
+    T --> F[文件与外部副作用]
+    A --> S[会话与长期状态]
+    D[Electron 桌面壳] -.提供进程能力.-> E
+    D -.提供 IPC 边界.-> A
 ```
 
-这是一张职责图，不是数据流图。`Web 界面` 负责呈现卡片、输入和窗体；`Core` 放可共享的业务、类型、存储与集成；`Pi Agent 运行时` 管理会话、消息、技能和工具；`Electron` 为桌面版提供原生窗口和进程能力。`Core -> 文件数据` 说明 MVP 以本地文件保存项目和会话，而非数据库。
+从左到右解释每根箭头：
 
-图中有两类箭头容易混淆。横向箭头表示一次用户动作通常从界面逐步进入业务与运行时；指向 `本地文件数据` 的箭头表示状态并不只停留在内存。`Electron -> Web/Core` 的两条箭头尤其容易误读：Electron 不是替代 Web 的另一套产品，它为桌面运行提供进程和窗口能力，同时复用已有 Web 与 Core。
+- 用户目标先进入入口和窗口，因为系统必须知道用户启动的是 Skill、工作区还是别的应用。
+- 窗口把身份和启动材料交给 Agent；窗口本身不推理。
+- Agent 把合适的上下文交给模型，同时只暴露允许的工具。
+- 工具才会真正读写文件或访问外部资源；模型文本不是副作用证据。
+- 会话保存已发生的消息与配置，使窗口关闭或服务重启后仍可能恢复。
+- Electron 虚线表示它提供另一种运行环境，并不替代 Web 和 Core 的业务职责。
 
-这些分工不是口头约定，而是写进了 [`AGENTS.md`](../../../../AGENTS.md#L1) 。它把 MVP 范围落到首页内置应用、技能系统、会话交互层、文件管理层、工作空间编辑器、窗体与可视化、本体构建系统，并规定了技术栈、目录结构、依赖方向和数据存储方式。阅读任何源码之前，先知道有这本规约；判断一段代码是否放错位置时，再回来查具体条款。
+## 源码证据一：入口首先是一份数据
 
-## 源码中的第一个证据：入口配置
+[packages/web/src/config/homeApps.ts 第 8—21 行](../../../../packages/web/src/config/homeApps.ts#L8) 定义首页入口合同：
 
-[`packages/web/src/config/homeApps.ts` 第 8—21 行](../../../../packages/web/src/config/homeApps.ts#L8) 定义了 `AppCardType = 'skill' | 'action'`。这不是视觉样式，而是产品入口的分类：
+```ts
+export type AppCardType = 'skill' | 'action';
 
-| 入口类型 | 配置含义 | 后续路径 |
-|----------|----------|----------|
-| `skill` | 需要一个技能名 | 打开技能对话，再进入 Agent 会话 |
-| `action` | 需要一个明确动作 | 例如打开工作区，不必请求模型 |
+export interface HomeAppConfig {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  color: string;
+  type: AppCardType;
+  skillName?: string;
+  action?: string;
+}
+```
 
-「创建 Agent」在 [`HOME_APPS` 第 29—37 行](../../../../packages/web/src/config/homeApps.ts#L29) 中只声明 `skillName: 'agent-creator'`。首页没有复制 Agent 创建算法。这种把入口描述与实现分开的方式称为**配置驱动**：新增产品入口时，先增加数据，控制逻辑保持集中。
+`type` 是必填判别字段；`skillName` 和 `action` 却是可选字段。这是一个尚未完全收紧的合同：TypeScript 允许写出 `{ type: 'skill' }` 却没有 `skillName` 的对象，运行时必须再检查。
 
-这个分类也解释了为什么首页不能只有「聊天」一个入口。如果所有功能都走聊天框，`type` 这个字段就失去意义；正是因为有些入口需要 Agent 会话、有些只需要打开窗口，`type` 才成为源码中必须被检查的合同。
+[同文件第 27—83 行](../../../../packages/web/src/config/homeApps.ts#L27) 给出真实数据。“头脑风暴”的关键值是：
 
-## Agent 与模型：两个不能互换的概念
+```ts
+{
+  id: 'app-brainstorming',
+  name: '头脑风暴',
+  type: 'skill',
+  skillName: 'bmad-brainstorming',
+}
+```
 
-**模型**预测文本；**Agent** 管理工作过程。OriginOS 中，一个 Agent 至少需要：系统提示词、会话历史、工具集合、工作目录、项目上下文和持久化位置。模型不能自己决定文件应写到哪里，也不能自己在窗口关闭时整理记忆。
+而“工作区”是 `type: 'action'`、`action: 'open-workspace'`。因此，页面上同样的卡片只代表同一种展示方式，不代表同一种业务能力。
 
-两者的差别可以从失败现象看得最清楚：
+## 源码证据二：卡片没有执行 Skill 的知识
 
-- 若模型暂时不可用，Agent 仍应知道这次会话属于谁、已经产生了哪些文件、哪些工具正在执行。
-- 若窗口被关闭，模型本身也不会通知存储层清理资源。
+[packages/web/src/components/framework/AppCard.tsx 第 73—79 行](../../../../packages/web/src/components/framework/AppCard.tsx#L73) 的点击逻辑只有两种动作：
 
-把这些生命周期责任交给运行时，才使模型可以被替换而系统保持完整。 [`packages/web/src/app/page.tsx` 第 28—69 行](../../../../packages/web/src/app/page.tsx#L28) 的导入列表可以验证这个分工：它同时导入 `SkillDialog`（UI）、`AppWindowManager`（窗口生命周期服务）、Pi Agent client（运行时配置），三者各司其职。
+```ts
+const handleClick = () => {
+  if (path) {
+    window.location.href = path;
+  } else if (onClick) {
+    onClick();
+  }
+};
+```
 
-## 一个容易犯的错误
+这段代码的输入是 `path` 或父组件传入的 `onClick`；输出是一次导航或一次回调。它既不读取 `SKILL.md`，也不创建会话。由此可以得出可复查结论：**AppCard 是展示与事件触发组件，不是 Skill 运行器。**
 
-把 `packages/web/src/app/page.tsx` 当作「整个系统的入口」是只对一半的说法。它确实是浏览器首页的入口，但不是所有运行形态的入口，也不是 Agent 的唯一创建点。 [`AGENTS.md` 的目录规则](../../../../AGENTS.md#L166) 明确要求 `app/` 保持页面和 API 边界，业务逻辑下沉到 Core。后续阅读中，任何页面文件过度膨胀都应触发这个警觉。
+## 源码证据三：页面才解释入口类别
 
-## 测试证据与缺口
+[packages/web/src/app/page.tsx 第 1426—1447 行](../../../../packages/web/src/app/page.tsx#L1426) 在渲染卡片时创建闭包：
 
-A01 还在建立产品地图，没有单一测试能证明「OriginOS 是什么系统」。但可以通过以下入口验证自己的理解：
+```tsx
+onClick={() => {
+  if (app.type === 'skill' && app.skillName) {
+    handleSkillLaunch(app.skillName, app.name);
+  } else if (app.action === 'create-agent') {
+    handleCreateProject();
+  } else if (app.action === 'open-workspace') {
+    const firstProject = projects[0];
+    if (firstProject) {
+      handleOpenWorkspace(firstProject.id);
+    }
+  }
+}}
+```
 
-- [`packages/web/src/config/homeApps.ts`](../../../../packages/web/src/config/homeApps.ts#L1) 中 `type: 'skill'` 与 `type: 'action'` 的数量和字段差异。
-- [`package.json`](../../../../package.json#L1) 中的 `name`、`description` 和 `scripts`，确认项目不是单一应用而是 monorepo。
-- [`AGENTS.md`](../../../../AGENTS.md#L1) 的 MVP 范围与禁止技术清单。
+这一窗口解释了为什么视觉相同的卡片可以进入不同系统能力。页面读取 `type`、`skillName`、`action` 和当前 `projects` 状态，再选择 handler。它仍没有读取 SKILL.md 或直接写磁盘；页面拥有的是入口编排，不是下游业务实现。
 
-当前缺口：没有自动化测试验证「首页入口分类是否符合产品意图」。这个判断目前靠人工 review 配置。
+三个分支还有三种不同失败条件：Skill 缺少 `skillName` 时静默结束；工作区没有 `projects[0]` 时也静默结束；创建 Agent 则不依赖这两个字段。只看 AppCard 无法区分它们，必须进入页面闭包。
 
-## 练习与口头验收
+## 用一条真实输入逐步推演
 
-1. 在 `HOME_APPS` 中找出一个 `skill` 和一个 `action`，分别写出它们完成工作时最先缺少的能力。
-2. 在首页导入列表中找到 `SkillDialog`、`AppWindowManager` 和 Pi Agent client，说明它们分别属于图中的哪一个对象。
-3. 解释为什么「模型返回一段文字」不能证明一个项目已经被创建。
-4. 打开 `AGENTS.md`，找出 MVP 范围中哪一项对应「结果放在哪里」。
+给定 `HOME_APPS` 中的头脑风暴对象：
 
-合上本页后，应能用自己的话说出：OriginOS 用 Web 给用户入口，用 Core 固化共享规则，用 Pi Agent 组织模型与工具，用 Electron 把同一能力带到桌面；并且能指出 `type: 'skill'` 与 `type: 'action'` 在源码中的第一个判断点。
+1. React 遍历配置并渲染一张 `AppCard`。
+2. 卡片显示 `name`、`description`、`icon` 和 `color`。
+3. 用户点击后，卡片只执行父级闭包 `onClick()`。
+4. 此时尚未加载 `bmad-brainstorming` 的 `SKILL.md`，没有 session JSON，也没有模型请求。
 
-下一章从一条真实点击出发，追踪这几个角色第一次怎样接力。
+继续追踪到页面条件后，状态才从“用户事件发生”变成“系统选择了 Skill handler”。真正窗口副作用仍在 `handleSkillLaunch → AppWindowManager`；因此本章在 handler 调用处停止，不把“已选中路径”误写成“窗口或会话已经成功”。
+
+将 `name` 改成“学习产品创意”，但保留 `skillName`，只会改变可见名称和后续窗口标题；实际加载目标仍是 `bmad-brainstorming`。将 `skillName` 删除，卡片仍可能渲染，但页面的防御条件会阻止 Skill 启动。
+
+## 从故障现象反推责任边界
+
+| 用户现象 | 第一检查点 | 此时不能先下的结论 |
+| --- | --- | --- |
+| 首页没有头脑风暴卡片 | `HOME_APPS` 是否包含条目 | “模型配置坏了” |
+| 卡片可见但点击没反应 | `type`、`skillName` 和页面分支 | “Skill 文件不存在” |
+| 窗口出现但没有会话 | `SkillDialog` 初始化路径 | “AppCard 没触发” |
+| 模型声称写了文件但磁盘没有 | 工具调用与输出目录 | “模型回复正确所以保存成功” |
+
+这种排查顺序体现了本书的第一条阅读原则：从最靠近现象的责任层开始，用证据逐层向下，不跨层猜测。
+
+## 测试证据与没有被证明的部分
+
+当前没有一项自动化测试能单独证明“OriginOS 是 AI Native 操作系统”，也没有专门测试约束每个 `skill` 条目必须具有 `skillName`。本章结论来自产品配置、组件实现与架构规约的联合证据。
+
+按 Given/When/Then 拆开测试缺口：Given 是一个 `type='skill'` 但没有 `skillName` 的配置；When 页面渲染并点击对应卡片；Then 当前代码应当既不调用 Skill handler，也不调用 action handler。这个行为现在能由源码推演，却没有测试将它固定，更没有 UI 提示说明为什么无动作。
+
+这能证明入口分类和卡片点击职责；不能证明 Skill 一定能加载、模型一定可用、工具一定执行成功或桌面形态一定可启动。把这些边界说清，才不会把源码存在误写成生产链路已接通。
+
+## 小实验：改一个字段，预测三个结果
+
+先不运行项目，在纸上完成预测：
+
+```ts
+{
+  id: 'app-brainstorming',
+  name: '学习产品创意',
+  type: 'skill',
+  skillName: 'bmad-brainstorming',
+}
+```
+
+预测答案：卡片标题改变；窗口标题会使用新名称；加载的 Skill 代码仍为 `bmad-brainstorming`。然后再用源码分别指出三项预测的证据位置。只有“预测 + 源码依据”同时具备，实验才完成。
+
+## 口头验收与本章收束
+
+合上本页，应能说明：
+
+1. 模型、Agent、应用入口和 OriginOS 为什么不是同义词。
+2. `type`、`name`、`skillName` 分别控制什么。
+3. 为什么 AppCard 可见不能推出 Skill 已加载。
+4. 为什么模型文本不能证明文件副作用已经发生。
+5. 卡片消失、点击失效、会话失效应分别从哪一层开始排查。
+
+本章得到的核心判断是：**先按责任拆系统，再按证据解释现象。** 下一章沿同一次点击，区分控制流、数据流与生命周期三条同时发生但不能混用的链。

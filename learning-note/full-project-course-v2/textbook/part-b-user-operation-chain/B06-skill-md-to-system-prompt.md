@@ -1,135 +1,141 @@
-# B06：SkillDialog 如何把 SKILL.md 变成系统提示词
+# B06：Skill 内容怎样变成一次会话的系统提示词
 
-## 打开窗口后，Agent 还不认识你
+## 原始 SKILL.md 不能单独启动 Agent
 
-当「头脑风暴」窗口出现时，Agent 还不知道它要扮演什么角色、能使用哪些工具、结果应写到哪里。这些信息不在用户即将输入的第一句话里，而在 `SKILL.md` 的 frontmatter 和正文中。`SkillDialog` 需要把它们整理成一份 `systemPrompt`，连同工作目录、输出目录一起交给 `usePiAgent.initialize`。
+B05 返回一段全文和三个目录。运行时还需要明确工作目录、产物目录、只读资产目录、执行规则和通信约束。`SkillDialog` 中的 `buildSkillSystemPrompt` 把这些材料按固定顺序拼成字符串。
 
-本章回答：系统提示词由哪些材料拼接而成，为什么 `SkillDialog` 要承担这个拼装工作？
+本章只解释当前 builder 的真实行为。提示词是否合理、工具是否真的注册、模型怎样消费上下文，属于后续运行时章节。
 
-## 调用链
+## 拼装顺序决定模型先看到什么
+
+[packages/web/src/components/skills/SkillDialog.tsx 第 103—220 行](../../../../packages/web/src/components/skills/SkillDialog.tsx#L103) 的顺序是：
+
+```text
+Working directory
+→ Output directory
+→ Skill assets directory
+→ Skill identity and body
+→ How to Execute
+→ Tool Execution Rules
+→ Network Access
+→ User Communication Rules
+→ 替换 ${CLAUDE_SKILL_DIR} 与 ${OUTPUT_DIR}
+```
+
+它不是通用模板引擎。当前实现只做两个精确字符串替换，不处理任意 `{{projectName}}` 占位符。把它理解为通用花括号变量系统，会错误预测未知变量也会被解析。
+
+## 目录段的三个条件分支
+
+### 有 `workDir`
+
+加入工作目录，并说明 bash 与认知文件从该目录解析。
+
+### 有 `outputDir` 且不同于 `workDir`
+
+加入产物目录、`${OUTPUT_DIR}` 用法以及 file tools 的运行时数据根路径约定。
+
+### `outputDir === workDir`
+
+仍注入 output directory 行。源码注释说明这是对某些 cwd 异常环境的兜底，使 Agent 至少能从 prompt 读到绝对产物目录。
+
+这三个分支说明“两个目录相同”不等于 output 说明可以完全省略。
+
+## Skill 身份段怎样处理 frontmatter
+
+[第 138—163 行](../../../../packages/web/src/components/skills/SkillDialog.tsx#L138) 的两条路径：
+
+- 内容为空：生成一个通用 `${skillName}` 助手说明；
+- 内容非空：用正则识别文件开头的 `---` frontmatter，提取 name 与 description，去掉 frontmatter 后把正文放进 `## Skill Instructions`。
+
+当前实现先用 `name` 设置 `displayName`，若又有 `description`，会把 `displayName` 覆盖为 description。于是最终 `You are ...` 可能使用描述而非名称。这是源码现状，可能是设计选择也可能值得审查；教材不能把它理想化成“稳定使用 name”。
+
+真实赋值顺序是：
+
+```ts
+if (nameMatch?.[1]) displayName = nameMatch[1].trim();
+if (descMatch?.[1]) displayName = descMatch[1].trim();
+```
+
+输入 `name: Brainstorm Coach`、`description: 帮助用户发散创意` 时，最终身份行是 `You are 帮助用户发散创意.`。若产品希望 description 只作为说明，就必须引入单独变量，而不是修改正则便假设行为会改变。
+
+## 图解：三类目录进入一段文本，但不变成权限
 
 ```mermaid
-sequenceDiagram
-    participant UI as SkillDialog
-    participant Loader as loadSkillContent
-    participant Builder as buildSkillSystemPrompt
-    participant Hook as usePiAgent.initialize
-
-    UI->>Loader: getAvailableSkillContent(name)
-    Loader-->>UI: content + baseDir + workingDir + outputDir
-    UI->>Builder: skillName, content, skillDir, workDir, outputDir
-    Builder-->>UI: systemPrompt
-    UI->>Hook: initialize({ systemPrompt, projectContext, agentBaseDir, outputDir })
+flowchart LR
+    S[skillDir\n只读来源说明] --> P[systemPrompt]
+    W[workDir\nCWD 说明] --> P
+    O[outputDir\n产物说明] --> P
+    M[SKILL.md 正文] --> P
+    P --> A[initialize variables]
+    T[真实工具注册与路径校验] -.不由 prompt 授权.-> A
 ```
 
-## buildSkillSystemPrompt 的四段拼接
+前三根实线表示字符串材料进入 prompt。虚线提醒：prompt 说“可以写文件”并不会创造 `write_file`；真实工具对象和执行边界仍由 runtime 决定。
 
-[`packages/web/src/components/skills/SkillDialog.tsx` 第 103—219 行](../../../../packages/web/src/components/skills/SkillDialog.tsx#L103) 是 `buildSkillSystemPrompt` 的实现。它可以拆成四段：
+## 代入真实值逐步得到结果
 
-### 第一段：目录边界
+输入：
 
-```ts
-if (workDir) {
-  lines.push(`Working directory: ${workDir}`);
-  lines.push('All bash commands and cognitive files (Memory.md, practice/) are resolved from this directory.');
-}
-
-if (outputDir && outputDir !== workDir) {
-  lines.push(`Output directory for artifacts: ${outputDir}`);
-  lines.push('Use `${OUTPUT_DIR}` in shell commands only when you need the native absolute artifact directory.');
-}
+```text
+skillName = bmad-brainstorming
+skillDir = /source/bmad-brainstorming
+workDir = /data/skills/bmad-brainstorming
+outputDir = /data/skills/bmad-brainstorming
 ```
 
-这段告诉 Agent：你的 CWD 在哪里，产物应该写到哪里。 `outputDir` 和 `workDir` 可能相同也可能不同，分别对应「工作上下文」和「产物输出」。
+输出前部会依次包含 working directory、同值 output directory、skill assets directory。`${CLAUDE_SKILL_DIR}` 被替换为源目录；`${OUTPUT_DIR}` 被替换为数据目录。若正文中出现其他 `${UNKNOWN}`，builder 不会处理它。
 
-### 第二段：Skill 身份与能力
+## Prompt 进入 initialize 的真实调用
 
-```ts
-lines.push(`You are the ${skillName} skill.`);
-lines.push('');
-lines.push(skillContent);
-```
-
-`skillContent` 是 `SKILL.md` 去除 frontmatter 后的正文。它描述 Skill 的目标、工作方式和输出格式。
-
-### 第三段：执行规则
+[SkillDialog.tsx 第 470—498 行](../../../../packages/web/src/components/skills/SkillDialog.tsx#L470) 计算目录与 prompt，随后调用：
 
 ```ts
-lines.push('When executing commands or writing files, follow these rules:');
-lines.push('- Prefer creating files in the output directory.');
-lines.push('- When using bash tools, use relative paths from the working directory.');
-// ...
-```
-
-这些规则是所有 Skill 共享的运行时约定，确保 Agent 不会把文件写到不该写的地方。
-
-### 第四段：变量替换
-
-某些 Skill 的 `SKILL.md` 可能包含占位符，如 `{projectName}`。`buildSkillSystemPrompt` 会进行简单替换：
-
-```ts
-return lines.join('\n').replace(/\{\{(\w+)\}\}/g, (match, key) => {
-  const value = variables[key];
-  return value !== undefined ? String(value) : match;
-});
-```
-
-如果变量缺失，占位符会原样保留，而不是替换成空字符串。这避免了"成功返回字符串"但"上下文没填好"的静默错误。
-
-## 关键输入：skillDir、workDir、outputDir
-
-| 参数 | 来源 | 作用 |
-|------|------|------|
-| `skillDir` | `baseDir`（Skill 源目录） | 让 Agent 知道只读资产位置 |
-| `workDir` | `workingDir` | Agent 的 CWD，保存记忆和实践日志 |
-| `outputDir` | `outputDir` | 产物输出目录，可能不等于 workDir |
-
-这三个目录的分离是 OriginOS 安全模型的基础：Agent 不能随意写回 Skill 源目录，产物和运行上下文也要分开管理。
-
-## 初始化调用
-
-[`SkillDialog.tsx` 第 470—498 行](../../../../packages/web/src/components/skills/SkillDialog.tsx#L470) 调用 `usePiAgent.initialize`：
-
-```ts
-await initialize({
-  sessionId: stableSessionIdRef.current,
-  projectId: currentProjectId,
-  projectName: currentSkillData?.displayName || currentSkill,
-  agentType: 'skill',
-  systemPrompt,
-  projectContext: {
-    ...
-    currentPath: agentBaseDir,
-    outputDir: effectiveOutputDir,
+await initialize(
+  effectiveSessionId,
+  {
+    projectId: `skill-${currentSkill}`,
+    projectName: `技能: ${currentSkill}`,
   },
-  agentBaseDir,
-  outputDir: effectiveOutputDir,
-});
+  {
+    agentType: 'skill',
+    systemPrompt,
+    ...(agentWorkDir && { agentBaseDir: agentWorkDir }),
+    ...(outputDir && { outputDir }),
+  },
+  llmConfig,
+);
 ```
 
-注意 `systemPrompt` 是本地构建的字符串；`agentBaseDir` 和 `outputDir` 会进入 `projectContext`，最终传递到 Agent 运行时的工具上下文中。
+system prompt、agentBaseDir 和 outputDir 是并列传入的启动材料。下层不必从 prompt 文本反向解析目录；文字用于模型理解，结构字段用于程序执行。
 
-## 失败路径
+## 失败与误解
 
-1. **`skillContent` 为空**：如果技能内容加载失败，`systemPrompt` 会缺少身份和能力描述。
-2. **`outputDir` 缺失**：回退到 `workDir` 或 `skillDir`，可能导致产物和运行上下文混在一起。
-3. **变量替换失败**：占位符原样保留，Agent 可能看到 `{projectName}` 这样的未解析标记。
-4. **提示词与工具注册不一致**：提示词里写了「你可以写文件」，但如果工具列表没有 `write_file`，模型仍然无法执行。
+| 情况 | 当前行为 | 风险 |
+| --- | --- | --- |
+| Skill 内容为空 | 退化为通用助手 prompt | 窗口可聊天但目标能力缺失 |
+| frontmatter 格式不匹配 | 全文作为 instructions | 元数据可能直接暴露给模型 |
+| description 覆盖 name | `You are` 使用描述 | 身份文本不符合预期 |
+| 目录缺失 | 对应提示段不生成 | 工具仍需下层决定 CWD |
+| prompt 声明工具能力 | 只影响模型文本上下文 | 不提供真实授权 |
 
 ## 测试证据与缺口
 
-- [`packages/web/src/components/skills/__tests__/skill-export-policy.test.ts`](../../../../packages/web/src/components/skills/__tests__/skill-export-policy.test.ts#L1) 验证 Skill 产物导出策略。
-- `buildSkillSystemPrompt` 目前没有直接单元测试。
+当前 builder 是 `SkillDialog.tsx` 内部函数，没有直接单元测试。现有 `skill-export-policy.test.ts` 不能替它证明拼装顺序或替换行为。
 
-缺口：建议增加测试验证 `buildSkillSystemPrompt` 的输出结构，包括目录区、身份区、规则区的顺序，以及变量缺失时的占位符行为。
+应抽取或通过组件测试锁定：空内容降级、name/description 选择、frontmatter 去除、相同/不同 outputDir、两个变量替换、未知变量保留。没有这些断言时，本章行为依据是源码执行推演，而非回归测试保证。
 
-## 练习与口头验收
+例如 Given 是同时具有 name 与 description 的内容；When 调用 builder；Then 应断言当前输出使用 description。这个测试会先固定现状；若随后修复为使用 name，应同步修改测试和教材，而不是把期望写成现有事实。
 
-1. 给一段带 frontmatter 的 `SKILL.md`，写出最终 prompt 中目录区、身份区、规则区的大致顺序。
-2. 如果 `outputDir` 与 `workDir` 相同，`buildSkillSystemPrompt` 会怎样处理？
-3. 为什么变量缺失时占位符要原样保留，而不是替换成空字符串？
-4. 解释「提示词声明不等于工具授权」：如果提示词写了可以删除文件，但工具列表没有 `delete_file`，会发生什么？
+## 小实验与口头验收
 
-合上本页后，应能说清：`SkillDialog` 把 `SKILL.md` 正文、目录边界、运行规则三块积木拼成 `systemPrompt`，然后交给 `usePiAgent.initialize`；`agentBaseDir` 和 `outputDir` 会进入项目上下文，最终影响工具的文件操作范围。
+准备只有 `name`、同时有 `name + description`、没有 frontmatter 三份短内容，预测 `You are ...` 的实际结果。再解释为什么这是正则与赋值顺序的结果，而不是 YAML 规范的一般结论。
 
-下一章追踪 `usePiAgent.initialize` 如何跨越 HTTP 边界创建会话。
+合上本页，应能回答：
+
+1. builder 按什么顺序拼装各段？
+2. 当前只替换哪两个变量？
+3. name 与 description 同时存在时，为什么 description 会成为 displayName？
+4. 结构化目录字段与 prompt 目录文字为什么不能互相替代？
+5. 提示词声明工具能力为什么不等于真实授权？
+
+下一章观察这些启动材料如何跨过 HTTP 或 IPC 边界，成为可持久化的 AgentSession。

@@ -1,151 +1,134 @@
-# B08：发送消息不是直接调用模型
+# B08：发送消息前为什么必须先确认归属并恢复运行时
 
-## 一个误解
+## “点击发送”离模型还很远
 
-用户在输入框里打了一句「帮我头脑风暴一个学习 App 的卖点」，点击发送。初学者容易以为这句话「直接交给模型」。实际上，在交给模型之前，系统必须做三件事：确认这条消息属于哪个会话、恢复该会话的运行时状态、把消息持久化到磁盘。只有做完这三件事，模型才能基于完整上下文开始生成。
+用户输入“帮我想三个适合大学生的学习 App 卖点”。消息 route 在调用 Agent 前，要验证内容、找到会话、校验入口归属、恢复 runtime，最后才把用户消息落盘并进入流式或非流式处理。
 
-本章追踪：`POST /api/agent/sessions/{id}/messages` 如何处理一次发送请求。
+本章最重要的顺序是：**先用旧会话恢复 runtime，再追加当前新消息。**
 
-## 调用链
+## 当前 route 的主干
+
+[packages/web/src/app/api/agent/sessions/[sessionId]/messages/route.ts 第 51—155 行](../../../../packages/web/src/app/api/agent/sessions/[sessionId]/messages/route.ts#L51) 可以压缩为：
 
 ```mermaid
-sequenceDiagram
-    participant UI as ChatInput
-    participant Hook as usePiAgent.sendMessageStream
-    participant API as /api/agent/sessions/{id}/messages
-    participant Service as agentSessionService
-    participant Manager as AgentManager
-    participant Runtime as OriginOSAgent
-
-    UI->>Hook: 用户点击发送
-    Hook->>Adapter: sendAgentMessageStream(sessionId, content)
-    Adapter->>API: POST /api/agent/sessions/{id}/messages
-    API->>API: 校验 content、sessionId、projectId
-    API->>Service: getSession(sessionId, projectId)
-    Service-->>API: AgentSession
-    API->>API: assertSessionMessageOwnership
-    API->>Manager: getOrRestoreAgentRuntime(session)
-    Manager-->>API: OriginOSAgent
-    API->>Service: addMessage(sessionId, userMessage)
-    Service->>Disk: 保存会话 JSON
-    API->>Runtime: agent.prompt(userMessage)
+flowchart TB
+    R[解析 sessionId body] --> V{content 存在?}
+    V -->|否| E400[400 INVALID_REQUEST]
+    V -->|是| G[getSession sessionId projectId]
+    G --> N{找到?}
+    N -->|否| E404[404 NOT_FOUND]
+    N -->|是| O[assertSessionMessageOwnership]
+    O --> X{匹配?}
+    X -->|否| E403[403 或 422]
+    X -->|是| A[getOrRestoreAgentRuntime]
+    A --> P[addMessage 落盘]
+    P --> S{Accept SSE?}
+    S -->|是| SSE[ReadableStream]
+    S -->|否| JSON[收集后返回 JSON]
 ```
 
-## 消息 API 的入口
+图中每个错误出口都在不同责任层：格式、存在性、归属、运行时、持久化和模型处理不可混为一个“发送失败”。
 
-[`packages/web/src/app/api/agent/sessions/[sessionId]/messages/route.ts` 第 51—120 行](../../../../packages/web/src/app/api/agent/sessions/[sessionId]/messages/route.ts#L51) 是入口：
+## 所有权不是登录认证
+
+[packages/core/src/lib/integrations/pi-agent/session-restore.ts](../../../../packages/core/src/lib/integrations/pi-agent/session-restore.ts#L1) 的 `assertSessionMessageOwnership` 比较 sessionId、projectId、entryType 和 entryId 等会话归属信息，防止一个入口把消息发进另一个入口的会话。
+
+它保护的是**对象归属一致性**。仅凭这项校验不能声称系统已经完成用户身份认证、租户授权或不可伪造的访问控制。安全术语必须与源码保证相称。
+
+## 为什么恢复发生在 `addMessage` 之前
+
+route 第 113 行的注释给出设计目的：runtime 必须先恢复持久化历史，再提交当前新消息，避免新消息被重复注入。
+
+假设旧会话有 10 条消息，新消息是第 11 条：
+
+### 当前顺序
+
+```text
+用 10 条持久历史恢复 runtime
+→ 将第 11 条写入 session JSON
+→ agent.prompt 处理当前输入
+```
+
+### 错误顺序
+
+```text
+先把第 11 条写入 session JSON
+→ 恢复时把 11 条全灌进 runtime
+→ 又把当前输入交给 prompt
+```
+
+若恢复实现把第 11 条视为历史，而 prompt 又提交一次，它可能重复出现。顺序本身是合同，需要专门测试，不是代码风格。
+
+## `addMessage` 保存的真实形状
+
+[packages/core/src/lib/features/agent/session-service.ts 第 156—178 行](../../../../packages/core/src/lib/features/agent/session-service.ts#L156) 接收不含 id 与 timestamp 的消息，补 UUID 和 `Date.now()`，push 到 `session.messages`，再保存整个会话。
+
+route 传入 `projectId`，确保读取与写回同一项目目录。若保存返回 null，route 返回 500，不进入模型分支。
+
+因此，当模型稍后失败时，用户消息通常已经落盘。这是一种“输入已接受、处理未完成”的部分成功，UI 不应简单把它当作消息从未发送。
+
+## SSE 与 JSON 从同一准备阶段分叉
+
+route 检查 `Accept` 是否包含 `text/event-stream`。流式分支返回 `ReadableStream`；非流式分支订阅 Agent 事件、累积回复后返回一次 JSON。
+
+相同的会话校验与用户消息持久化位于分叉之前。两条响应路径的最终助手消息、错误和终止语义仍需分别测试，不能因共享前半段就推断完全一致。
+
+## Electron 不是调用这条 HTTP route
+
+[packages/desktop/src/main/services/agent-session-service.ts 第 590—631 行](../../../../packages/desktop/src/main/services/agent-session-service.ts#L590) 为流式 IPC 注册另一条生产入口：
 
 ```ts
-export async function POST(
-  _request: NextRequest,
-  { params }: { params: Promise<{ sessionId: string }> }
-) {
-  const { sessionId } = await params;
-  const body = await _request.json();
-  const projectId = body.projectId;
-
-  if (!body.content) {
-    return NextResponse.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'content is required' } }, { status: 400 });
-  }
-
-  let session = await agentSessionService.getSession(sessionId, projectId);
-  if (!session) {
-    return NextResponse.json({ success: false, error: { code: 'NOT_FOUND', message: 'Session not found' } }, { status: 404 });
-  }
-
-  try {
-    assertSessionMessageOwnership(session, { sessionId, projectId, entryType: body.entryType, entryId: body.entryId });
-  } catch (error) {
-    const ownershipError = toRestoreAgentSessionError(error);
-    return NextResponse.json({ success: false, error: ownershipError }, { status: ownershipError.code === 'OWNERSHIP_MISMATCH' ? 403 : 422 });
-  }
-
-  const agent = await agentManager.getOrRestoreAgentRuntime(session);
-  session = await agentSessionService.addMessage(sessionId, { role: 'user', content: body.content, ... });
-  // ... 进入流式/非流式处理
-}
+const session = await agentSessionService.getSession(
+  request.sessionId,
+  request.projectId,
+);
+assertSessionMessageOwnership(session, request);
+const agent = await agentManager.getOrRestoreAgentRuntime(session);
+await agentSessionService.addMessage(request.sessionId, {
+  role: request.role || 'user',
+  content: request.content,
+}, request.projectId);
 ```
 
-这段代码展示了四个关键边界：
+它保留了同样的重要顺序：存在性 → 归属 → runtime 恢复 → 追加新消息。但错误不转换成 HTTP 400/404/403/422，而是返回 `IpcResponse`。后续也不创建 SSE `ReadableStream`，而是通过 `event.sender.send(AGENT_EVENT, payload)` 向 renderer 推事件。
 
-1. **请求校验**：`content` 必填。
-2. **会话存在性**：找不到会话返回 404。
-3. **所有权校验**：`entryType/entryId/projectId` 必须与会话匹配。
-4. **运行时恢复**：调用 `agentManager.getOrRestoreAgentRuntime(session)`。
+因此，本章的 HTTP 状态表只能用于 Web。Electron 排查需要读取 `success`、`error.code`、主进程日志和对应 IPC 事件；不能在 Electron 控制台里寻找一个并未发生的 403 响应。
 
-## 所有权校验：防止串会话
+## 故障状态表
 
-[`packages/core/src/lib/integrations/pi-agent/session-restore.ts` 第 262—327 行](../../../../packages/core/src/lib/integrations/pi-agent/session-restore.ts#L262) 的 `assertSessionMessageOwnership` 会检查：
+| 用户现象 | HTTP/服务状态 | 消息是否已落盘 |
+| --- | --- | --- |
+| 空内容立即失败 | 400 | 否 |
+| 会话找不到 | 404 | 否 |
+| 所有权不匹配 | 403/422 | 否 |
+| runtime 恢复失败 | 500 | 否，恢复在 add 前 |
+| addMessage 失败 | 500 | 不可靠 |
+| 模型调用失败 | 流内 error 或 500 | 用户消息通常已保存 |
 
-- `sessionId` 是否匹配。
-- `projectId` 是否匹配。
-- `entryType` 和 `entryId` 是否与会话启动时一致。
+Electron 具有相同的“用户消息可能已保存、回答仍失败”状态，但观察证据不同：启动调用可能已经返回 `success:true, started:true`，后续失败通过 `AGENT_EVENT` 的 error 到达 renderer。传输层结果与后台任务结果必须分开。
 
-这个校验防止一个入口误用另一个入口的会话。例如，不能用 `skill-budget-planner` 的 `projectId` 向 `skill-bmad-brainstorming` 的会话发消息。
-
-## 运行时恢复：为什么必须先恢复再追加消息
-
-[`packages/core/src/lib/integrations/pi-agent/agent-manager.ts` 第 251—277 行](../../../../packages/core/src/lib/integrations/pi-agent/agent-manager.ts#L251) 的 `getOrRestoreAgentRuntime`：
-
-```ts
-async getOrRestoreAgentRuntime(session: AgentSession): Promise<OriginOSAgent> {
-  const agent = await this.getOrCreateAgent(session.id, session);
-  await this.restoreAgentRuntimeOnce(session);
-  return agent;
-}
-```
-
-`OriginOSAgent` 实例可能因长时间未用被清理，或因服务重启而丢失。每次发消息时，必须先从磁盘会话恢复运行时状态，再把新消息追加进去。如果先追加消息再恢复，新消息可能被重复注入或丢失。
-
-## 消息持久化
-
-[`agentSessionService.addMessage` 第 156—178 行](../../../../packages/core/src/lib/features/agent/session-service.ts#L156) 把用户消息追加到会话对象并保存：
-
-```ts
-async addMessage(sessionId: string, message: Partial<AgentMessage>): Promise<AgentSession> {
-  const session = await this.getSessionOrThrow(sessionId);
-  session.messages.push({ ...message, id: uuidv4(), timestamp: new Date().toISOString() } as AgentMessage);
-  session.updatedAt = new Date().toISOString();
-  await this.saveSession(session);
-  return session;
-}
-```
-
-注意：消息先落盘，再交给模型。这样即使模型调用失败或流式响应中断，用户消息也不会丢失。
-
-## 关键区分：持久化 vs 模型调用
-
-| 步骤 | 是否落盘 | 是否调用模型 |
-|------|----------|--------------|
-| 校验请求 | 否 | 否 |
-| 恢复运行时 | 否 | 否 |
-| 追加用户消息 | 是 | 否 |
-| 调用 `agent.prompt` | 否 | 是 |
-| 保存助手消息 | 是 | 否 |
-
-这条顺序是系统可靠性的基础：用户输入一旦接收，先保存；模型调用失败不会导致消息丢失。
-
-## 失败路径
-
-1. **会话不存在**：返回 404，客户端需要引导用户重新创建会话。
-2. **所有权不匹配**：返回 403，通常意味着入口身份被篡改或会话 ID 被误用。
-3. **运行时恢复失败**：可能因 LLM 配置无效、工具上下文错误等原因抛出异常。
-4. **消息追加成功但模型调用失败**：用户消息已保存，但助手回复为空或报错。
+这张表是恢复 UI 设计的依据：模型失败后重试时，应先确认已保存的用户消息是否会再次提交。
 
 ## 测试证据与缺口
 
-- [`packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts`](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts#L1) 覆盖客户端会话隔离。
-- 消息 API route 的集成测试目前可能依赖 E2E。
+[packages/core/src/lib/integrations/pi-agent/__tests__/session-restore.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-restore.test.ts#L1) 和 [client-hooks-session-isolation.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/client-hooks-session-isolation.test.ts#L1) 分别提供恢复/隔离相关证据。必须逐个断言确认它们是否覆盖 route 的调用顺序，不能只看文件名。
 
-缺口：建议为 `messages/route.ts` 增加集成测试，覆盖 400、404、403、正常流式、非流式响应等分支。
+[session-restore.test.ts 第 239—255 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/session-restore.test.ts#L239) 的 Given 是请求 entry 与持久化归属不匹配；When 调用 `restoreSessionAtBoundary`；Then 断言在 runtime hydrate 或返回消息正文之前拒绝请求。它证明恢复边界的先后顺序，却没有调用 messages route，也没有断言 `addMessage` 未发生。
 
-## 练习与口头验收
+仍需要 route 集成测试明确断言：ownership 失败时不 restore、不 add；restore 完成后才 add；add 失败时不 prompt；SSE/JSON 分叉前状态一致。
 
-1. 为什么发消息前必须先 `assertSessionMessageOwnership`？举一个越权场景。
-2. 解释「消息先落盘，再交给模型」的顺序为什么重要。
-3. 如果 `agentManager.getOrRestoreAgentRuntime` 失败，用户消息是否已保存？为什么？
-4. 画出从用户点击发送到 `agent.prompt` 的完整调用链。
+还需要一组 IPC 合同测试使用相同 Given/When/Then，确认 ownership 失败不会恢复 runtime、不会追加消息、不会启动后台流，并比较 Web 403/422 与 IPC `error.code` 的映射。两端共享函数并不能代替这组边界断言。
 
-合上本页后，应能准确说明：发送消息不是直接调用模型，而是先校验、再恢复运行时、再持久化用户消息、最后才进入模型调用；所有权校验防止不同入口串用会话。
+## 小实验与口头验收
 
-下一章追踪模型回复如何以流式事件一段一段回到窗口。
+把 `getOrRestoreAgentRuntime` 与 `addMessage` 的顺序交换，在纸上模拟“服务重启后的第一条新消息”，标出重复注入可能发生在哪。再说明 ownership check 解决的是哪种串会话问题，又不等于哪种用户授权。
+
+合上本页，应能回答：
+
+1. 为什么必须先恢复旧历史，再追加当前消息？
+2. ownership 校验保护什么，又不等于什么？
+3. Web 的 400、404、403/422、500 分别停在哪一层？
+4. Electron 为什么不能用 HTTP 状态码诊断同一问题？
+5. 为什么“用户消息已保存”和“Agent 已成功回答”必须作为两个状态处理？
+
+下一章进入 SSE 分支，观察 runtime 事件怎样变成浏览器逐段可见的文本。

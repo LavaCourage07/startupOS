@@ -1,12 +1,66 @@
-# E37：Skill 历史会话使用 `skill-${name}` 作为项目范围
+# E37：Skill 历史会话为什么使用 `skill-${name}` 作为项目范围
 
-小林用毕业旅行 Skill 规划了第一版行程，第二天再打开时，希望能看到历史会话。这个能力不是靠浏览器本地缓存实现的，而是通过会话系统按项目范围列出历史。对于 Skill，会话项目范围采用 `skill-${skillName}`。
+小林昨天用“毕业旅行策划” Skill 讨论了城市、预算和交通，今天重新打开 Skill，希望继续昨天的对话。系统要完成的并不只是“读取几个 JSON 文件”，而是回答三个不同的问题：
 
-本节阅读 [packages/web/src/components/skills/SkillDialog.tsx](../../../../packages/web/src/components/skills/SkillDialog.tsx)、[packages/web/src/app/api/skill-sessions/route.ts](../../../../packages/web/src/app/api/skill-sessions/route.ts) 和 [packages/core/src/lib/features/skills/service.ts](../../../../packages/core/src/lib/features/skills/service.ts)。
+1. 应当去哪个会话范围里寻找历史？
+2. 历史列表需要返回哪些摘要信息？
+3. 点击某条历史以后，怎样证明它确实属于当前 Skill？
 
-## 1. SkillDialog 加载当前 Skill 的历史
+这三个问题分别对应**查找范围、列表合同和恢复归属**。如果把它们混为一谈，就容易出现“列表里能看到，点击却恢复失败”，或者“文件明明存在，列表却为空”的现象。
 
-[packages/web/src/components/skills/SkillDialog.tsx 第 331—355 行](../../../../packages/web/src/components/skills/SkillDialog.tsx#L331) 的 `loadSessionHistory`：
+本节会从 `trip-planner` 这个具体输入出发，沿着 UI、环境适配、Web/Electron 边界、core service 和会话存储逐层推演。读完以后，读者应当能够独立定位 Skill 历史会话问题，而不只是记住一个字符串模板。
+
+## 1. 先分清四个容易混淆的名字
+
+假设毕业旅行 Skill 的名称是 `trip-planner`，四个字段的含义如下。
+
+| 字段 | 本例中的值 | 它回答的问题 | 主要使用者 |
+| --- | --- | --- | --- |
+| `skillName` | `trip-planner` | 当前要列出哪个 Skill 的历史？ | 列表接口 |
+| `entryType` | `skill` | 用户从哪一类入口进入？ | 恢复归属校验 |
+| `entryId` | `trip-planner` | 当前具体是哪一个入口？ | 恢复归属校验 |
+| `projectId` | `skill-trip-planner` | 这批会话存放在哪个逻辑范围？ | 会话服务与存储 |
+
+`skillName` 和 `entryId` 在本例中碰巧相同，但职责不同：前者是“列谁的历史”的查询条件，后者是“正在从谁的入口恢复”的身份信息。`projectId` 则在原名称前增加 `skill-`，把 Skill 会话纳入通用项目会话体系，同时避免与名为 `trip-planner` 的普通项目混在一起。
+
+因此，`skill-${name}` 不是展示名称，也不是随意的文件名前缀，而是一条跨创建、列表和恢复阶段都必须一致的**范围约定**。
+
+## 2. 一次历史加载在系统中怎样前进
+
+```mermaid
+sequenceDiagram
+    participant U as 小林
+    participant UI as SkillDialog
+    participant A as 环境适配函数
+    participant B as Web Route 或 Electron IPC
+    participant S as Skill Service
+    participant SS as AgentSessionService
+    participant FS as 会话文件
+
+    U->>UI: 打开 trip-planner 的历史列表
+    UI->>A: skillName = trip-planner
+    A->>B: 按当前运行环境发送请求
+    B->>S: listSkillSessions({ skillName })
+    S->>S: 生成 skill-trip-planner
+    S->>SS: listSessions("skill-trip-planner")
+    SS->>FS: 扫描该范围下的会话
+    FS-->>SS: 会话文件
+    SS-->>UI: 按 updatedAt 倒序的摘要列表
+```
+
+图中最关键的变化发生在 Skill Service：对外输入还是 `trip-planner`，进入通用会话服务之前却变成了 `skill-trip-planner`。后面的文件扫描、归属过滤和排序都以这个范围为准。
+
+可以把整条链路概括为：
+
+```text
+入口名称 → 业务范围 → 范围内的会话文件 → 可展示的摘要 → 经过归属校验的完整会话
+```
+
+列表阶段只需要摘要，点击恢复时才需要完整消息。这样既减少列表读取量，也避免把全部对话内容一次性塞进历史下拉框。
+
+## 3. UI 层只提交业务名称，不碰磁盘路径
+
+[packages/web/src/components/skills/SkillDialog.tsx 第 331—355 行](../../../../packages/web/src/components/skills/SkillDialog.tsx#L331) 的 `loadSessionHistory` 负责发起加载：
 
 ```ts
 const loadSessionHistory = useCallback(async () => {
@@ -23,17 +77,27 @@ const loadSessionHistory = useCallback(async () => {
         summary: s.summary,
       })));
     }
+  } catch (error) {
+    console.error('Failed to load session history:', error);
   } finally {
     setIsLoadingHistory(false);
   }
 }, [currentSkill]);
 ```
 
-这里的关键输入仍然是 `currentSkill`。UI 不直接知道会话文件在哪里，也不自己拼磁盘路径；它只把 skill 名称交给 service。
+按执行顺序阅读这段代码：
 
-## 2. Web 和 Electron 仍然共用适配函数
+1. `currentSkill` 为空时直接返回，因为系统还不知道要查哪个 Skill。
+2. 请求开始前把 `isLoadingHistory` 设为 `true`，界面可以显示加载状态。
+3. UI 只传 `skillName`，不拼 `data/projects/...` 之类的磁盘路径。
+4. 成功后只保留列表所需字段，不把完整消息装进 `sessionHistory`。
+5. 无论成功还是失败，`finally` 都会把加载状态恢复为 `false`。
 
-[packages/core/src/lib/integrations/electron/services/skill.ts 第 193—207 行](../../../../packages/core/src/lib/integrations/electron/services/skill.ts#L193) 的 `listAvailableSkillSessions`：
+这里还有一个值得注意的边界：异常目前只写入控制台，没有形成用户可见的错误状态；如果响应是 `success: false`，旧的 `sessionHistory` 也不会在这个函数中主动清空。因此，“加载动画结束”并不等于“历史加载成功”，界面设计和测试都不能用 `isLoadingHistory === false` 代替成功证据。
+
+## 4. 同一个调用函数怎样跨 Web 与 Electron
+
+[packages/core/src/lib/integrations/electron/services/skill.ts 第 193—207 行](../../../../packages/core/src/lib/integrations/electron/services/skill.ts#L193) 对 UI 隐藏运行环境差异：
 
 ```ts
 export async function listAvailableSkillSessions(
@@ -53,11 +117,13 @@ export async function listAvailableSkillSessions(
 }
 ```
 
-和技能列表一样，这里也把 Web fetch 与 Electron IPC 包成同一个函数。对 SkillDialog 来说，获取历史会话不需要关心运行环境。
+在浏览器中，它把 `skillName` 编入查询字符串；在 Electron 中，它把同一请求对象交给 `SKILL_SESSION_LIST` IPC 通道。`SkillDialog` 因而不需要出现两套历史加载逻辑。
 
-## 3. API route 只把 query 转成 service 请求
+“共用适配函数”只说明 UI 的调用方式一致，并不自动证明两端行为完全一致。Web route 和 Electron handler 仍然各自承担协议映射，必须分别检查；真正复用的业务规则位于后面的 core service。
 
-[packages/web/src/app/api/skill-sessions/route.ts 第 12—22 行](../../../../packages/web/src/app/api/skill-sessions/route.ts#L12)：
+### 4.1 Web 边界：把查询参数交给 core
+
+[packages/web/src/app/api/skill-sessions/route.ts 第 12—22 行](../../../../packages/web/src/app/api/skill-sessions/route.ts#L12) 读取查询参数：
 
 ```ts
 const searchParams = request.nextUrl.searchParams;
@@ -66,11 +132,17 @@ const skillName = searchParams.get('skillName');
 const data = await listSkillSessions({ skillName: skillName ?? undefined });
 ```
 
-如果缺少 `skillName`，错误不会在 API route 里自己拼出来，而是交给 core service 抛 `SkillServiceError`。这仍然符合 app route 只做边界映射的原则。
+route 没有自行扫描文件，也没有复制 `skill-${name}` 规则。缺少参数时，它把 `undefined` 交给 service，由业务层统一验证。
 
-## 4. Core service 把 skillName 变成项目范围
+### 4.2 Electron 边界：把 IPC 请求交给同一个 core service
 
-[packages/core/src/lib/features/skills/service.ts 第 542—559 行](../../../../packages/core/src/lib/features/skills/service.ts#L542)：
+[packages/desktop/src/main/services/skill-service.ts 第 90—103 行](../../../../packages/desktop/src/main/services/skill-service.ts#L90) 注册 IPC handler，并调用同一个 `listSkillSessions`。因此两种入口最终共享范围转换、列表结构和业务错误定义。
+
+这条依赖方向也符合项目分层：Web route 和 Electron main 是边界层，Skill Service 与 AgentSessionService 位于 core；上层负责接线，下层负责规则。
+
+## 5. Core Service 在哪里建立 Skill 范围
+
+[packages/core/src/lib/features/skills/service.ts 第 542—559 行](../../../../packages/core/src/lib/features/skills/service.ts#L542) 是范围转换的唯一关键点：
 
 ```ts
 export async function listSkillSessions(
@@ -86,38 +158,38 @@ export async function listSkillSessions(
 
   const sessions = await agentSessionService.listSessions(`skill-${request.skillName}`);
 
-  return {
-    sessions,
-    count: sessions.length,
-  };
+  return { sessions, count: sessions.length };
 }
 ```
 
-这就是本节最重要的源码。Skill 历史会话不是按 `skillName` 直接查，而是按 `projectId = skill-${skillName}` 查。这与 E24-E29 的恢复归属规则对齐：Skill 的会话范围就是 `skill-${entryId}`。
+这段代码完成三件事：验证业务输入、将 `trip-planner` 规范化为 `skill-trip-planner`、把底层列表和数量包装成 Skill 侧公开结果。
 
-```mermaid
-sequenceDiagram
-    participant UI as SkillDialog
-    participant Adapter as skill.ts
-    participant API as skill-sessions route
-    participant Service as listSkillSessions
-    participant Store as AgentSessionService
-    UI->>Adapter: skillName = trip-planner
-    Adapter->>API: GET skill-sessions?skillName=trip-planner
-    API->>Service: listSkillSessions
-    Service->>Store: listSessions skill-trip-planner
-    Store-->>UI: sessions + count
-```
+如果创建会话时使用 `skill-trip-planner`，列表却查询 `trip-planner`，两者会落入不同范围；文件没有丢失，查询只是去了错误的位置。反过来，如果所有 Skill 都使用固定的 `skill` 作为 `projectId`，不同 Skill 的历史又会混入同一个范围。
 
-图中的 `skill-trip-planner` 不是随意命名，而是 Skill 会话隔离边界。旅行 Skill 的历史不会和预算 Skill 的历史混在一起。
+## 6. AgentSessionService 不是简单地“列目录”
 
-读这张图时要注意两层转换。第一层转换发生在 UI 到适配层：`SkillDialog` 只知道当前选择的是 `trip-planner`，它不关心磁盘上的 sessions 目录，也不直接操作 `AgentSessionService`。第二层转换发生在 core service：`listSkillSessions` 把业务名 `trip-planner` 转成会话系统能识别的项目范围 `skill-trip-planner`。如果读者只记住“传了 skillName”，就会漏掉真正决定隔离性的那一步；如果只记住“查 sessions”，又会误以为所有 Skill 历史都在同一个池子里。
+[packages/core/src/lib/features/agent/session-service.ts 第 190—229 行](../../../../packages/core/src/lib/features/agent/session-service.ts#L190) 的 `listSessions(projectId)` 还会依次完成：
 
-所以，排查历史列表问题时不要跳步。应先确认 `currentSkill` 是否正确，再确认请求是否带上 `skillName`，最后确认 service 查询的是不是同一个 `skill-${skillName}` 范围。小林打开毕业旅行 Skill 后看不到昨天的记录，最常见的源码级原因不是“历史功能坏了”，而是保存和查询使用了不同的范围字符串。
+1. 根据是否有 `projectId` 选择项目会话目录或全局会话目录。
+2. 枚举候选文件，并跳过不合法的 session id。
+3. 读取会话；无法恢复的条目不会进入公开列表。
+4. 跳过缺少 `projectContext` 的项目会话。
+5. 再次比较会话内部的 `projectId` 与请求范围，避免目录位置与内部归属不一致。
+6. 把完整会话转换为 `SessionListItem` 摘要。
+7. 按 `updatedAt` 倒序排列，让最近使用的会话排在前面。
 
-## 5. 选择历史会话会带上入口身份恢复
+因此，磁盘上“有一个 JSON 文件”只是候选证据，不足以证明它应当出现在列表里。文件名是否合法、内容能否读取、内部项目归属是否一致，都会影响最终结果。
 
-历史列表只是展示。真正选择某条会话时，[packages/web/src/components/skills/SkillDialog.tsx 第 374—409 行](../../../../packages/web/src/components/skills/SkillDialog.tsx#L374) 会调用恢复：
+| sessionId | 内部 `projectId` | `updatedAt` | 是否进入本次列表 |
+| --- | --- | --- | --- |
+| `session-a` | `skill-trip-planner` | 今天 09:00 | 是，且排在前面 |
+| `session-b` | `skill-budget-helper` | 昨天 20:00 | 否，归属不匹配 |
+
+这个过滤是在会话服务内部完成的，不能只靠 UI 隐藏不属于当前 Skill 的条目。
+
+## 7. “列得出来”为什么仍不等于“恢复得了”
+
+选择历史时，[packages/web/src/components/skills/SkillDialog.tsx 第 374—409 行](../../../../packages/web/src/components/skills/SkillDialog.tsx#L374) 提交完整入口身份：
 
 ```ts
 const restored = await restoreSession({
@@ -128,37 +200,73 @@ const restored = await restoreSession({
 });
 ```
 
-这与 `listSkillSessions` 的项目范围完全一致。列表使用 `skill-${currentSkill}` 找历史；恢复也使用 `skill-${currentSkill}` 校验归属。这样才能避免小林从旅行 Skill 的下拉历史里恢复到另一个 Skill 的会话。
+列表阶段的问题是“哪些会话可能属于这个范围”；恢复阶段的问题是“这一个具体会话能否在当前入口下被接受”。后者更严格，还要检查入口类型和入口 id。
 
-## 6. 错误边界
+```mermaid
+flowchart LR
+    A[skillName: trip-planner] --> B[查询范围: skill-trip-planner]
+    B --> C[得到会话摘要]
+    C --> D[用户选择 session-a]
+    D --> E{三项身份都匹配?}
+    E -- 是 --> F[恢复消息和模型状态]
+    E -- 否 --> G[拒绝恢复]
+```
 
-| 错误 | 表现 | 根因 |
-| --- | --- | --- |
-| `skillName` 为空 | API 返回 400 | service 要求必须有 skillName |
-| 列表为空但文件存在 | 项目范围不一致 | 会话可能保存在别的 projectId 下 |
-| 历史能列出但恢复失败 | entryType 或 entryId 不匹配 | 恢复比列表校验更严格 |
-| 切换会话后又初始化覆盖 | 恢复状态没有阻止 init effect | SkillDialog 用 `restoredSessionIdRef` 防止重复初始化 |
+图中的两道门不能互相替代：范围查询缩小候选集合，恢复归属校验保护具体会话。仅仅因为会话出现在列表里，不能跳过第二道门。
 
-最后一行连接到 E28 的竞态思想：恢复历史不是只 `setActiveSessionId`，还要阻止过期初始化覆盖当前状态。
+`SkillDialog` 还使用转换令牌避免较慢的旧恢复请求覆盖较新的选择。这个令牌解决的是**时间顺序**问题，`projectId/entryId` 解决的是**身份归属**问题；二者不是同一种保护。
 
-## 7. 测试证据与缺口
+## 8. 从现象反推故障层
 
-E21-E30 已讲过恢复归属的测试。对于 Skill 历史列表，本节源码能证明 service 使用 `skill-${skillName}` 调用 `agentSessionService.listSessions`。但还缺少端到端测试证明 UI 展示、点击恢复、恢复成功后三者完全闭环。
+| 用户看到的现象 | 先检查什么 | 可能的源码原因 | 不能直接下的结论 |
+| --- | --- | --- | --- |
+| 历史按钮点开后为空 | `currentSkill`、请求参数、查询范围 | 保存和列表使用了不同 `projectId` | “文件一定被删了” |
+| 一直显示加载中 | `finally` 是否执行、组件是否仍挂载 | 请求未结束或调用链阻塞 | “列表数据太多” |
+| 加载结束但仍显示旧列表 | 响应是否失败、失败时是否清空状态 | 当前 UI 只记录控制台错误 | “本次加载成功但排序错了” |
+| 能看到记录但点击恢复失败 | 恢复请求的三项身份与会话内部元数据 | `entryType`、`entryId` 或 `projectId` 不匹配 | “列表查询一定错误” |
+| 两个 Skill 的记录混在一起 | 创建、列表、恢复的范围构造 | 共同使用了过宽的 `projectId` | “只在前端过滤即可” |
 
-补测应覆盖：
+可靠的排查顺序是：
 
-| Given | When | Then |
-| --- | --- | --- |
-| `skill-trip-planner` 下有两个会话 | 打开 trip-planner 历史 | 返回两个会话 |
-| 缺少 skillName | 请求 skill-sessions | 返回 400 |
-| 从 trip-planner 恢复 budget 会话 | 调用 restoreSession | 归属校验失败 |
+```text
+currentSkill → 适配层请求 → Web/IPC 边界 → 范围转换 → 文件与内部 projectId
+             → 摘要映射和排序 → 恢复身份 → 过期异步请求是否被丢弃
+```
 
-## 8. 小实验 / 练习与口头验收
+按顺序收集证据，可以避免在还没确认范围字符串时就去修改 UI。
 
-纸面推演：如果创建会话时使用 `projectId: 'trip-planner'`，但历史列表用 `listSessions('skill-trip-planner')`，会发生什么？合格答案是：历史列表可能读不到这份会话，因为保存范围和查询范围不一致。
+## 9. 测试证据：源码已经证明什么，还缺什么
 
-口头验收：读者应能解释为什么 Skill 会话范围是 `skill-${name}`，而不是直接用 `name`。合格答案必须联系恢复归属：Skill 的 `expectedProjectId` 也是 `skill-${entryId}`。
+当前源码可以直接证明 Skill Service 会拒绝空 `skillName`，合法名称会被转换为 `skill-${skillName}`，AgentSessionService 会过滤内部归属并按更新时间排序，UI 点击恢复时会再次提交三项身份。
 
-## 9. 本节小结
+但在现有相关测试中，没有找到覆盖 Skill 历史完整链路的专门用例。下面这些行为仍应通过自动化测试固定下来：
 
-Skill 历史会话按 `skill-${skillName}` 作为项目范围保存和读取。列表、恢复和会话初始化都必须使用同一套范围规则。只要 `skillName`、`projectId`、`entryId` 三者不一致，就会出现历史丢失、恢复失败或跨入口串台风险。
+| Given | When | Then | 证明的合同 |
+| --- | --- | --- | --- |
+| 范围内有两个合法会话 | 打开历史列表 | 返回两个摘要且最近更新者在前 | 范围与排序 |
+| 请求缺少 `skillName` | 调用 Web route 或 IPC | 返回结构化无效请求错误 | 双入口错误映射 |
+| 目录中混入内部归属不同的文件 | 列表查询 | 该会话不进入结果 | 存储层防串台 |
+| 从 trip-planner 点击 budget 会话 | 恢复 | 归属校验拒绝 | 恢复边界 |
+| 先点 A 后点 B，A 最后返回 | 两个请求竞态 | 最终仍停留在 B | 时间顺序保护 |
+| 请求失败且旧列表仍存在 | 重新加载 | 明确保留、清空或展示错误的产品语义 | UI 失败语义 |
+
+最后一项目前不是已经固定的合同，而是需要产品和测试共同明确的缺口。教材必须区分“源码现状”和“推荐补强”，不能把建议写成已实现事实。
+
+## 10. 推演练习：从一处不一致找到最终症状
+
+假设创建会话时错误地使用 `projectId: 'trip-planner'`，而列表仍执行 `listSessions('skill-trip-planner')`。请依次回答：会话保存在哪个范围、列表查询哪个范围、文件是否一定丢失、用户最终看到什么。
+
+完整答案是：会话保存在 `trip-planner` 范围，列表查询 `skill-trip-planner` 范围；文件可能仍存在，但不属于本次查询集合，所以小林看到空列表或缺少该条历史。正确修复点是统一创建、列表和恢复的范围规则，而不是让 UI 扫描更多目录。
+
+进一步思考：如果列表为了“找回来”而同时查询两个范围，会掩盖错误数据并扩大候选集合，后续恢复仍可能因归属不匹配而失败，因此不能把宽松查询当成根治方案。
+
+## 11. 本节小结
+
+Skill 历史会话是一条完整的归属链：
+
+```text
+skillName → skill-${skillName} → 范围内过滤和排序 → 摘要展示
+          → projectId + entryType + entryId 再校验 → 恢复完整会话
+```
+
+读者真正需要掌握的不是背诵 `skill-` 前缀，而是理解每个字段在哪一层承担什么责任。遇到问题时，先验证范围是否一致，再验证会话内部归属，最后检查 UI 的异步顺序和失败状态，才能区分“数据不在查询范围”“会话身份不合法”和“旧请求覆盖新选择”三类完全不同的故障。

@@ -24,6 +24,13 @@ flowchart TD
 
 这张图不是新架构，而是把 E56-E62 的保护点串起来。每个保护点只解决一类问题，不能互相替代。
 
+对零基础读者而言，先要区分两个概念：
+
+- **稳定性**不是“永远不失败”，而是失败、重复、超时或提前停止以后，系统仍能作出有界反应，不把状态越弄越乱。
+- **可观测性**不是“多打印几行日志”，而是能够用结构化证据回答：刚才发生了什么、发生在哪一层、系统采取了什么动作、现在处于什么状态。
+
+一次异常可以同时触发多个保护机制。例如网络超时由错误分类处理，超时后的重复读取由循环检测处理，恢复过程中重复到达的流式片段由去重处理。看到一个机制生效，不代表其他层一定正常。
+
 ## 2. 源码覆盖验收表
 
 | 课号 | 主题 | 生产源码 | 测试证据 |
@@ -36,7 +43,21 @@ flowchart TD
 | E61 | 循环保护与工具状态 | [packages/core/src/lib/integrations/pi-agent/tools/loop-detector.ts](../../../../packages/core/src/lib/integrations/pi-agent/tools/loop-detector.ts)、[packages/core/src/lib/integrations/pi-agent/core/tool-event-status.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/tool-event-status.ts)、[packages/core/src/lib/integrations/pi-agent/core/agent.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/agent.ts) | [packages/core/src/lib/integrations/pi-agent/tools/__tests__/loop-detector.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/tools/__tests__/loop-detector.test.ts)、[packages/core/src/lib/integrations/pi-agent/core/__tests__/tool-event-status.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/core/__tests__/tool-event-status.test.ts) |
 | E62 | 健康、通知、上传 | [packages/core/src/lib/integrations/pi-agent/health.ts](../../../../packages/core/src/lib/integrations/pi-agent/health.ts)、[packages/core/src/lib/integrations/pi-agent/notification-system.ts](../../../../packages/core/src/lib/integrations/pi-agent/notification-system.ts)、[packages/core/src/lib/integrations/pi-agent/upload-tracker.ts](../../../../packages/core/src/lib/integrations/pi-agent/upload-tracker.ts) | [packages/core/src/lib/integrations/pi-agent/__tests__/health.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/health.test.ts) |
 
-## 3. 三类常见误解
+## 3. 先学会读一条故障证据链
+
+排障时要把五种信息分开记录：
+
+| 信息 | 它回答的问题 | 预算任务示例 |
+| --- | --- | --- |
+| 症状 | 用户看到了什么？ | 摘要重复了一段，最后也没有文件 |
+| 观察 | 系统留下了什么事实？ | 两次相同工具调用、一个 timeout 错误码 |
+| 机制 | 哪段运行时逻辑处理它？ | ErrorHandler、stream-dedupe、LoopDetector |
+| 动作 | 系统实际做了什么？ | 建议重试、裁掉重叠文本、触发 circuit breaker |
+| 结果 | 动作之后状态如何？ | 会话仍可继续，重复调用停止，成果仍未交付 |
+
+症状和原因不能直接画等号。“界面没有新文字”可能是模型没有输出，也可能是渲染调度尚未提交；“任务停止”可能是成功完成，也可能只是协议收到 `stop`。必须找到中间证据。
+
+## 4. 五类常见误解
 
 | 误解 | 正确认知 |
 | --- | --- |
@@ -46,9 +67,9 @@ flowchart TD
 | stop 就是完成 | stop 只是协议结束，完成还要看是否交付结果 |
 | 日志越多越可观测 | 关键状态要结构化，能被查询和解释 |
 
-## 4. 综合案例：预算摘要任务出问题
+## 5. 综合案例：沿时间线诊断预算摘要任务
 
-小林让 Agent 生成旅行预算摘要。运行过程中发生这些情况：
+小林让 Agent 读取 `budget.xlsx`，生成预算摘要并保存为文件。运行过程中依次发生：
 
 1. 第一次读取 `budget.xlsx` 超时。
 2. 第二次流式输出重复了前半段文字。
@@ -56,7 +77,62 @@ flowchart TD
 4. Agent 最终只说“我会继续生成摘要”，但没有文件。
 5. 它又连续读取同一个不存在文件。
 
-合格系统应这样处理：
+先不要直接给每个症状贴标签。把时间线展开以后，才能知道保护机制在哪一刻介入。
+
+```mermaid
+sequenceDiagram
+    participant U as 小林
+    participant R as Agent Runtime
+    participant T as 文件工具
+    participant S as 流式管线
+    participant G as 完成与循环保护
+
+    U->>R: 读取预算并生成摘要文件
+    R->>T: 读取 budget.xlsx
+    T-->>R: TIMEOUT_ERROR
+    R->>T: 受控重试
+    T-->>R: 返回预算数据
+    R->>S: 输出摘要 delta
+    R->>S: 又到达一段重叠 delta
+    S-->>U: 去重并分批渲染
+    R-->>G: stop，但只说“我会继续”
+    G-->>R: 判定未完成并请求恢复
+    R->>T: 再读 old-budget.xlsx
+    R->>T: 再读 old-budget.xlsx
+    G-->>R: circuit breaker，停止无进展循环
+```
+
+图中至少包含四种不同状态：工具失败、流内容重叠、协议停止但任务未完成、重复工具调用。它们不能用一个笼统的“重试”解决。
+
+### 5.1 第一次读取超时：先分类，再决定是否恢复
+
+ErrorHandler 把原始异常转换成稳定类别，例如 `TIMEOUT_ERROR`，再携带是否可恢复、建议动作等信息。分类的价值在于让上层按规则行动；如果只保留一段任意错误字符串，上层很难可靠判断能否重试。
+
+一次超时可以重试，不意味着无限重试。重试仍要受尝试次数、任务进展和循环保护约束。
+
+### 5.2 第二次输出重叠：去重与渲染调度分别处理
+
+stream-dedupe 比较已有文本和新片段，裁掉重复或重叠部分；StreamRenderScheduler 决定何时把积累的内容提交到 UI。前者保证“写什么”，后者控制“多频繁地写”。
+
+如果最终文本正确但页面频繁卡顿，应查渲染调度；如果页面流畅但文本出现重复，应查去重。两个问题表现接近，却属于不同层。
+
+### 5.3 长会话压缩：必须保住最近失败
+
+当历史过长，recent trace compression 不能只保留最后几条普通消息。`old-budget.xlsx` 不存在这类最近失败会影响下一步行动，如果压缩后丢失，Agent 可能再次走同一条错误路径。运行摘要与最近轨迹共同承担“缩短上下文但保留决策证据”的职责。
+
+### 5.4 收到 stop：协议结束不等于用户目标完成
+
+“我会继续生成摘要”只是承诺，没有交付文件。completion guard 要结合回复内容、工具结果和任务要求判断是否属于 promise-only stop，并决定是否触发一次受控恢复。它检查的是任务完成语义，不是网络流是否已经结束。
+
+### 5.5 重复读取同一缺失文件：循环检测负责止损
+
+同一工具以相同参数反复失败，说明重试没有带来新信息。LoopDetector 根据调用轨迹从 warning 升级到 circuit breaker，阻止无进展消耗。这里的关键不是“调用次数多”，而是“输入、结果和进展高度重复”。
+
+### 5.6 最终还要查询运行状态
+
+健康状态、通知和上传记录提供旁证：运行时是否存活、是否产生需要用户注意的事件、文件上传记录是否存在。桌面环境还要区分应用进程是否健康与 Agent 业务任务是否完成；进程存活不能证明摘要已经生成。
+
+把整条时间线收敛成诊断表：
 
 | 问题 | 对应机制 | 合格反应 |
 | --- | --- | --- |
@@ -68,7 +144,37 @@ flowchart TD
 | 重复读同一文件 | LoopDetector | warning / circuit breaker |
 | 文件上传证据 | upload-tracker | 从 MEMORY.md 查上传记录 |
 
-## 5. 纸面推演 / 综合练习
+## 6. 一条可执行的单元级调试路线
+
+面对“Agent 不稳定”这样的模糊反馈，按证据成本从低到高检查：
+
+1. 固定任务目标和预期产物。例如预期是 `budget-summary.md`，不能只写“回答正常”。
+2. 保存原始事件时间线，不先删掉重复片段。
+3. 查结构化错误类别及恢复建议。
+4. 对比原始 delta、去重结果和 UI commit，判断文本问题出现在哪一层。
+5. 查看压缩后上下文是否仍保留最近任务、失败、纠正和完整工具协议。
+6. 对照最终产物判断 completion guard 是否正确。
+7. 比较连续工具名、参数、结果和进展，判断是否形成循环。
+8. 最后用健康、通知、上传及桌面进程状态补足运行证据。
+
+```mermaid
+flowchart TD
+    A[固定用户目标与预期产物] --> B[保留原始事件时间线]
+    B --> C{存在结构化错误?}
+    C -- 是 --> D[检查分类、可恢复性和重试次数]
+    C -- 否 --> E[比较原始 delta、去重结果和 UI commit]
+    D --> E
+    E --> F[检查压缩后的最近证据]
+    F --> G{最终产物真的存在?}
+    G -- 否 --> H[检查 completion guard]
+    G -- 是 --> I[检查是否仍有重复工具循环]
+    H --> I
+    I --> J[用健康、通知、上传和进程状态补证]
+```
+
+这条路线允许多个问题同时成立，不把故障强行归入单一分支。
+
+## 7. 纸面推演：为一次异常建立证据表
 
 请读者在纸上写出“小林的预算摘要任务异常排查表”，至少包含：
 
@@ -82,47 +188,6 @@ flowchart TD
 8. 健康状态和上传记录是否可查。
 
 口头验收：读者应能用一分钟说清楚：稳定性不是“不失败”，而是失败时能分类、能记录、能恢复或停止；可观测性不是“多打日志”，而是关键状态和证据能被后续系统读懂。
-
-## 6. 三项学习验收自查
-
-| 审查项 | 本单元应达到的状态 |
-| --- | --- |
-| 源码是否完全覆盖 | 每个稳定性机制都对应真实源码和测试文件，不用泛泛概念代替源码 |
-| 讲解深度是否够 | 每节都讲清楚输入、处理链路、返回或状态变化、失败边界 |
-| 是否新手友好 | 每节都能用小林旅行任务解释，并提供图表、纸面推演和口头验收 |
-
-如果某一节只说“系统会处理错误”“系统会去重”“系统会监控健康”，但没有讲清楚具体函数、状态字段、触发条件和测试断言，就不合格。
-
-## 7. 单元级调试路线
-
-当一次 Agent 会话看起来“不稳定”时，不要直接猜模型坏了。按下面路线排查：
-
-1. 是否有明确错误对象？先看 E56。
-2. 是否是流式文本重复？看 E57。
-3. 是否是 UI 卡顿或最终内容迟迟不落地？看 E58。
-4. 是否是长历史压掉了最近失败？看 E59。
-5. 是否只是承诺没有完成？看 E60。
-6. 是否重复调用同一个工具？看 E61。
-7. 是否健康状态、通知、上传记录能提供证据？看 E62。
-
-```mermaid
-flowchart TD
-    A[用户反馈不稳定] --> B{有错误消息吗}
-    B -->|有| C[E56 错误分类]
-    B -->|无| D{文本重复吗}
-    D -->|是| E[E57 去重]
-    D -->|否| F{界面卡顿吗}
-    F -->|是| G[E58 渲染调度]
-    F -->|否| H{长会话继续失败吗}
-    H -->|是| I[E59 压缩和摘要]
-    H -->|否| J{只承诺未完成吗}
-    J -->|是| K[E60 完成度保护]
-    J -->|否| L{工具重复吗}
-    L -->|是| M[E61 循环保护]
-    L -->|否| N[E62 健康和记录]
-```
-
-这张调试图的价值在于把“感觉不稳定”拆成可定位问题。只有能定位，才谈得上修复。
 
 ## 8. 单元验收口径
 
@@ -139,6 +204,8 @@ flowchart TD
 | `Heartbeat timeout` | 健康监控 |
 
 如果读者能完成这张归类表，就说明本单元不是只读懂概念，而是能用证据排查问题。
+
+读者还应能够解释三个反事实：如果关闭去重，重复文本会重新出现；如果关闭 completion guard，promise-only stop 会被当成完成；如果循环检测阈值过低，合法的分页读取也可能被误伤。能预测保护机制缺失或配置错误后的结果，才说明已经理解机制，而不是只会给术语分类。
 
 ## 9. 本单元小结
 

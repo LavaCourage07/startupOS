@@ -6,6 +6,19 @@
 
 本课精读 `session-restore.test.ts` 与运行时历史恢复测试，建立“输出断言、拒绝断言、未调用断言、异步顺序断言、性能断言”五类证据。
 
+在进入源码前，先建立测试阅读词典：
+
+| 术语 | 本课中的含义 |
+| --- | --- |
+| 测试夹具（fixture） | 为测试准备的一份合法基准会话 |
+| mock | 可记录调用、也可人为控制结果的替身函数 |
+| 断言（assertion） | 对执行结果或执行过程提出的可验证要求 |
+| Promise | 一个未来才会完成或失败的异步结果 |
+| hydration | 把磁盘中的会话数据装回可继续工作的运行时 |
+| 负向断言 | 证明某个危险动作没有发生，例如运行时从未被恢复 |
+
+测试不是“调用函数后看看有没有报错”。本课关注的是一个更严格的问题：在错误请求中，危险动作是否从未发生；在正确请求中，运行时是否先准备完毕，数据才交给客户端。
+
 ## 1. 恢复不是一次普通的读取
 
 ```mermaid
@@ -113,6 +126,26 @@ expect(settled).toBe(true);
 ```
 
 这里不是靠 `setTimeout(100)` 猜执行速度，而是用门闩控制关键阶段。无论机器快慢，只要 hydration 尚未释放，恢复就不得完成。这类测试比等待固定毫秒更稳定，也更准确地表达因果关系。
+
+逐步展开这段测试：
+
+1. 创建 `hydration` Promise，但暂时不调用它的 `resolve`，相当于把运行时恢复停在一道门前。
+2. 调用 `restoreSessionAtBoundary`，得到尚未完成的 `restore` Promise。
+3. `await Promise.resolve()` 只让当前已经排入微任务队列的代码获得一次执行机会，它不是在等待 hydration 完成。
+4. 此时断言 `settled === false`，证明恢复没有绕过门闩提前返回。
+5. 手动调用 `releaseHydration()`，运行时恢复才获准完成。
+6. 等待 `restore`，最后断言 `settled === true`。
+
+这里还要区分“没有调用”和“尚未完成”：`not.toHaveBeenCalled()` 适合证明错误分支根本没触发 hydration；门闩测试则允许 hydration 已被调用，但要求外层恢复必须等它完成。两种断言验证的是两个不同阶段。
+
+一个弱测试可能只写：
+
+```ts
+const result = await restoreSessionAtBoundary(request, deps);
+expect(result.messages).toHaveLength(3);
+```
+
+即使错误实现先返回消息、稍后才恢复 runtime，这个测试也可能通过。强测试把中间阶段变成可观察状态，因此能抓住“结果最终正确、顺序却危险”的实现。
 
 ## 7. 内部错误必须映射成有界外部错误
 

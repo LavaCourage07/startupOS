@@ -1,116 +1,154 @@
-# A03：代码为什么分布在不同包中
+# A03：包边界不是目录整理，而是变化隔离
 
-## 一个假设实验
+## 如果所有代码都放进首页会怎样
 
-假设 OriginOS 把所有代码都放进 `packages/web/src/app/page.tsx`。第一天，点击卡片和打开窗口都能工作；第二天，桌面端需要复用会话逻辑，测试又需要在没有浏览器的环境中创建会话，页面文件就开始同时依赖 DOM、磁盘、Electron 与模型配置。任何一个环境变化都会牵动全部代码。再过一周，想单独升级 Electron 主进程时，发现必须先升级 React；想给 Core 写单元测试时，发现必须把整个 Next.js 打包环境拉进来。
+A02 的一次点击跨过配置、组件、页面、窗口服务和 Agent 入口。把这些代码塞进同一个页面，短期会少几次 import，长期却会产生三个直接后果：Core 单测必须加载 React 环境；Electron 主进程必须认识页面组件；修改窗口样式可能迫使 Agent 运行时代码重新构建。
 
-Monorepo 的包边界就是为了防止这种「最初方便，后来无法移动」的结构。本章不是背诵每个 package 的名字，而是理解**为什么某个能力必须放在某个包里，以及判断一条 import 是否越界的规则**。
+Monorepo 不能自动解决这些问题。它只提供多个包共处一个仓库的组织方式；真正的边界来自每个包的职责和单向依赖。
 
-## Workspace 与包分工
+## 先区分三个容易混淆的词
+
+| 词 | 回答的问题 | OriginOS 示例 |
+| --- | --- | --- |
+| 仓库 | 哪些版本化文件共同演进 | `startupOS` Git 仓库 |
+| workspace | 包管理器把哪些目录视为本地 package | `packages/*` |
+| package | 哪组代码拥有独立名称、依赖和脚本 | `@originos/web`、`@originos/core` |
+
+[pnpm-workspace.yaml 第 1—2 行](../../../../pnpm-workspace.yaml#L1) 的 `packages/*` 只声明 package 发现范围。它没有规定 Web 能否反向被 Core import，也没有规定业务逻辑放在哪里。架构规约才承担这些限制。
+
+## 包关系图：箭头表示“知道对方”
 
 ```mermaid
 flowchart TB
-    Root[originos root] --> Workspace[pnpm-workspace.yaml]
-    Root --> Scripts[根 package scripts]
-    Root --> Configs[tsconfig / lint]
+    Web[packages/web\n页面 组件 Web 适配] --> Core[packages/core\n共享业务 类型 集成 存储]
+    Desktop[packages/desktop\nElectron main preload IPC] --> Core
+    Desktop --> Adapter[packages/agent\nPi Agent 适配边界]
+    Core --> Adapter
+    Service[packages/service\n服务包边界] --> Core
 
-    Workspace --> Web["@originos/web"]
-    Workspace --> Core["@originos/core"]
-    Workspace --> Desktop["@originos/desktop"]
-    Workspace --> AgentAdapter["@originos/pi-agent-adapter"]
-    Workspace --> PiTasks["@originos/pi-tasks"]
-    Workspace --> Service["@originos/service"]
-
-    Web --> WebTech[Next React Tailwind Zustand]
-    Core --> CoreTech[features integrations modules types]
-    Desktop --> DesktopTech[Electron main preload IPC]
-    AgentAdapter --> AgentTech[Pi Agent runtime boundary]
+    Core -.禁止反向知道.-> Web
+    Core -.禁止反向知道.-> Desktop
 ```
 
-[`pnpm-workspace.yaml` 第 1—2 行](../../../../pnpm-workspace.yaml#L1) 只声明：`packages: - packages/*`。这意味着 workspace package 必须在 `packages/` 下一层；`docs/`、`learning-note/`、`scripts/` 不是 package，它们是文档和工具区域。
+实线说明上层可以使用下层公共能力；虚线标出禁止方向。Web 与 Desktop 都可以复用 Core，所以项目、会话、Skill 等规则只需实现一次。Core 若 import React 页面，就失去在 Node 测试、桌面服务和其他入口中独立使用的能力。
 
-[`packages/web/package.json` 第 1—10 行](../../../../packages/web/package.json#L1) 的 `name` 是 `@originos/web`，并依赖 `@originos/core: workspace:*`。 [`packages/core/package.json` 第 1—10 行](../../../../packages/core/package.json#L1) 的 `name` 是 `@originos/core`，入口指向 `src/index.ts`。 `workspace:*` 的意思是「使用本仓库中的 Core」，而不是从 npm 下载一个外部副本。
+## 源码窗口一：`workspace:*` 连接的是本地包
 
-箭头表示允许依赖。上层可以使用下层；下层不能反向知道上层。这样 Web 可以换界面，Desktop 可以替换壳，Core 的会话和存储仍可复用。
+[packages/web/package.json 第 13—16 行](../../../../packages/web/package.json#L13) 声明包名和对 Core 的依赖：
 
-## 每个包的核心职责
+```json
+{
+  "dependencies": {
+    "@originos/core": "workspace:*",
+    "@originos/pi-agent-adapter": "workspace:*"
+  }
+}
+```
 
-| Package | 核心职责 | 不应承担的职责 |
-|---------|----------|----------------|
-| `@originos/web` | 页面、组件、路由、Web 状态 | 复制一份 Agent 或存储业务 |
-| `@originos/core` | 共享业务、类型、集成、存储 | import Web 页面或 Electron main |
-| `@originos/desktop` | Electron 主进程、IPC、打包 | 复制 Core 的业务实现 |
-| `@originos/pi-agent-adapter` | Pi Agent runtime 适配边界 | 决定某个 React 面板如何显示 |
-| `@originos/pi-tasks` | 受控任务运行能力 | 处理 UI 事件 |
-| `@originos/service` | 服务包占位或扩展边界 | 在 MVP 阶段承担未定义职责 |
+[packages/core/package.json 第 1—12 行](../../../../packages/core/package.json#L1) 则把 `src/index.ts` 声明为 Core 的主入口，并通过 `exports` 继续暴露受支持的子路径。依赖版本写作 `workspace:*` 时，pnpm 解析当前仓库中的 package，而不是从远程 registry 随机下载同名实现。
 
-判断一个改动应该放哪里，首先看它属于哪个 package 的职责。例如「会话创建逻辑」属于 Core，因为 Web 和 Desktop 都需要复用；「窗口关闭按钮样式」属于 Web，因为桌面壳有自己的原生窗口控件。
+`workspace:*` 解决“连接哪个包”，不解决“允许导入包内哪个文件”。例如 Web 可以使用 Core 公共 API，但不应任意穿透另一个 Feature 的内部实现。
 
-## 依赖方向的硬规则
+把输入改成 `"@originos/core": "^0.1.0"`，依赖解析语义就从“必须连接当前 workspace 包”变成“可由 registry 版本满足”。这不一定立刻报错，却可能让 Web 运行旧 Core、源码编辑的 Core 没有被使用。排查“我改了 Core 但页面行为不变”时，package 声明就是第一层证据。
 
-[`AGENTS.md` 的依赖规则](../../../../AGENTS.md#L223) 给出了六层单向依赖：
+## 源码窗口二：同一次点击如何跨包而不反向依赖
+
+[packages/web/src/app/page.tsx 第 845—869 行](../../../../packages/web/src/app/page.tsx#L845) 完成 Web 页面编排；[packages/web/src/services/AppWindowManager.ts 第 5—12 行](../../../../packages/web/src/services/AppWindowManager.ts#L5) 从 `@originos/core` 导入类型与 Electron 适配；Core 没有导入 `SkillDialog`。
+
+窗口服务的真实 import 是：
+
+```ts
+import { AppWindowConfig, ComponentContent } from '@originos/core/types';
+import { createNativeWindow } from '@originos/core/lib/integrations/electron/window';
+import { isElectron } from '@originos/core/lib/integrations/electron/env';
+```
+
+第一行引入稳定数据合同，后两行引入环境适配；它没有让 Core 认识具体页面组件。调用时，页面把 `SkillDialog` 作为值传给窗口服务，依赖方向仍停留在 Web 内部。
+
+允许方向可以写成：
 
 ```text
-app routes → components → services/stores → core features/modules → storage/integrations/shared types
+page.tsx
+→ AppWindowManager.ts
+→ @originos/core 的类型与集成适配
 ```
 
-面对一个 import，依次提问：
-
-1. 导入者在哪一层？
-2. 被导入者在哪一层？
-3. 箭头方向是否允许？
-4. 是否绕开了另一个 Feature 的公共出口？
-
-### 正确示例
-
-[`packages/web/src/app/page.tsx` 第 51—56 行](../../../../packages/web/src/app/page.tsx#L51) 导入：
+反方向若出现：
 
 ```ts
-import { normalizeRuntimeLLMConfig } from '@originos/core/lib/integrations/pi-agent/client';
+// 假设出现在 packages/core 内
+import { SkillDialog } from '@/components/skills/SkillDialog';
 ```
 
-导入者是 Web app 层；被导入者是 Core integration 层；方向由上至下，符合规约。它还使用了 Core 的公开路径，而不是从 Core 内部绕路抓取某个私有文件。
+Core 将依赖 Web 的路径别名、React 和 DOM 语义。结果不是“风格不优雅”，而是 Node 环境可能无法加载模块、桌面服务无法独立复用、依赖图可能形成循环。
 
-### 错误示例
+## package 边界内仍有层级
 
-```ts
-// packages/core/src/lib/features/project/service.ts
-import { ProjectCard } from '@/components/project/ProjectCard';
+同在 `packages/web` 不等于可以互相随意 import。规约给出的顺序是：
+
+```text
+app
+→ components
+→ services / store
+→ core features / modules
+→ storage / integrations / shared / types
 ```
 
-这会让项目服务必须认识 React 组件、浏览器打包别名和展示属性。正确方向是反过来：Core 返回项目数据或类型，`ProjectCard` 导入这些数据并决定怎样渲染。这样 CLI、测试或 Electron 服务也能复用项目服务。
+这里的“向下”表示高层编排可以依赖更稳定的低层能力，低层不能反向认识具体 UI。`app/` 还只能承担页面、布局和 API 边界；把会话持久化算法直接写入 route，即使没有形成 import 循环，仍属于职责错位。
 
-## 同包内的 Feature 边界
+## Feature 公共出口：路径可解析不等于合同稳定
 
-即使两个文件都在 Core，Feature A 直接 import Feature B 的内部文件也会形成隐蔽耦合。规约要求经过 B 的 `index.ts` 公共出口。原因是内部实现可以重构，而公共 API 才是稳定合同。
+Core 中两个 Feature 同层存在时，也必须经过被依赖 Feature 的 `index.ts` 公共出口。直接导入深层实现的问题在于：调用方开始依赖文件布局、私有类型和临时函数，内部重构就会扩散到所有调用者。
 
-例如 Pi Agent runtime 需要项目上下文时，应通过 `@originos/core/lib/features/project` 的公共出口获取类型或服务，而不是直接深入 `project-creation-service.ts` 的内部函数。
+判断一条 import 时依次问：
 
-## 失败路径
+1. 导入者属于哪个 package、哪一层？
+2. 被导入者属于哪个 package、哪一层？
+3. 箭头是否从高层指向同层公共 API 或低层？
+4. 是否绕过 Feature 的公共出口？
+5. 被导入对象是否带入不属于当前运行环境的依赖？
 
-1. **越层依赖**：Core 的代码 import Web 组件，导致 Core 无法脱离浏览器环境测试。
-2. **反向包依赖**：`packages/core` 依赖 `packages/web`，形成循环，任何 Web 改动都会影响 Core。
-3. **绕过公共出口**：同层 Feature 直接读取对方内部实现，内部重构时调用方大面积失效。
-4. **Desktop 复制 Core 业务**：桌面服务重新实现一套项目创建逻辑，未来修复 bug 需要改两处。
+[packages/core/package.json 第 12—45 行](../../../../packages/core/package.json#L12) 还暴露出一个现实边界：当前 Core 不只导出顶层 `index.ts`，也允许若干 `features/*/session-service`、`integrations/*/*` 等子路径。也就是说，“能够从 package exports 解析”只能证明包作者允许这一条构建路径，不能自动证明 Feature 之间的依赖符合 AGENTS.md。架构审查仍要继续判断导入者和被导入者的层级。
 
-## 测试证据与缺口
+## 三个失败案例的因果推演
 
-- [`scripts/check-agents-compliance.js`](../../../../scripts/check-agents-compliance.js#L1) 把部分依赖层级规则变成自动检查，运行 `pnpm agents:check` 可发现越层 import。
-- [`eslint-rules/agents-compliance.js`](../../../../eslint-rules/agents-compliance.js#L1) 在 lint 阶段也做类似检查。
+### Core import Web 组件
 
-缺口：自动脚本只能抓 import 路径违规，无法发现「业务逻辑堆在 route 里」或「Desktop 复制 Core 规则」这类结构性问题，仍需人工 review。
+输入：Core 项目服务引入 `ProjectCard` 复用格式化函数。直接后果是服务模块同时加载 React 组件依赖。修复方式不是复制格式化函数，而是把纯格式化合同下沉到 shared 或 Feature 公共 API，再由组件和服务分别使用。
 
-## 练习与口头验收
+### Desktop 复制 Core 业务
 
-1. 解释 `pnpm-workspace.yaml` 中 `packages/*` 与 `package.json` 中 `workspace:*` 分别解决什么问题。
-2. 判断下面 import 为何错误，并说明替代方向：
-   ```ts
-   // packages/core/src/lib/features/project/service.ts
-   import { ProjectCard } from '@/components/project/ProjectCard';
-   ```
-3. 打开 [`packages/web/src/app/page.tsx`](../../../../packages/web/src/app/page.tsx#L51) 的导入区，找出三个来自 `@originos/core` 的导入，并确认它们都属于允许的方向。
-4. 为什么 `@originos/core` 不能 import `@originos/web` 的组件？举出一个具体后果。
+输入：桌面 IPC service 重写一套 `createSession`。Web 修复字段默认值后，桌面仍使用旧规则，两个入口产生不同 JSON。正确方向是 desktop 只解析 IPC payload，再调用 Core 公共 service。
 
-合上本页后，应能说出：Monorepo 包边界是责任划分，`workspace:*` 连接本地包，依赖方向只能从上到下，Core 不能知道 Web 或 Desktop 的实现细节，Feature 之间要通过公共出口。
+### Feature 穿透内部实现
 
-下一章区分「代码在哪个包」和「代码在哪个进程执行」。
+输入：ontology 直接导入 project Feature 的内部 store。project 重命名或拆分文件时，ontology 被迫同步修改。正确方向是 project 的 `index.ts` 暴露必要合同，或将双方真正共享的抽象下沉。
+
+## 测试证据与限制
+
+[scripts/check-agents-compliance.js](../../../../scripts/check-agents-compliance.js#L1) 和 [eslint-rules/agents-compliance.js](../../../../eslint-rules/agents-compliance.js#L1) 把一部分路径与层级规则自动化。它们可以抓取可静态识别的违规 import，却无法证明以下事情：
+
+- API route 内是否塞入了过多业务决策；
+- Desktop 是否复制了逻辑而没有直接 import；
+- 两个不同名字的模块是否形成语义循环；
+- 公共 API 是否设计得足够稳定。
+
+因此，`pnpm agents:check` 或 `pnpm lint` 通过只能证明扫描器覆盖的规则没有被触发，不能替代架构审查。
+
+本轮曾实际运行 `pnpm agents:check`。命令退出码为 0，却同时输出“`src/` 目录不存在，跳过检查”。Given 是从仓库根运行脚本；When 是脚本寻找它预期的单一 `src/`；Then 是没有扫描当前 monorepo 的 `packages/*/src`。因此这次退出码不能作为“依赖方向已检查”的证据，反而揭示了校验入口和仓库结构之间的缺口。
+
+## 小实验：给一段错位代码找新家
+
+假设 `SkillDialog` 中出现一个纯函数 `buildSessionStoragePath(projectId, sessionId)`，同时 desktop service 也需要它。三个候选位置是 Web component、Desktop service、Core storage/shared。正确迁移目标应是 Core 的合适低层公共边界；两端再 import 它。验收时要同时说明：为什么它不依赖 React、为什么它不应重复、公共出口在哪里。
+
+## 口头验收与下一章
+
+合上本页，应能说明：
+
+1. 仓库、workspace 和 package 的区别。
+2. `workspace:*` 保证了什么，又没有保证什么。
+3. Core 反向 import Web 会产生哪些具体后果。
+4. 为什么“同在 Core”也可能越过 Feature 边界。
+5. 静态依赖检查通过为什么不等于架构完全正确。
+
+下一章增加一个正交维度：代码放在哪个 package，不等于它只会在哪个进程执行。

@@ -1,140 +1,204 @@
-# A06：把源码阅读变成可验证的知识
+# A06：把“我看过源码”变成可复查的判断能力
 
-## 从「看过文件」到「能解释行为」
+## 最后一课不再增加新名词
 
-学完前五章，你已经知道 OriginOS 有四个系统角色、代码按 Monorepo 分层、运行形态分浏览器和桌面、架构规约是阅读罗盘。但知道这些还不够。源码阅读的目标不是记住函数名，而是能在新问题出现时重新找到入口、追踪数据并验证判断。
+Part A 已建立产品角色、三条链、包边界、运行进程和架构判案。A06 把它们合成一种可重复的阅读方法，并完整演示一次：
 
-"我看过这个文件"和"我能解释这个行为"之间差着一条证据链。文件很长时，最危险的做法是从第一行顺序滚动，看到熟悉词就以为理解。更可靠的做法是先提出一个能被证明或推翻的问题，再只阅读回答该问题所需的窗口。
+> 问题：为什么头脑风暴卡片能显示，却可能点击后没有任何反应？
 
-## 阅读闭环
+这个问题足够具体，可以被源码证据支持或推翻；也足够小，不需要先读完整个 `page.tsx`。
+
+本课也承担 Part A 的复盘。阅读顺序是：先用“卡片可见但无动作”完成一次正向执行和反向诊断；再看总体认知图重新组织 A01—A05；最后用工作区入口做迁移实验。不要先背源码台账，先掌握证据回路怎样工作。
+
+一句核心判断是：**源码阅读的产物不是结论，而是一条带输入、执行过程、证据等级和停止边界的可复查推理。**它包含四层含义：现象不等于原因；同名字段不等于同一对象；代码分支不等于测试证明；单次验证不等于永久事实。
+
+## 阅读闭环不是直线，而是证据回路
+
+![小黑把模糊猜测校准成源码证据](assets/a06-evidence-loop.png)
+
+图中，小黑操作五层镜片，把“用户动作”聚焦到“源码证据”；偏离镜片的红色光线代表未经验证的直觉。五层镜片分别提醒读者检查入口、窗口、运行时、存储和进程。任何一层证据不足，都应回到源码继续定位，而不是把猜测写成结论。
 
 ```mermaid
 flowchart LR
-    Q[问题] --> E[入口]
-    E --> C[调用链]
-    C --> T[关键类型]
-    T --> X[测试证据]
-    X --> P[练习]
-    P --> R[复盘记录]
+    Q[可观察问题] --> E[找到最小入口]
+    E --> C[追调用者与被调用者]
+    C --> D[代入真实数据]
+    D --> F[改变条件看分支]
+    F --> T[核对测试和运行证据]
+    T --> R[记录事实 边界 缺口]
+    R -.新证据可推翻.-> Q
 ```
 
-以技能卡片为例：问题是「点击后谁打开对话」；入口是 [`HOME_APPS` 第 27 行](../../../../packages/web/src/config/homeApps.ts#L27)；调用链是 `AppCard -> onClick -> handleSkillLaunch -> AppWindowManager -> SkillDialog`；关键类型是 `HomeAppConfig`；测试证据分散在组件测试和 E2E 中；练习是画出这条链并解释每个边界；复盘记录是「窗口 id 不等于已持久化 session」。
+图中最后一根回箭头很重要：源码会变化，旧结论必须允许被新证据修正。
 
-## 一次完整的阅读记录
+## 第一步：把模糊抱怨改写成可验证问题
 
-| 步骤 | 实际动作 | 得到的证据 |
-|------|----------|------------|
-| 提问 | "哪段代码决定 skill 还是 action？" | 这是可定位的问题 |
-| 定位 | 搜索 `HOME_APPS.map` | 找到 [`page.tsx` 第 1426 行](../../../../packages/web/src/app/page.tsx#L1426) |
-| 追踪 | 沿 `onClick` 进入 `handleSkillLaunch` | 找到 [`page.tsx` 第 845 行](../../../../packages/web/src/app/page.tsx#L845) |
-| 校正 | 区分窗口 id 与持久化 session | 第 866 行只创建元数据关联 |
-| 验证 | 比较 `action` 分支 | 工作区没有调用 `handleSkillLaunch` |
+“卡片坏了”无法定位。先拆成三个观察：
 
-这张表的价值在于每一步都可回到源码复查。它避免把"我认为应该如此"误写成"代码就是如此"。
+1. `HOME_APPS` 中是否存在条目？
+2. `AppCard` 是否执行了传入的 `onClick`？
+3. 页面闭包是否满足启动分支？
 
-## 测试应当回答什么
+本次只追到第 3 项。窗口创建与会话初始化分别是下一层问题。
 
-测试不是给整个文件打一个"正确"印章。它只证明一个明确断言。例如消息测试会验证空内容是否拒绝，会话测试会验证保存后能否恢复；它们不自动证明窗体视觉布局正确。阅读任何测试时，先写出它的 Given、When、Then，再判断这条断言覆盖了调用链的哪一段。
+## 第二步：按调用方向打开最少文件
 
-每次记录只保留四项：入口、关键数据、容易误解点、验证结果。有效记录不是"已阅读 page.tsx"，而是"`skillName` 同时参与窗口 id 和 props，但不等于已持久化 Session"。
+建议顺序不是按目录，而是按因果：
 
-## Part A 核心判断
+1. [packages/web/src/config/homeApps.ts 第 8—83 行](../../../../packages/web/src/config/homeApps.ts#L8)：入口对象长什么样。
+2. [packages/web/src/app/page.tsx 第 1426—1450 行](../../../../packages/web/src/app/page.tsx#L1426)：对象怎样变成回调。
+3. [packages/web/src/components/framework/AppCard.tsx 第 73—79 行](../../../../packages/web/src/components/framework/AppCard.tsx#L73)：点击是否真的把控制权还给父级。
+4. [packages/web/src/app/page.tsx 第 845—869 行](../../../../packages/web/src/app/page.tsx#L845)：满足条件后准备什么窗口配置。
 
-读完 Part A 后，你应该带着一句核心判断进入 Part B：
+这次可以暂时跳过 `page.tsx` 的项目访谈、Spotlight 视觉、设置面板等区域，因为它们不回答当前问题。
 
-> OriginOS 的源码不是按功能目录平铺的，而是按"谁面对用户、谁共享业务、谁管理运行时、谁保存状态、谁在桌面进程执行"分层的。阅读任何代码时，先问它属于哪一层、依赖哪一层、数据落在哪里。
+## 第三步：代入一个真实配置逐步执行
 
-这句话可以拆成五条具体含义：
+输入对象：
 
-1. **产品入口是配置**：`HOME_APPS` 中的 `type` 决定入口身份，不是视觉样式。
-2. **视觉组件不执行业务**：`AppCard` 只触发 `onClick`，不知道 Skill 如何运行。
-3. **窗口是生命周期边界**：`AppWindowManager` 在关闭时注入 Agent 销毁和记忆整理。
-4. **包边界是责任边界**：`web/core/desktop` 单向依赖，`workspace:*` 连接本地包。
-5. **进程边界是权限边界**：浏览器、Next 服务端、Electron main 拥有不同权限，`pnpm dev` 不能验证桌面 IPC。
+```ts
+{
+  id: 'app-brainstorming',
+  name: '头脑风暴',
+  type: 'skill',
+  skillName: 'bmad-brainstorming',
+}
+```
 
-## 总体认知图
+执行记录：
+
+| 步骤 | 当前数据 | 分支结果 | 新副作用 |
+| --- | --- | --- | --- |
+| 配置读取 | `type='skill'`、`skillName` 非空 | 可进入 skill 分支 | 无 |
+| AppCard 点击 | `path` 未优先导航、`onClick` 存在 | 执行父回调 | 无 |
+| 页面判断 | 两个条件均真 | 调用 `handleSkillLaunch` | 无 |
+| handler 组装 | 窗口 id、title、props、metadata | 调用窗口服务 | 窗口状态即将创建 |
+
+直到最后一步，系统才接近窗口副作用；前面三步都没有创建会话或调用模型。
+
+## 第四步：改变一个条件，推导控制流
+
+### 删除 `skillName`
+
+配置仍满足 `HomeAppConfig`，卡片仍可渲染；页面条件的第二项为假；若 `action` 也不存在，则闭包结束。可见症状是“卡片有，点击无结果”。
+
+### 增加 `path`
+
+`AppCard.handleClick` 优先处理 `path`，不会执行 `onClick`。若调用方同时传两者，用户会导航而非打开窗口。这个分支说明只看页面闭包还不够，必须回看真实组件入口。
+
+### `type='action'` 且 `action='open-workspace'`
+
+页面进入工作区分支，但还要求 `projects[0]` 存在。若没有项目，同样可能“无结果”，但责任不再是缺少 `skillName`。
+
+## 第五步：从症状反向定位
+
+```text
+卡片是否可见？
+├─ 否：查 HOME_APPS 与渲染列表
+└─ 是：点击是否执行 onClick？
+   ├─ 否：查 path 优先级、disabled/事件层
+   └─ 是：type 与必要字段是否满足？
+      ├─ 否：修配置合同或提供可见错误
+      └─ 是：进入 AppWindowManager 继续查
+```
+
+这棵树故意在窗口服务处停止。诊断地图应当告诉读者何时把问题交给下一责任层，而不是把所有可能故障堆在一张表里。
+
+## 第六步：测试证据只覆盖它断言的范围
+
+本案例缺少直接配置结构测试、`handleSkillLaunch` 单测和完整点击 E2E。因此当前判断主要是静态执行推演。它能够证明条件分支按代码将怎样运行，不能证明真实浏览器中没有遮罩层阻挡点击、React 没有 hydration 问题、Electron 原生窗口一定成功。
+
+适合补充的最小测试：
+
+```ts
+it('requires skillName for every skill home app', () => {
+  for (const app of HOME_APPS) {
+    if (app.type === 'skill') {
+      expect(app.skillName).toBeTruthy();
+    }
+  }
+});
+```
+
+这项测试只固定配置不变量；它仍不证明用户点击能打开窗口。第二层需要组件/编排测试，完整视觉行为需要 E2E 或人工运行。
+
+## 第七步：形成一条可审计记录
+
+| 字段 | 本次记录 |
+| --- | --- |
+| 可观察问题 | 头脑风暴卡片可见但点击可能无结果 |
+| 最小入口 | `HOME_APPS` 中对应对象 |
+| 控制流 | 配置 → AppCard → 父级 onClick → 页面条件 → handler |
+| 关键数据 | `type`、`skillName`、`path`、`projects[0]` |
+| 已证事实 | 缺少 `skillName` 时 skill 分支不执行 |
+| 未证边界 | 真实 DOM 点击、窗口渲染、Electron 创建 |
+| 建议验证 | 配置单测 + handler 测试 + 浏览器/Electron 观察 |
+
+这样的记录比“已阅读 page.tsx”更有用，因为另一位读者可以复查、反驳或在源码变化后更新。
+
+## Part A 总体认知图
 
 ```mermaid
 flowchart TB
-    User[用户动作] --> Home[首页配置 HOME_APPS]
-    Home --> Card[AppCard 触发 onClick]
-    Card --> Page[HomePage 翻译为窗口配置]
-    Page --> WM[AppWindowManager 管理生命周期]
-    WM --> Dialog[SkillDialog 准备材料]
-    Dialog --> Agent[Pi Agent 运行时]
-    Agent --> Storage[本地文件存储]
-    Desktop[Electron 桌面壳] -.共享.-> WM
-    Desktop -.共享.-> Agent
-    Desktop -.共享.-> Storage
+    Phenomenon[用户现象] --> Product[产品入口与对象]
+    Product --> Control[控制流与数据流]
+    Control --> Package[包和层级责任]
+    Package --> Process[运行进程与权限]
+    Process --> Rule[规约判案]
+    Rule --> Evidence[源码 测试 运行证据]
+    Evidence --> Boundary[事实 边界 缺口]
 ```
 
-这张图不是调用链，而是 Part A 建立的整体责任地图。每一根箭头代表一种稳定的依赖关系：首页配置决定入口，卡片触发事件，页面翻译配置，窗口服务管理生命周期，SkillDialog 准备会话材料，Agent 运行时处理模型调用，存储层保存结果。Electron 不是替代其中任何一层，而是在桌面形态下复用 Web 与 Core。
+这不是产品调用链，而是阅读顺序：先把现象改写成问题，再确定对象和流向，然后判断包与进程，最后用多种证据收束。顺序反过来时，读者容易从一个测试文件或一个大类名推导过度结论。
 
-## 关键区分卡
+## 源码覆盖与相邻边界
 
-| 概念 | 是什么 | 不能误认为 |
-|------|--------|-----------|
-| `app.id` | React 列表 key | 窗口 id 或 session id |
-| 窗口 id | 窗口在 `AppWindowManager` 中的标识 | 持久化会话的磁盘文件名 |
-| session id | 会话在存储层和运行时的标识 | 窗口的视觉标题 |
-| `workspace:*` | 本地 workspace 包引用 | npm 外部包版本 |
-| `app/` | 页面和 API route 边界 | 业务逻辑主实现 |
-| `core/lib/features/` | 共享业务能力 | UI 展示或进程专属代码 |
-| `pnpm dev` | 只启动 Web | 也启动 Electron |
-| `pnpm desktop:dev` | 协调 Web + adapter + 主进程 + Electron | 只编译桌面 |
+Part A 已直接精读 `homeApps.ts`、`AppCard.tsx` 的点击窗口、`page.tsx` 的技能启动窗口、`AppWindowManager.ts` 的打开与环境分支、workspace/package 脚本和架构检查入口。`SkillDialog`、客户端 Hook、API routes、会话 service 与工具只作为停止边界，Part B/E 继续精读。
 
-## 排查地图
+因此，本单元完成不意味着全项目地图中的这些大文件已整体“吃透”；它只完成台账登记的代码窗口和能力目标。
 
-当遇到一个现象时，先按层定位，再进入该层源码：
+## 已证明、尚未证明与明确不在范围内
 
-| 现象 | 先看哪一层 | 典型入口 |
-|------|-----------|----------|
-| 首页卡片没显示 | Web 配置层 | `packages/web/src/config/homeApps.ts` |
-| 点击卡片没反应 | Web 页面编排层 | `packages/web/src/app/page.tsx` 中 `HOME_APPS.map` |
-| 窗口没打开 | 窗口服务层 | `packages/web/src/services/AppWindowManager.ts` |
-| 窗口开了但欢迎语不对 | SkillDialog 准备层 | `packages/web/src/components/skills/SkillDialog.tsx` |
-| 桌面版失败但 Web 正常 | 运行形态/进程层 | `packages/desktop/package.json` scripts |
-| 不确定 import 是否越界 | 架构规约层 | `AGENTS.md` 目录与依赖规则 |
+| 证据状态 | 本单元可以下的结论 |
+| --- | --- |
+| 已由当前源码证明 | 入口配置怎样投影成卡片；页面怎样选择 Skill handler；窗口服务怎样分 Web/Electron；规约怎样限制依赖方向 |
+| 只有静态推演、尚无回归测试 | 缺少 `skillName` 时无动作；handler 生成的完整 metadata；原生窗口失败后的 store 部分成功 |
+| 本轮命令未证明 | `pnpm agents:check` 实际跳过扫描；Vitest 在当前环境不可用；浏览器和 Electron 均未启动 |
+| 明确不在 Part A | Skill 内容加载、会话创建、消息恢复、SSE、工具执行和产物写入的内部实现 |
 
-## 综合实验
+这张表防止两个常见越界：不能因为源码分支存在就写成回归行为已被测试固定，也不能因为 Part A 画出了 Agent 节点就声称已经掌握 Pi Agent runtime。
 
-不看 Part A 正文，完成以下三项：
+## 综合实验：独立追踪另一个入口
 
-1. 画出一次技能启动的控制流、数据流和生命周期边界。
-2. 任选一个 `packages/web/src/app/page.tsx` 中的 import，用 A05 的四问判定其方向。
-3. 解释如果删除 `HOME_APPS` 中某个 `skill` 条目的 `skillName`，系统会怎样表现。
+选择“工作区”入口，不复制本章答案，完成以下记录：
 
-## 源码覆盖台账
+1. 配置对象与必要字段；
+2. AppCard 到页面闭包的控制流；
+3. `projects[0]` 对分支的影响；
+4. handler 生成的窗口 id、标题、组件和 metadata；
+5. 没有项目时的用户可见症状；
+6. 现有测试能证明与不能证明的范围。
 
-| 文件路径 | 状态 | 主讲章节 | 教学责任 |
-|----------|------|----------|----------|
-| `packages/web/src/config/homeApps.ts` | 直接精读 | A01、A02 | 首页入口分类 |
-| `packages/web/src/app/page.tsx` | 局部引用 | A02 | 页面编排与点击分发 |
-| `packages/web/src/components/framework/AppCard.tsx` | 直接精读 | A02 | 卡片只触发事件 |
-| `packages/web/src/services/AppWindowManager.ts` | 局部引用 | A02、A04 | 窗口生命周期与原生分支 |
-| `pnpm-workspace.yaml` | 直接精读 | A03 | workspace 包范围 |
-| `packages/*/package.json` | 直接精读 | A03、A04 | 包职责与 scripts |
-| `packages/core/src/index.ts` | 背景引用 | A03 | Core 公共入口 |
-| `AGENTS.md` | 直接精读 | A03、A05 | 目录规则与依赖方向 |
-| `scripts/check-agents-compliance.js` | 直接精读 | A05 | 规约自动化检查 |
+验收标准不是写满六项，而是每项都能指向真实源码窗口，并至少完成一个条件变化的预测。
 
 ## 进入 Part B 前的口头验收
 
-合上 Part A 后，应能不翻稿回答：
+不看稿，应能回答：
 
-1. OriginOS 的四个系统角色是什么，各自负责什么？
-2. 为什么 `AppCard` 不执行 Skill，而只触发 `onClick`？
-3. `workspace:*` 与 npm 包引用有什么区别？
-4. `pnpm dev` 和 `pnpm desktop:dev` 分别启动了哪些进程？
-5. 如何判断一条 import 是否违反 `AGENTS.md` 的层级规则？
-6. 源码阅读的闭环包含哪七个步骤？
+1. 为什么“页面上同时出现”不能推出“同一个组件完成”？
+2. package、架构层级和运行进程分别回答什么问题？
+3. 判断 import 的五个步骤是什么？
+4. 为什么静态检查、单元测试、集成测试和 E2E 不能互相替代？
+5. 卡片可见但无反应时，怎样在不盲读整个仓库的情况下逐层定位？
+6. 一条可信源码笔记为什么必须包含未证明边界？
 
-能完成这六项，说明 Part A 提供的不是目录记忆，而是一套可以进入 Part B 的阅读工具。
+## 四轮学习者模拟
 
-## 下一单元预告
+1. **术语首现**：能够用头脑风暴对象解释配置、组件实例、窗口、会话和 runtime，不依赖后文章节补定义。
+2. **正向追踪**：能把真实配置推进到页面条件和窗口命令，并在尚未创建会话处停下。
+3. **反向诊断**：从“卡片可见但无动作”依次排除 AppCard 事件、页面字段和窗口服务，不直接归因于模型。
+4. **相邻迁移**：把同一方法用于工作区 action，识别 `projects[0]` 是新的条件，而不是机械寻找 `skillName`。
 
-Part B 将用一次真实点击——首页「头脑风暴」卡片——把 Web 入口、窗口、API、Core、Agent 运行时、文件产物串成一条完整链路。你不再需要凭感觉猜测"系统做了什么"，而是能逐层追踪"数据现在在哪里、下一跳去哪里、边界在哪里"。
+若其中任一轮只能复述结论、不能指出字段和源码窗口，Part A 仍需回到对应章节复习，不能把读完文件当成通过。
 
-![小黑图：阅读证据链闭环](assets/a06-evidence-loop.png)
-
-*上图意图：小黑手持放大镜，依次穿过「问题」「入口」「调用链」「关键类型」「测试证据」「练习」「复盘」七个节点，最终回到问题本身，表示每一次阅读都应留下可验证的证据链。*
+Part A 最终留下的原则是：**先建立最小准确模型，再用真实输入推演；从症状反查边界，用证据限制结论。** Part B 将用这套原则贯穿一次完整 Skill 操作。

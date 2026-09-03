@@ -6,6 +6,25 @@
 
 本课精读 Pi task runtime boundary 的独立 Vitest 配置、公开 harness 和合同用例，并结合跨入口循环保护测试理解“同一安全规则在不同 Agent 入口仍成立”。
 
+## 0. 先把抽象术语翻译成一次旅行任务
+
+小林要求 Agent：“先建立杭州三日游计划，核对预算表，再把‘预算已核对’这一步标为完成。”扩展不能直接修改宿主内部对象，而要提交一条受控命令。下面这些术语都能放回这次任务理解：
+
+| 术语 | 通俗解释 | 旅行任务中的例子 |
+| --- | --- | --- |
+| 公共合同 | 扩展和宿主共同承诺长期遵守的输入、输出和顺序 | `task_plan` 命令必须带哪些字段 |
+| harness | 测试中可控的小型宿主 | 记录命令、事件和分支变化的测试容器 |
+| schema | 输入形状规则 | 计划必须有合法步骤数组 |
+| scope | 命令有权影响的范围 | 只能修改小林当前会话 |
+| receipt | 宿主已接收命令的回执 | “请求 `req-42` 已受理” |
+| state event | 公开状态确实变化的事件 | “计划已写入 revision 8” |
+| branch/cursor | 当前会话分支及其位置 | 只允许写入小林正在看的版本 |
+| busy | 当前是否已有互斥命令执行 | 防止两次计划更新互相覆盖 |
+| epoch | 当前 bridge 实例的代次 | 页面重载后旧 bridge 失去资格 |
+| 幂等 | 同一次重试不会重复产生副作用 | `req-42` 重放不会再追加一份计划 |
+
+先记住一个最小闭环：**请求被接收，不等于状态已经改变；只有关联到同一请求的公开状态事件到达，扩展才能确认命令生效。**
+
 ## 1. 为什么要单独配置合同测试
 
 [packages/core/src/lib/integrations/pi-agent/__tests__/pi-task-runtime-boundary/vitest.contract.config.ts 第 1—28 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/pi-task-runtime-boundary/vitest.contract.config.ts#L1) 使用 Node 环境，只收集 `*.contract.test.ts`，并把三个公开包入口映射到明确位置。
@@ -15,6 +34,8 @@
 `adapter-root-stub.ts` 只导出空对象。若测试代码意外从 adapter 根入口获得本不该使用的私有能力，会立即失败。
 
 这个空边界文件可直接查看：[packages/core/src/lib/integrations/pi-agent/__tests__/pi-task-runtime-boundary/adapter-root-stub.ts 第 1 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/pi-task-runtime-boundary/adapter-root-stub.ts#L1)。它没有模拟业务行为，只负责让错误导入尽早暴露。
+
+对新手而言，可以把独立 Vitest 配置理解成一间“只允许从正门进出的考场”。普通单元测试可能借助源码别名直接拿到内部函数，合同测试则刻意只开放正式包入口。这样测试通过时，才能说明一个外部扩展确实能够依赖公开 API 工作，而不是因为测试拥有生产调用方不具备的特权。
 
 ## 2. Harness 是受控的小型宿主，不是生产运行时复制品
 
@@ -46,6 +67,31 @@ sequenceDiagram
 receipt 只能说明宿主接收了命令；state event 才说明公开状态发生了相应变化。两者必须以 request、command、cursor 或 revision 等字段关联。只有 receipt 没有状态确认，会把“已受理”误写成“已生效”。
 
 [packages/core/src/lib/integrations/pi-agent/__tests__/pi-task-runtime-boundary/pi-task-runtime-boundary.contract.test.ts 第 31—113 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/pi-task-runtime-boundary/pi-task-runtime-boundary.contract.test.ts#L31) 先确认案例矩阵，再验证合法命令形成 receipt/state 闭环，以及 schema、权限、非 allowlist 工具在 mutation 前被拒绝。
+
+### 3.1 把 `req-42` 一步一步走完
+
+假设扩展提交“建立三日游计划”：
+
+```text
+requestId = req-42
+command = task_plan
+session = xiaolin-trip
+branch = main
+cursor = 7
+payload = 三个旅行步骤
+```
+
+执行过程必须满足：
+
+1. schema 校验先确认 payload 形状合法。
+2. permission 与 scope 校验确认扩展有权修改 `xiaolin-trip`。
+3. branch/cursor 校验确认它仍在用户当前版本上。
+4. busy 与 epoch 校验确认没有并发写入，bridge 也没有过期。
+5. 宿主接受命令并返回 receipt；此时只能写“已受理”。
+6. 宿主提交状态后发布 state event，其中带有可与 `req-42` 和本次命令关联的信息。
+7. bridge 才向扩展返回有界成功结果。
+
+如果第 5 步后事件丢失，调用方不能武断声称“计划已写入”。它应进入等待、超时和幂等恢复路径。这个具体时序是后面分支、epoch、超时与重放规则的共同基础。
 
 ## 4. 分支、busy 与 epoch 都是提交资格
 

@@ -1,95 +1,150 @@
-# A05：用架构规约判断一段代码的位置
+# A05：架构规约怎样用来“判案”而不是背诵
 
-## 规约是地图，不是业务解释
+## 能编译的代码也可能放错位置
 
-在读懂业务之前，先能判断代码是否放错层，这会大幅降低阅读陌生仓库的难度。架构规约并不替代源码；它像城市地图。地图不能告诉你一家店今天卖什么，却能告诉你不应把高速公路修进客厅。同样，规约不能替你理解 `SkillDialog` 的全部行为，却能先判断它不该被 Core 直接 import。
+假设开发者为了复用 `SkillDialog` 中的提示词拼装逻辑，让一个 Core service 直接 import 这个 React 组件。TypeScript 可能暂时能解析路径，功能也可能在 Web 环境运行，但 Core 从此依赖 UI、浏览器别名和组件生命周期。真正的问题不是语法，而是依赖方向被反转。
 
-[`AGENTS.md` 的目录规则](../../../../AGENTS.md#L166) 规定：`app/` 只放页面、布局与 API route 边界；共享逻辑下沉到 Core；Feature 经 `index.ts` 暴露公共 API。 [`AGENTS.md` 的依赖规则](../../../../AGENTS.md#L223) 则给出每层允许和禁止的依赖方向。
+本章用固定判案流程审查三类问题：越层 import、业务逻辑错位和跨 Feature 穿透。规约不是结论生成器；它提供假设，再由真实 import、调用者和副作用证明。
 
-## 单向依赖层级
-
-```mermaid
-flowchart TB
-    App[app routes] --> Components[components]
-    Components --> WebState[services stores]
-    WebState --> Core[core features modules]
-    Core --> Infra[storage integrations shared types]
-
-    BadCore[core 反向依赖 web] -.禁止.-> Components
-    BadRoute[app route 写业务主逻辑] -.禁止.-> Core
-    BadDesktop[desktop 复制 core 业务] -.禁止.-> Core
-```
-
-实线是允许的调用方向；虚线表示错误的反向依赖或错位。错误不是「编译器一定报错」，而是系统的可替换性被破坏：以后任何想复用运行时的地方都要安装 UI。
-
-## 一次判案的完整过程
-
-[`SkillDialog.tsx` 第 1—26 行](../../../../packages/web/src/components/skills/SkillDialog.tsx#L1) 位于 Web components 层。它导入 `usePiAgent`，后者来自 Core 的 Pi Agent integration。根据 [`AGENTS.md`](../../../../AGENTS.md#L233) ，组件可以依赖 Web service/store 和 Core 公共 API，因此方向允许。
-
-相反，若 Pi Agent 的 `agent.ts` 导入 `SkillDialog`，基础集成层会依赖上层 UI，Desktop 服务与无 DOM 测试都被迫带入 React。
+## 五步判案法
 
 ```mermaid
 flowchart LR
-    Dialog[SkillDialog UI] --> Hook[usePiAgent]
-    Hook --> Runtime[Pi Agent runtime]
-    Runtime --> Storage[session storage]
-    Bad[Core runtime] -. forbidden .-> Dialog
+    A[确定文件位置] --> B[识别责任]
+    B --> C[追踪 import 方向]
+    C --> D[寻找调用者与副作用]
+    D --> E[用脚本和测试取证]
+    E --> F[给出事实 边界 修复]
 ```
 
-判断一条 import 时，不要只看路径能否解析，要同时判断层级和公开边界。
+1. **位置**：文件属于 app、component、service/store、core feature/module 还是基础设施。
+2. **责任**：它在做页面映射、UI 状态、共享业务还是文件/集成操作。
+3. **方向**：依赖是否由高层指向低层或稳定公共 API。
+4. **调用与副作用**：谁真正调用它，它是否写磁盘、开窗口、发网络请求。
+5. **证据**：静态规则能抓什么，测试实际断言什么，还有什么只能人工判断。
 
-## 另一种隐蔽错误：同包内绕过公共出口
+## 案例一：`SkillDialog → usePiAgent` 为什么允许
 
-Feature A 直接 import Feature B 的内部文件，即使两个文件都在 Core，也会形成隐蔽耦合。规约要求经过 B 的 `index.ts` 公共出口，原因是内部实现可以重构，而公共 API 才是稳定合同。
+[packages/web/src/components/skills/SkillDialog.tsx 第 288—300 行](../../../../packages/web/src/components/skills/SkillDialog.tsx#L288) 调用 `usePiAgent()`，获得初始化、恢复、流式发送和终止能力。导入者是 Web component；被依赖能力来自 Core 的 Pi Agent 客户端边界。方向是上层 UI 使用下层集成，符合规约。
 
-例如 `page.tsx` 导入 `@originos/core/lib/integrations/pi-agent/client` 是上层使用下层能力。反过来，若 Pi Agent 代码 import `@/components/skills/SkillDialog`，就把 Core 锁死在 Web UI 上，违反规约。
+同时，`usePiAgent` 返回状态与函数，不 import `SkillDialog`。因此 UI 可以替换，客户端运行逻辑仍保持独立。
 
-## 从规约到脚本
+## 案例二：API route 可以解析请求，却不应拥有业务主实现
 
-[`scripts/check-agents-compliance.js`](../../../../scripts/check-agents-compliance.js#L1) 把部分规则变成自动检查。它定义了依赖层级：
+[packages/web/src/app/api/agent/sessions/route.ts 第 54—145 行](../../../../packages/web/src/app/api/agent/sessions/route.ts#L54) 做参数解析、必填校验、配置合并、目录准备、调用 `agentSessionService` 和响应映射。这些是 HTTP 边界职责。
 
-```js
-const DEPENDENCY_LAYERS = {
-  'src/app': 5,
-  'src/components': 4,
-  'src/services': 3,
-  'src/lib/features': 2,
-  'src/modules': 2,
-  'src/lib/storage': 1,
-  'src/lib/integrations': 1,
-  'src/lib/hooks': 1,
-  'src/lib/shared': 0,
-  'src/lib/utils.ts': 1,
-};
+如果 route 自己实现“构造 AgentSession、决定路径、写 JsonStore”，桌面 IPC 想复用同一能力时就只能复制代码或模拟 HTTP。正确结构是 route 形成 `createRequest`，再把共享业务交给 [packages/core/src/lib/features/agent/session-service.ts 第 54—83 行](../../../../packages/core/src/lib/features/agent/session-service.ts#L54)。
+
+边界判断不能机械地说“route 一行业务都不能有”。请求字段校验和 HTTP 状态码映射本来就属于 route；不应放进去的是跨入口都必须一致的会话业务规则。
+
+## 案例三：基础设施层不能向 Feature 求助
+
+存储层负责通用 JSON 读写。如果 `json-store.ts` 为了识别某种 Project 字段而 import project Feature，它就从最底层反向依赖业务层。以后 AgentSession、Ontology 等其他对象也会推动 JsonStore 添加专用分支，通用基础设施逐渐变成所有业务的汇总。
+
+正确方式是上层把完整路径和数据传给通用 store；若需要业务验证，在 Feature 调用 store 之前完成。
+
+## 自动检查真实做了什么
+
+[scripts/check-agents-compliance.js](../../../../scripts/check-agents-compliance.js#L1) 定义可扫描层级和违规模式；[eslint-rules/agents-compliance.js](../../../../eslint-rules/agents-compliance.js#L1) 把部分规则放入 lint。阅读脚本时要区分：
+
+| 证据 | 可以推出 | 不能推出 |
+| --- | --- | --- |
+| 扫描器定义了层级 | 这些路径会接受自动检查 | 所有真实目录都已覆盖 |
+| 命令退出码为 0 | 本次扫描未发现已编码违规 | 没有复制逻辑或职责错位 |
+| 某 import 被报错 | 路径触发明确规则 | 自动给出最合理重构设计 |
+
+AGENTS.md 要求提交前运行 `pnpm lint`。若命令因环境或已有问题失败，应记录准确错误与未完成验证，不能把 `git diff --check` 通过写成 lint 通过。
+
+要判断脚本是否真的覆盖仓库，必须继续精读入口，而不是停在文件名。[scripts/check-agents-compliance.js 第 1—24 行](../../../../scripts/check-agents-compliance.js#L1) 计算扫描根并检查目标目录是否存在；当前从仓库根执行时输出“`src/` 目录不存在，跳过检查”。执行过程可以写成：
+
+```text
+输入：仓库根目录
+→ 脚本计算目标 src
+→ existsSync 返回 false
+→ 输出跳过提示
+→ 进程没有报告违规并以 0 结束
 ```
 
-数字越大，层级越高。如果一个低层文件导入更高层文件，就会产生 `LAYER_VIOLATION`。脚本还检查组件分层和 feature 跨模块导入。但它只能抓一部分问题，不能替代人工 review。
+这里的关键分支是“未扫描”而不是“扫描且无违规”。两种状态都可能得到零退出码，但证据含义完全不同。验证工具也必须像业务代码一样追踪输入、分支和输出。
 
-## 失败路径
+## 一次完整的错误重构推演
 
-1. **Core 依赖 Web 组件**：Core 无法脱离浏览器环境测试和复用。
-2. **API route 写业务主逻辑**：业务逻辑被锁死在 HTTP 边界内，桌面端和 CLI 无法复用。
-3. **Desktop 服务复制 Core 规则**：同样的 bug 需要在两处修复。
-4. **Feature 之间直接读取内部文件**：内部重构时调用方大面积失效。
+错误输入：
+
+```ts
+// 假设位于 packages/core/src/lib/features/agent/session-service.ts
+import { useAppWindowStore } from '@/store/appWindowStore';
+
+export async function createAndOpenSession(request: CreateSessionRequest) {
+  const session = await createSession(request);
+  useAppWindowStore.getState().openWindow(...);
+  return session;
+}
+```
+
+逐步判案：
+
+1. 文件属于 Core feature。
+2. `createSession` 是共享业务；`openWindow` 是 Web UI 状态。
+3. Core import Web store，箭头向上，违规。
+4. 后果是无 UI 的调用方也被迫加载 Zustand/Web 别名。
+5. 重构时保留 Core 的 `createSession`，由 Web 上层在成功返回后决定是否打开窗口；若多个 UI 入口要统一响应，可在 Web service 中封装编排。
+
+重构不是把 import 换个相对路径，而是把决策送回拥有该责任的层。
+
+重构后的最小调用合同应是：
+
+```ts
+// Core：只返回共享业务结果
+export async function createSession(request: CreateSessionRequest) {
+  return agentSessionService.createSession(request);
+}
+
+// Web：拥有窗口决策
+const session = await createSession(request);
+windowManager.openComponentWindow(
+  `session-${session.sessionId}`,
+  '会话',
+  SessionView,
+  { sessionId: session.sessionId },
+);
+```
+
+第一段可以被 HTTP、IPC、后台任务复用；第二段只能在拥有 React 窗口语义的 Web 层执行。若 Core 创建成功而 Web 打窗失败，系统处于“会话已保存、窗口未出现”的部分成功，重试策略也应由上层决定是否复用已有 session，而不是让 Core 回滚文件。
+
+## 隐蔽问题：平行实现和中间层空洞
+
+没有违规 import 也可能有架构问题。Web 与 Desktop 分别复制相同会话构造，就是平行实现；教材若只讲 UI 和最终 Core service，跳过 HTTP/IPC 适配，就是中间层空洞。
+
+全局审查应双向走查：
+
+```text
+用户入口 → 编排 → 边界适配 → Core → 副作用
+副作用 → 谁写入 → 谁调用 → 哪个入口触发
+```
+
+两次走查得到的文件集合不一致时，应查明是遗漏、备用路径、legacy 路径还是未接入实现。
 
 ## 测试证据与缺口
 
-- `pnpm lint` 会运行 ESLint，包括 [`eslint-rules/agents-compliance.js`](../../../../eslint-rules/agents-compliance.js#L1) 的自定义规则。
-- `pnpm agents:check` 会运行 [`scripts/check-agents-compliance.js`](../../../../scripts/check-agents-compliance.js#L1)，扫描依赖违规。
+静态规则适合验证 import 方向；单元测试适合验证业务输出；集成测试适合验证边界合同；E2E 才能跨过真实用户入口。任何一种都不能替代其余种类。
 
-缺口：自动脚本无法发现「业务逻辑写在 route 里太多」这类结构性问题，需要人工 review 判断。
+当前 Part A 没有实际执行 `pnpm lint`，所以正文只给出运行方式，不声称它已通过。即使后续执行成功，也只能把结论写成“当前工作树在规则覆盖范围内通过”，不能写成“架构完全正确”。
 
-## 练习与口头验收
+本轮实际证据如下：Given 是当前 monorepo 根目录，When 执行 `pnpm agents:check`，Then 命令跳过 `src/` 扫描；Given 是当前依赖环境，When 尝试运行目标 Vitest，Then `vitest` 命令不存在。两项都不是产品代码失败，但都阻止“自动验证已经完成”的结论。
 
-1. 为 A02 的 `HomePage -> AppWindowManager -> SkillDialog` 链路标注层级。
-2. 假设把 `handleSkillLaunch` 中的会话持久化代码搬进 `page.tsx`，说明它违反的是哪条边界、应下沉到哪里。
-3. 判断下面 import 为何错误：
-   ```ts
-   // packages/core/src/lib/features/ontology/index.ts
-   import { OntologyPreview } from '@/components/os/ontology-preview/OntologyPreview';
-   ```
-4. 打开 [`scripts/check-agents-compliance.js`](../../../../scripts/check-agents-compliance.js#L1)，说明 `DEPENDENCY_LAYERS` 中数字越大代表层级越高还是越低。
+## 小实验：对四个位置逐一判案
 
-合上本页后，应能给出任意 import 时回答四件事：导入者在哪一层、被导入者在哪一层、箭头是否允许、是否经过公共出口。规约不是开发结束时才检查的清单，而是阅读时的罗盘。
+把“把 session 对象保存成 JSON”分别放入 `page.tsx`、Web service、Core feature service、JsonStore，判断每处应该拥有多少责任：页面只触发；Web service 可适配环境；Core feature 决定会话业务；JsonStore 只负责通用 DataFile 写入。完成后再说明调用链应该怎样串联，而不是只选一个目录名。
 
-下一章把这套方法固化成可复用的源码阅读闭环。
+## 口头验收与下一章
+
+合上本页，应能回答：
+
+1. 五步判案法各自收集什么证据。
+2. 为什么 `SkillDialog → usePiAgent` 合法，反向则违规。
+3. API route 中哪些逻辑属于边界，哪些必须下沉。
+4. 静态检查通过为什么不能证明没有平行实现。
+5. 重构依赖违规时为什么要移动责任，而非只改 import 路径。
+
+下一章将以上方法用于一次完整学习记录：从用户问题进入源码，再用测试边界和最小实验收束。

@@ -1,136 +1,125 @@
-# B02：点击后谁决定打开哪个窗口
+# B02：页面怎样把一次点击翻译成窗口命令
 
-## 一个错觉
+## 点击事件本身不知道要开什么
 
-上一章看到 `AppCard` 只触发 `onClick`。但用户确实看到窗口打开了——这个决定是在哪里做出的？答案是 `HomePage`。它不仅是首页的视觉容器，更是把「入口配置」翻译成「窗口配置」的编排层。
+B01 停在 `AppCard` 调用父级 `onClick`。接下来，`HomePage` 才读取 `type`、`skillName` 或 `action`，选择具体 handler。页面在这里承担**编排**：它连接产品配置和窗口服务，却不实现 Skill 加载或会话持久化。
 
-本章追踪：从 `HOME_APPS.map` 到 `handleSkillLaunch`，再到 `AppWindowManager.openComponentWindow`，首页如何把一次点击变成一份窗口配置。
-
-## 调用链
+## 控制流与数据流并排阅读
 
 ```mermaid
 sequenceDiagram
-    participant Config as HOME_APPS
-    participant Page as HomePage
-    participant Card as AppCard
-    participant WM as AppWindowManager
+    participant C as AppCard
+    participant P as HomePage 闭包
+    participant H as handleSkillLaunch
+    participant W as AppWindowManager
 
-    Config-->>Page: 提供配置数组
-    Page-->>Card: 传入 props + onClick
-    Card->>Page: 用户点击，调用 onClick
-    Page->>Page: 判断 type / skillName / action
-    Page->>WM: openComponentWindow(id, title, component, props, options)
+    C->>P: onClick()
+    P->>P: type === skill && skillName?
+    P->>H: bmad-brainstorming, 头脑风暴
+    H->>H: 计算 id / props / metadata
+    H->>W: openComponentWindow(...)
 ```
 
-图中没有网络请求。`AppCard -> HomePage` 是子组件执行父组件传下来的回调；`HomePage -> AppWindowManager` 是把产品入口翻译成窗口配置。
+第一根箭头没有业务参数，因为闭包已捕获 `app`；第二步才读取配置。`handleSkillLaunch` 接收稳定 code 和显示名，输出的是窗口服务合同。
 
-## 页面层的事件分发
+## 页面分流的真实分支
 
-[`packages/web/src/app/page.tsx` 第 1426—1450 行](../../../../packages/web/src/app/page.tsx#L1426) 是分发中心：
+[packages/web/src/app/page.tsx 第 1426—1450 行](../../../../packages/web/src/app/page.tsx#L1426) 对 skill 与 workspace 采取不同路径。`skill` 要求 `app.skillName`；工作区还要求 `projects[0]`。
+
+这说明页面不是简单转发器：它拥有当前页面状态 `projects`，可以决定某个 action 是否具备执行条件。但它不应在这里读取 Skill 文件或写会话 JSON，那些是下层公共能力。
+
+## `handleSkillLaunch` 的五次翻译
+
+[packages/web/src/app/page.tsx 第 845—869 行](../../../../packages/web/src/app/page.tsx#L845) 把 `skillName` 与 `name` 翻译为：
+
+1. `skill-${skillName}`：窗口 id；
+2. `name`：窗口标题；
+3. `{ skillName, initialMessage }`：交给 `SkillDialog` 的 props；
+4. `{ width: 1200, height: 800 }` 与最小尺寸：窗口几何合同；
+5. `{ entryType, entryId, sessionId, projectId }`：生命周期 metadata。
+
+给定输入：
 
 ```ts
-onClick={() => {
-  if (app.type === 'skill' && app.skillName) {
-    handleSkillLaunch(app.skillName, app.name);
-  } else if (app.action === 'create-agent') {
-    handleCreateProject();
-  } else if (app.action === 'open-workspace') {
-    const firstProject = projects[0];
-    if (firstProject) {
-      handleOpenWorkspace(firstProject.id);
-    }
-  }
-}}
+handleSkillLaunch('bmad-brainstorming', '头脑风暴');
 ```
 
-这里有三个分支：
-
-- `skill`：打开 Skill 对话窗口。
-- `create-agent`：创建项目并打开访谈窗口。
-- `open-workspace`：打开第一个项目的工作区窗口。
-
-当前配置中只实际使用了 `skill` 和 `open-workspace`，`create-agent` 分支是为未来入口预留的。这个条件结构也说明：**首页卡片可以共享同一种视觉组件，但走完全不同的后续路径**。
-
-## handleSkillLaunch 的翻译工作
-
-[`packages/web/src/app/page.tsx` 第 845—869 行](../../../../packages/web/src/app/page.tsx#L845) 把 `skillName` 和 `name` 翻译成窗口配置：
+得到：
 
 ```ts
-const handleSkillLaunch = (skillName: string, name: string, initialMessage?: string) => {
-  const windowManager = AppWindowManager.getInstance();
-
-  windowManager.openComponentWindow(
-    `skill-${skillName}`,
-    name,
-    SkillDialog,
-    {
-      skillName,
-      initialMessage: initialMessage?.trim() || '你好！我是' + name.split(' ')[0] + '助手，有什么可以帮助你的吗？',
-    },
-    {
-      position: { width: 1200, height: 800 },
-      constraints: { minWidth: 600, minHeight: 400 },
-      metadata: { entryType: 'skill', entryId: skillName, sessionId: `skill-${skillName}`, projectId: `skill-${skillName}` },
-    }
-  );
-};
+{
+  windowId: 'skill-bmad-brainstorming',
+  title: '头脑风暴',
+  component: SkillDialog,
+  props: {
+    skillName: 'bmad-brainstorming',
+    initialMessage: '你好！我是头脑风暴助手，有什么可以帮助你的吗？',
+  },
+  metadata: {
+    entryType: 'skill',
+    entryId: 'bmad-brainstorming',
+    sessionId: 'skill-bmad-brainstorming',
+    projectId: 'skill-bmad-brainstorming',
+  },
+}
 ```
 
-这段代码做了四件事：
+`name.split(' ')[0]` 按半角空格截取首段；中文“头脑风暴”没有空格，所以完整进入欢迎语。这是实际字符串规则，不是自然语言分词。
 
-| 输入 | 输出 | 原因 |
-|------|------|------|
-| `skillName` | `skill-${skillName}` | 稳定窗口 id，避免重复点击产生随机窗口 |
-| `name` | 窗口标题 | 用户看到产品名称，不必看内部代码名 |
-| `skillName` | `SkillDialog` 的 prop | 对话界面才能读取正确的技能 |
-| `skillName` | `metadata.entryType/entryId` | 关闭或恢复时能辨认入口身份 |
+## 三条入口为什么要复用 handler
 
-第 866 行的 `metadata.sessionId` 只是窗口层的关联键，**不等于已经在磁盘创建了会话**。这条区分以后会反复出现：一个 id 存在，不代表对应资源已经被初始化。
-
-## 三条入口通道汇流
-
-首页不是唯一入口。[`page.tsx` 第 1194—1267 行](../../../../packages/web/src/app/page.tsx#L1194) 的 Spotlight 搜索也会生成 `appItems`，并复用同一批 handler；Dock 的 `handleDockAction` 也会根据 `entryType` 调用 `handleSkillLaunch` 或 `handleOpenWorkspace`。
+[page.tsx 第 1194—1267 行](../../../../packages/web/src/app/page.tsx#L1194) 还把 HOME_APPS 与用户 Skill 变成 Spotlight 项；Dock action 也会回到 `handleSkillLaunch`。因此首页卡片只是一个生产调用者，不是唯一入口。
 
 ```mermaid
 flowchart LR
-    Home[首页卡片] --> Launch[handleSkillLaunch]
-    Spotlight[Spotlight 搜索] --> Launch
-    Dock[Dock 图标] --> DockAction[handleDockAction]
-    DockAction --> Launch
-    DockAction --> Workspace[handleOpenWorkspace]
+    H[首页卡片] --> L[handleSkillLaunch]
+    S[Spotlight] --> L
+    D[Dock] --> A[handleDockAction]
+    A --> L
+    L --> W[AppWindowManager]
 ```
 
-这意味着「点击首页卡片」只是众多入口中的一种。把 handler 放在 `HomePage` 而不是 `AppCard`，正是为了让 Spotlight、Dock 等入口复用同一套翻译逻辑。
+复用 handler 可以统一窗口 id、尺寸、props 和 metadata；但三个入口的上游合同仍需分别验证，不能因为最终汇流就假设行为完全一致。
 
-## 关键区分：窗口 id 与 session id
+## 相同字符串，不同身份
 
-在 `handleSkillLaunch` 中，窗口 id 和 `metadata.sessionId` 目前都使用 `skill-${skillName}`。这个选择有两个目的：
+窗口 id、metadata.sessionId 和 projectId 当前都可能是 `skill-bmad-brainstorming`。分别改变它们可以看到责任差异：
 
-1. **重复点击聚焦同一窗口**：同一 `id` 不会让 `AppWindowManager` 创建多个窗口。
-2. **会话归属稳定**：同一 Skill 的多次启动复用同一项目范围。
+- 改窗口 id 会影响窗口去重/聚焦；
+- 改 sessionId 会影响关闭时销毁哪个 runtime；
+- 改 metadata.projectId 会影响关闭清理请求的 runtime 定位；它不会直接改写 SkillDialog 创建会话时独立计算的 projectId；
+- 改 entryId 会影响入口所有权与记忆整理对象。
 
-但它也带来一个风险：如果误以为「窗口 id 就是 session id 且已创建会话」，会忽略 `SkillDialog` 初始化时真正创建会话的那一步。窗口 id 只是视觉容器的标识；session id 是会话在存储层的标识；两者只是在当前实现中碰巧同名。
+它们同名是为了稳定关联，不是可以永远混用的类型保证。
 
-## 失败路径
+[packages/web/src/app/window/page.tsx 第 64—69 行](../../../../packages/web/src/app/window/page.tsx#L64) 是验证这个结论的消费端：Skill 原生窗口只把 `skillName` 与 `initialMessage` 传给 `SkillDialog`。随后 [SkillDialog.tsx 第 485—496 行](../../../../packages/web/src/components/skills/SkillDialog.tsx#L485) 才用 `currentSkill` 计算 `projectId`。因此，metadata 和会话请求目前是两条独立计算、结果碰巧一致的数据链。
 
-1. **`handleOpenWorkspace` 没有项目时无法打开**：它依赖 `projects[0]`，如果列表为空则无任何反馈。
-2. **`skillName` 为空时进入不了 `handleSkillLaunch`**：条件判断在 `HOME_APPS.map` 中已完成。
-3. **窗口 id 冲突**：如果两个不同入口使用相同前缀生成窗口 id，会导致聚焦错误。
+## 失败诊断
+
+| 症状 | 证据入口 | 可能原因 |
+| --- | --- | --- |
+| 首页点击无反应 | 页面闭包是否进入分支 | `skillName` 缺失 |
+| Spotlight 能开，首页不能 | 两个入口上游差异 | 首页配置/闭包问题 |
+| 重复点击聚焦了错误窗口 | 实际 window id | id 冲突 |
+| 标题正确但加载错误 Skill | `name` 与 `props.skillName` | 两个字段错配 |
+| 窗口已开却没有 session 文件 | `SkillDialog.initialize` | 打开窗口不等于初始化会话 |
 
 ## 测试证据与缺口
 
-- `handleSkillLaunch` 目前没有直接单元测试。
-- 首页点击流程依赖 E2E 或人工验证。
+当前没有直接测试固定 `handleSkillLaunch` 的完整输出，也没有跨首页、Spotlight、Dock 的一致性测试。源码事实只能说明三个入口复用了 handler；不能证明各入口在真实 UI 中都能触发，也不能证明原生窗口创建成功。
 
-缺口：建议为 `handleSkillLaunch` 和 `handleOpenWorkspace` 增加单元测试，验证生成的窗口 id、标题、组件类型和 metadata。
+建议的合同测试应拦截 `openComponentWindow`，断言 id、component、props、尺寸与 metadata；另用入口测试分别验证首页、Spotlight、Dock 是否传入相同 `skillName` 与显示名。
 
-## 练习与口头验收
+## 小实验与口头验收
 
-1. 对比 `app-workspace` 与 `app-brainstorming` 的点击分支，写出各自经过的 handler。
-2. 如果将 `bmad-brainstorming` 的 `skillName` 改成 `trip-planner`，窗口 id、窗口标题、`SkillDialog` 收到的 prop 分别是什么？
-3. 说明为什么 `handleSkillLaunch` 放在 `HomePage` 而不是 `AppCard`。
-4. 解释 `metadata.sessionId: skill-${skillName}` 为什么不等于磁盘已经创建会话。
+传入 `initialMessage = '   '`，推导为何最终使用欢迎语；再传入 `'  先列十个方向  '`，推导为何去掉首尾空格。完成标准是写出条件表达式的求值过程。
 
-合上本页后，应能画出：`HOME_APPS -> AppCard -> onClick -> HomePage -> handleSkillLaunch -> AppWindowManager.openComponentWindow`，并说明每一棒传递的是配置、组件还是身份。
+合上本页，应能回答：
 
-下一章进入窗口管理器，看一个窗口 id 如何变成屏幕上的窗体。
+1. HomePage 怎样从配置中选择 handler？
+2. `handleSkillLaunch` 做了哪五次字段翻译？
+3. 为什么多个入口汇流不等于上游合同一致？
+4. 为什么窗口 id 存在不能证明 session 已创建？
+5. 只改变 metadata.projectId、保持 `skillName` 不变时，打开、初始化和关闭分别读取哪个值？
+
+下一章进入窗口服务，观察窗口命令如何变成 Web store 状态或 Electron 原生窗口。

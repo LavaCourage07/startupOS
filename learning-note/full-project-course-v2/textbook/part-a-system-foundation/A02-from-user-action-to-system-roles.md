@@ -1,139 +1,203 @@
-# A02：从一次点击看系统角色的接力
+# A02：一次点击同时产生了哪三条链
 
-## 一个可观察的现象
+## 同一个窗口，不能只用一条箭头解释
 
-用户在首页点击「头脑风暴」卡片。三件事情几乎同时发生：卡片被按下、一个标题为「头脑风暴」的窗口出现、窗口里出现一句欢迎语。如果只看 UI，很容易以为「卡片直接打开了窗口」。但源码中不存在「AppCard 打开窗口」的函数；卡片只负责触发点击事件，真正决定打开什么、怎么打开的代码在页面层和窗口服务层。
+用户点击“头脑风暴”，窗口很快出现。若只画 `AppCard → SkillDialog`，图看起来简单，却遗漏了真正决定行为的页面层、窗口服务和身份数据，也无法解释关闭窗口为什么会触发运行时清理。
 
-这个分工是 OriginOS 学习的第一条重要经验：**不要把视觉结果直接归给最近的视觉组件**。本章用一次点击画出系统在 Web、Core、Runtime、Storage、Desktop 五个角色之间的高层接力，为 Part B 的逐文件追踪建立整体地图。
+本章把同一次点击拆成三条链：
 
-## 系统角色接力图
+- **控制流**：当前是谁调用谁；
+- **数据流**：`skillName`、标题和各种 id 怎样被改造成下一层输入；
+- **生命周期**：窗口何时创建、聚焦、关闭，运行时何时清理。
+
+三条链相互关联，但不能互相代替。
+
+## 控制流：谁把下一棒交给谁
 
 ```mermaid
 sequenceDiagram
     participant U as 用户
     participant C as AppCard
-    participant H as HomePage
+    participant P as HomePage
+    participant H as handleSkillLaunch
     participant W as AppWindowManager
     participant D as SkillDialog
-    participant P as usePiAgent
-    participant S as 会话存储
+    participant R as usePiAgent 边界
 
-    U->>C: 点击「头脑风暴」
-    C->>H: 调用 onClick
-    H->>H: 检查 type / skillName
-    H->>W: openComponentWindow(id, title, SkillDialog, props)
-    W->>W: 注入关闭回调（销毁 Agent + 整理记忆）
-    W->>D: 挂载 SkillDialog
-    D->>D: 加载技能内容、构建 systemPrompt
-    D->>P: 初始化 Agent 会话
-    P->>S: 创建或恢复会话
+    U->>C: 点击卡片
+    C->>P: 执行父级 onClick
+    P->>P: 检查 type 与 skillName
+    P->>H: 传入 skillName、name
+    H->>W: openComponentWindow(...)
+    W->>D: 把组件与 props 放入窗口内容
+    D->>R: 后续初始化会话
 ```
 
-这张图不展示网络请求细节、不展示流式响应过程、不展示工具执行链。它只回答一个问题：**一次点击后，控制权依次经过哪些系统角色，每个角色新增了什么责任**。
+这张图在 `usePiAgent` 边界停止。A02 只证明页面怎样抵达会话入口，不展开 HTTP、runtime 和模型内部；后者由 Part B、Part E负责。
 
-- `AppCard` 只负责展示和触发点击，不知道 Skill 如何运行。
-- `HomePage` 负责把配置翻译成窗口配置，并产生稳定的窗口 id。
-- `AppWindowManager` 负责窗口生命周期，并在关闭时注入 Agent 销毁和记忆整理。
-- `SkillDialog` 负责准备 UI 与会话所需材料（技能内容、提示词、工作目录）。
-- `usePiAgent` 负责客户端与会话运行时的交互。
-- `会话存储` 负责把会话状态持久化到本地文件。
+每根箭头都可以在源码中找到：卡片调用 `onClick`；页面判断入口字段；`handleSkillLaunch` 组装窗口配置；窗口服务保存组件和 props；React 挂载 `SkillDialog` 后，它才可能初始化会话。
 
-注意：图中没有从 `AppCard` 直接到 `SkillDialog` 的箭头。卡片甚至不知道 SkillDialog 的存在；它只向上抛 `onClick`。
+## 源码窗口一：页面不是被动容器
 
-## 为什么必须分这么多层
-
-假设把所有代码都放进 `page.tsx`。第一天，点击卡片和对话框都能工作；第二天，桌面端需要复用会话逻辑，测试又需要在没有浏览器的环境中创建会话，页面文件就开始同时依赖 DOM、磁盘、Electron 与模型配置。任何一个环境变化都会牵动全部代码。
-
-分层的目的就是限制这种「最初方便，后来无法移动」的结构。每个角色只负责一种稳定变化：
-
-| 角色 | 负责什么 | 不负责的典型错误 |
-|------|----------|------------------|
-| Web 组件 | 展示与事件触发 | 直接调用模型或写文件 |
-| 页面编排 | 把配置映射到窗口/服务 | 复制 Core 的业务规则 |
-| 窗口服务 | 窗口生命周期与关闭回调 | 决定 Agent 内部如何推理 |
-| Core 集成 | 会话、技能、工具的公共边界 | 渲染 React 组件 |
-| 存储 | 把状态落到本地文件 | 解释用户意图 |
-
-[`AGENTS.md` 的依赖层级](../../../../AGENTS.md#L198) 把这条规则具体化了：app routes 依赖 components，components 依赖 services/stores，services 依赖 core features，core features 依赖 storage/integrations。反过来就是违规。
-
-## 源码中的三个边界信号
-
-### 信号 1：卡片只做触发
-
-[`packages/web/src/components/framework/AppCard.tsx` 第 73—79 行](../../../../packages/web/src/components/framework/AppCard.tsx#L73) 的 `handleClick` 只有两条分支：
+[packages/web/src/app/page.tsx 第 1426—1450 行](../../../../packages/web/src/app/page.tsx#L1426) 把配置映射为卡片，并在闭包中决定后续 handler。关键条件是：
 
 ```ts
-const handleClick = () => {
-  if (path) {
-    window.location.href = path;
-  } else if (onClick) {
-    onClick();
+if (app.type === 'skill' && app.skillName) {
+  handleSkillLaunch(app.skillName, app.name);
+} else if (app.action === 'open-workspace') {
+  const firstProject = projects[0];
+  if (firstProject) {
+    handleOpenWorkspace(firstProject.id);
   }
+}
+```
+
+这段代码同时承担“解释配置”和“选择动作”两项职责。AppCard 不知道 `type`，真正的分流发生在页面编排层。
+
+注意 `action` 分支还依赖 `projects[0]`。因此工作区入口配置正确，也可能因项目列表为空而没有后续动作。配置有效与运行条件满足是两件事。
+
+## 数据流：同一个值如何变成不同身份
+
+[packages/web/src/app/page.tsx 第 845—869 行](../../../../packages/web/src/app/page.tsx#L845) 接收两个必填字符串和一个可选初始消息：
+
+```ts
+const handleSkillLaunch = (skillName: string, name: string, initialMessage?: string) => {
+  windowManager.openComponentWindow(
+    `skill-${skillName}`,
+    name,
+    SkillDialog,
+    {
+      skillName,
+      initialMessage: initialMessage?.trim()
+        || '你好！我是' + name.split(' ')[0] + '助手，有什么可以帮助你的吗？',
+    },
+    {
+      position: { width: 1200, height: 800 },
+      constraints: { minWidth: 600, minHeight: 400 },
+      metadata: {
+        entryType: 'skill',
+        entryId: skillName,
+        sessionId: `skill-${skillName}`,
+        projectId: `skill-${skillName}`,
+      },
+    },
+  );
 };
 ```
 
-它要么跳转链接，要么调用父组件传进来的回调。 `skillName` 只是作为 prop 被传入， `AppCard` 内部从不读取它来决定行为。
+把 `skillName = 'bmad-brainstorming'` 代入后，可以逐项计算：
 
-### 信号 2：页面负责翻译
+| 字段 | 结果 | 所属责任 |
+| --- | --- | --- |
+| 窗口 id | `skill-bmad-brainstorming` | 窗口去重与聚焦 |
+| 标题 | `头脑风暴` | 用户可见文案 |
+| `props.skillName` | `bmad-brainstorming` | SkillDialog 加载身份 |
+| `metadata.entryType` | `skill` | 生命周期分类 |
+| `metadata.entryId` | `bmad-brainstorming` | 入口所有权 |
+| `metadata.sessionId` | `skill-bmad-brainstorming` | 关闭时的运行时清理参数 |
+| `metadata.projectId` | `skill-bmad-brainstorming` | 关闭时帮助定位 runtime；不是 SkillDialog 创建会话时直接读取的字段 |
 
-[`packages/web/src/app/page.tsx` 第 1426—1450 行](../../../../packages/web/src/app/page.tsx#L1426) 把 `HOME_APPS` 的每条配置映射成 `AppCard`，并在 `onClick` 中判断 `type` 和 `skillName`：
+字符串相同不代表概念相同。窗口 id 和 session id 当前由同一表达式生成，是实现选择，不是二者天然属于同一资源。
 
-```ts
-onClick={() => {
-  if (app.type === 'skill' && app.skillName) {
-    handleSkillLaunch(app.skillName, app.name);
-  } else if (app.action === 'open-workspace') {
-    const firstProject = projects[0];
-    if (firstProject) {
-      handleOpenWorkspace(firstProject.id);
-    }
-  }
-}}
+还要避免一个更隐蔽的误读：窗口 metadata 并不会原样成为 `SkillDialog` 的 props。普通 Web 路径只把 `content.props` 交给组件；Electron 的 `/window` 重建页也只给 SkillDialog 传入 `skillName` 和 `initialMessage`。真正创建会话时，SkillDialog 再根据 `currentSkill` 独立构造 `projectId = skill-${currentSkill}`。
+
+[packages/web/src/app/window/page.tsx 第 64—69 行](../../../../packages/web/src/app/window/page.tsx#L64) 可以直接看到这个停止边界：
+
+```tsx
+{windowType === 'skill' && (
+  <SkillDialog
+    skillName={skillName}
+    initialMessage={initialMessage}
+  />
+)}
 ```
 
-这里有两个容易被忽略的事实。第一，条件同时检查 `type === 'skill'` 和 `skillName` 存在，缺少 `skillName` 时卡片仍可渲染，但点击无响应。第二，`app.id` 只用于 React 列表 key，不是窗口 id，也不是 session id；三个 id 承担完全不同的职责。
+因此，修改窗口 metadata 中的 `projectId` 会改变关闭清理请求拿到的定位信息，却不会自动改变 SkillDialog 随后创建会话时使用的项目范围。两个值目前相同，是两条链各自计算出了相同字符串，不是一次字段透传。
 
-### 信号 3：窗口服务注入生命周期
+## 生命周期：窗口服务在打开时埋下关闭动作
 
-[`packages/web/src/services/AppWindowManager.ts` 第 31—54 行](../../../../packages/web/src/services/AppWindowManager.ts#L31) 在打开窗口时检查 `entryType`，如果属于 `role-agent`、`agent`、`project`、`solution`、`skill` 之一，就为该窗口注入 `onClose` 回调：关闭时调用 `destroyAgentSession` 和 `consolidateMemory`。
+[packages/web/src/services/AppWindowManager.ts 第 31—54 行](../../../../packages/web/src/services/AppWindowManager.ts#L31) 读取窗口 metadata。若 `entryType` 属于受管理集合，就把原 `onClose` 包装为新回调：先执行原回调，再异步调用 `destroyAgentSession` 与 `consolidateMemory`。
 
-这意味着**窗口不仅是视觉容器，还是运行时生命周期边界**。窗口关闭会触发运行时的清理动作，但清理的是内存中的 Agent 实例和记忆整理，不是删除持久化会话文件。
+```mermaid
+stateDiagram-v2
+    [*] --> Absent: 尚未打开
+    Absent --> Open: openComponentWindow
+    Open --> Focused: store.openWindow / focus
+    Focused --> Closed: 用户关闭
+    Closed --> RuntimeCleanup: destroyAgentSession
+    Closed --> MemoryWork: consolidateMemory
+    RuntimeCleanup --> [*]
+    MemoryWork --> [*]
+```
 
-## 关键区分：三种 id
+图中的两个关闭后动作是 fire-and-forget：失败会记录日志，但不阻止窗口消失。它们也不等于删除会话文件。B10 会精读这一差异。
 
-一次点击会同时出现三种 id，但它们不是一回事：
+## 为什么这些责任不能合并进 AppCard
 
-| id | 例子 | 由谁产生 | 生命周期 |
-|----|------|----------|----------|
-| `app.id` | `app-brainstorming` | 配置文件 | 跟随 `HOME_APPS` 静态存在 |
-| 窗口 id | `skill-bmad-brainstorming` | `handleSkillLaunch` | 窗口打开时产生，关闭时销毁 |
-| session id | `skill-bmad-brainstorming` | 初始化时生成或复用 | 窗口关闭后仍保留在磁盘 |
+若 AppCard 直接 import `SkillDialog` 和 `AppWindowManager`，它就必须理解 Skill、工作区、项目访谈等所有应用类型。每新增一个入口都要修改通用视觉组件，Spotlight 与 Dock 也无法复用同一 handler。
 
-在 [`handleSkillLaunch` 第 849—866 行](../../../../packages/web/src/app/page.tsx#L849) 可以看到窗口 id 和 session id 目前都使用 `skill-${skillName}`。这个选择是为了让重复点击同一卡片时聚焦已有窗口，并复用同一项目范围。但它也带来一个风险：如果误以为「窗口 id 就是 session id 且已创建会话」，会忽略 `SkillDialog` 初始化时真正创建会话的那一步。
+当前结构让变化分开：
 
-## 失败路径
+| 变化 | 主要修改点 |
+| --- | --- |
+| 卡片视觉变化 | `AppCard` |
+| 新增入口数据 | `homeApps.ts` |
+| 入口如何翻译为动作 | `page.tsx` |
+| 窗口创建和关闭语义 | `AppWindowManager` |
+| Skill 会话准备 | `SkillDialog` |
 
-1. **卡片渲染 ≠ 点击能工作**：缺少 `skillName` 的 `skill` 类型卡片仍会显示，但点击后没有任何反应。
-2. **窗口打开 ≠ 会话已创建**：`AppWindowManager` 只创建窗口和元数据关联，`SkillDialog` 内的 `usePiAgent.initialize` 才是真正创建或恢复会话的地方。
-3. **窗口关闭 ≠ 会话删除**：关闭窗口触发 `destroyAgentSession` 清理运行时实例，但 `agentSessionService` 保存的 JSON 文件仍保留，供下次恢复。
+这种拆分不是为了文件数量，而是让不同变化拥有不同责任主体。
+
+## 正向推演：改动输入后会发生什么
+
+给 `handleSkillLaunch` 显式传入：
+
+```ts
+handleSkillLaunch(
+  'bmad-brainstorming',
+  '头脑风暴',
+  '  帮我想三个学习 App 卖点  ',
+);
+```
+
+`trim()` 后的初始消息是“帮我想三个学习 App 卖点”，不会使用默认欢迎语。若第三个参数只包含空格，`trim()` 得到空字符串，逻辑会回退到欢迎语。这个小分支证明数据流必须看到具体值，不能只背函数名。
+
+再改变另一个条件：只把 metadata 中的 `projectId` 改成 `wrong-project`，保持 `props.skillName` 不变。窗口仍会加载 `bmad-brainstorming`，SkillDialog 初始化时仍计算 `skill-bmad-brainstorming`；但关闭窗口时，`destroyAgentSession` 会收到 `wrong-project`。这会制造“运行时创建链正确、清理定位链错误”的部分失败，也证明数据流与生命周期链不能合并。
+
+## 反向诊断：四种相似的“没打开”
+
+1. 卡片没有渲染：查 `HOME_APPS` 和列表渲染。
+2. 卡片渲染但 handler 未执行：查 `AppCard.handleClick` 的 `path` 优先级与父级 `onClick`。
+3. handler 执行但窗口状态没有记录：查 `openComponentWindow` 到 `store.openWindow`。
+4. Electron 下 store 有记录但原生窗口未出现：查 `createNativeWindow` 的异步失败日志，不能只看 React store。
+
+同样的用户描述必须拆成可观察证据，才能避免在错误层修代码。
 
 ## 测试证据与缺口
 
-当前没有单一单元测试覆盖「从首页点击到窗口打开」的完整链路。相关验证分散在：
+当前没有从 `HOME_APPS` 点击到 `SkillDialog` 挂载的完整自动化测试，也没有直接测试锁定 `handleSkillLaunch` 生成的 metadata。现有源码可以证明控制流和字段计算，却不能证明真实浏览器事件、窗口渲染与 Electron 原生窗口都已工作。
 
-- [`packages/web/src/components/skills/__tests__/skill-export-policy.test.ts`](../../../../packages/web/src/components/skills/__tests__/skill-export-policy.test.ts#L1) 验证 Skill UI 附近的策略。
-- [`tests/e2e/epic-2-workspace.spec.ts`](../../../../tests/e2e/epic-2-workspace.spec.ts#L1) 覆盖端到端用户流程。
-- 首页入口配置目前没有自动化测试，缺失 `skillName` 的场景只能靠人工 review 或 E2E 捕获。
+最小应补测试包括：
 
-缺口：建议为 `HOME_APPS` 配置增加一个结构测试，断言每个 `type: 'skill'` 条目都有非空 `skillName`。
+1. `skill` 且有 `skillName` 时调用 `handleSkillLaunch`；
+2. 缺少 `skillName` 时不调用；
+3. 生成的组件、props、尺寸和 metadata 与合同一致；
+4. 同一窗口 id 再次打开时聚焦而非重复创建；
+5. Electron 创建失败时保留可诊断日志。
 
-## 练习与口头验收
+## 小实验与答案
 
-1. 不看本文回答：`app.id`、`skillName`、窗口 id、session id 为什么不是同一种 id？
-2. 为什么判断 `type === 'skill'` 放在 `HomePage` 而不是 `AppCard`？
-3. 画出一次技能启动的控制流、数据流和生命周期边界，分别指出 Web、Core、Pi Agent、Electron 的职责。
-4. 假设把 `handleSkillLaunch` 中的会话持久化代码搬进 `page.tsx`，说明它违反的是哪条边界、应下沉到哪里。
+将窗口 id 前缀从 `skill-` 改成 `app-`，但 metadata 中的 sessionId 不变，先预测影响：窗口去重键会变化；会话清理键不变；二者不再同名。这个实验不建议直接提交，只用于证明“同名是实现选择”。完成标准是能指出窗口 store 与会话 API 分别读取哪个字段。
 
-合上本页后，应能准确说明：卡片只触发事件，页面负责翻译，窗口服务负责生命周期，SkillDialog 准备材料，usePiAgent 进入运行时；并且能区分「卡片渲染」「窗口创建」「Agent 会话初始化」三个阶段。
+## 口头验收与下一章
 
-下一章进入 Monorepo 包边界：这些角色为什么必须分布在不同 package 中。
+不看正文，应能回答：
+
+1. 控制流、数据流、生命周期各自回答什么问题？
+2. `AppCard → HomePage` 与 `HomePage → AppWindowManager` 两根箭头分别传什么？
+3. `initialMessage` 是空格时为什么会回退到欢迎语？
+4. 窗口 id 与 session id 同名为什么不代表它们是同一对象？
+5. Electron 原生窗口失败时，为什么 store 状态仍可能已经存在？
+6. 为什么窗口 metadata 中的 `projectId` 与 SkillDialog 创建会话时的 `projectId` 目前同值，却不是一次字段透传？
+
+下一章解释这些角色为什么分布在不同 package，以及 package 边界如何阻止 UI、运行时和桌面进程互相拖住。

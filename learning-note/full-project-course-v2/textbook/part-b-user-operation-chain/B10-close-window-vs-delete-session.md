@@ -1,129 +1,121 @@
-# B10：窗口关闭不等于会话删除
+# B10：关闭窗口、销毁运行时和删除会话是三件事
 
-## 一个常见误解
+## 用户只做了一次关闭，系统却处理三种生命周期
 
-用户点击窗口右上角关闭按钮，窗口消失了。很多人会以为「这次对话没了」。但在 OriginOS 中，窗口只是运行时生命周期的容器；窗口关闭时，系统会清理内存中的 Agent 实例并整理记忆，但会话 JSON 文件仍然保留在磁盘上。下次打开同一 Skill 时，历史会话仍然可以恢复。
+“头脑风暴”窗口消失，只能直接证明 UI 窗口已关闭。`AppWindowManager` 还会请求销毁 Agent runtime 和整理记忆；持久化会话 JSON 则继续保留，除非用户显式调用删除会话接口。
 
-本章回答：关闭窗口时为什么会触发 `destroyAgentSession` 和 `consolidateMemory`，以及它们与会话持久化的关系。
+## 三种对象与三种终止动作
 
-## 关闭回调的注入位置
+| 对象 | 终止动作 | 典型结果 |
+| --- | --- | --- |
+| Window | `closeWindow` / store close | 界面不再显示 |
+| Agent runtime / worker | `destroyAgentSession` | 内存实例或子进程释放 |
+| AgentSession 文件 | `deleteAgentSession` / DELETE route | 持久历史移除 |
 
-关闭窗口时，系统会同时做两件事：清理运行时实例、整理长期记忆。但会话 JSON 文件保留。
+三者可能使用相关 id，却不共享同一生命周期。
+
+最后一行描述的是删除动作的目标语义，不保证当前所有项目范围都能被正确定位。后文会看到，现有 DELETE 合同只传 sessionId，而 Core 的项目会话路径还需要 projectId；对 Skill 的项目范围会话，这是一项真实缺口。
+
+## 关闭回调从打开时就被注入
+
+[packages/web/src/services/AppWindowManager.ts 第 31—54 行](../../../../packages/web/src/services/AppWindowManager.ts#L31) 在 `entryType='skill'` 时包装 `onClose`。关闭时执行原回调，再分别调用：
+
+```ts
+destroyAgentSession({ sessionId, projectId }).catch(...);
+consolidateMemory(entryType, entryId).catch(...);
+```
+
+两个 Promise 都没有被等待。窗口关闭与后台收尾不是事务：窗口成功消失后，runtime 清理或记忆整理仍可能失败。
+
+## destroy adapter 不调用 DELETE
+
+[packages/core/src/lib/integrations/electron/services/agent-session.ts 第 130—146 行](../../../../packages/core/src/lib/integrations/electron/services/agent-session.ts#L130) 的 Web 路径发 `POST /api/agent/sessions/destroy`。同文件更早的删除会话函数才发 `DELETE /api/agent/sessions/{sessionId}`。
+
+HTTP method 和 route 已经给出明确语义：destroy 面向运行实例；DELETE 面向持久数据。
+
+## destroy route 为什么要尝试多个身份
+
+[packages/web/src/app/api/agent/sessions/destroy/route.ts 第 21—105 行](../../../../packages/web/src/app/api/agent/sessions/destroy/route.ts#L21) 同时支持 runtime mode 与 in-process mode。
+
+### Runtime mode
+
+1. 优先按 sessionId 在 global spawner 查 worker；
+2. 若窗口传的是稳定 Skill id，而真实 worker 使用 UUID，则按 projectId 列最近会话再找 UUID；
+3. 最后遍历进程并对 id 做包含匹配；
+4. 找不到也返回 200，只把 `agentDestroyed` 设为 false。
+
+### In-process mode
+
+1. 直接 `finalizeAndRemoveAgent(sessionId)`；
+2. 必要时从会话或 projectId 反查 Agent entry；
+3. 找不到仍返回成功响应和 false。
+
+包含匹配是兼容兜底，不应描述成严格身份匹配。若多个进程 id 共享子串，它存在误选风险；真正的改进方向是稳定传递真实 runtime id，而不是夸大当前保证。
+
+## Electron destroy 是另一套定位实现
+
+[packages/desktop/src/main/services/agent-session-service.ts 第 280—324 行](../../../../packages/desktop/src/main/services/agent-session-service.ts#L280) 没有调用 Web destroy route。它先按 sessionId 调用 `finalizeAndRemoveAgent`，失败后从会话反查 projectId，再遍历 AgentManager stats 做精确 projectId 比较，最后才用请求中的 projectId 重试。
+
+与 Web route 相比，Desktop handler 没有 global runtime spawner 的 worker 查找，也没有进程 id 子串匹配。两端都可能返回 `success:true` 和 `agentDestroyed:false`，但内部查找集合与风险不同。测试 Web 模糊匹配不能替代 Desktop projectId 回退测试。
+
+## DELETE 当前为什么可能找不到 Skill 项目会话
+
+[packages/web/src/app/api/agent/sessions/[sessionId]/route.ts 第 159—192 行](../../../../packages/web/src/app/api/agent/sessions/[sessionId]/route.ts#L159) 只从路径取得 sessionId：
+
+```ts
+const { sessionId } = await params;
+const deleted = await agentSessionService.deleteSession(sessionId);
+```
+
+而 [session-service.ts 第 183—184 行](../../../../packages/core/src/lib/features/agent/session-service.ts#L183) 只有收到 projectId 才能构造项目会话路径。Skill 会话通常保存在 `projects/skill-bmad-brainstorming/sessions/{id}.json`；DELETE 没有 projectId 时会尝试全局 session 路径，可能返回 404，即使项目目录中的文件仍存在。
+
+Desktop 的 delete handler 也只接收 sessionId。因此准确结论不是“显式 DELETE 一定删除 Skill 历史”，而是“删除 API 的目标是持久会话，但当前项目范围定位合同不完整”。这需要修复 DTO/route/IPC，并增加项目会话删除测试。
+
+## 图解：关闭后的分叉不是一条删除线
 
 ```mermaid
-sequenceDiagram
-    participant User as 用户
-    participant WM as AppWindowManager
-    participant Agent as Agent 运行时
-    participant Disk as 磁盘会话 JSON
-
-    User->>WM: 点击关闭
-    WM->>Agent: destroyAgentSession
-    WM->>Agent: consolidateMemory
-    Note over Disk: 会话 JSON 保留
+flowchart LR
+    C[用户关闭窗口] --> W[Window 消失]
+    C --> D[destroy runtime 请求]
+    C --> M[consolidate memory 请求]
+    J[AgentSession JSON] --> K[继续保留]
+    X[显式 DELETE] --> P{能否定位真实会话路径}
+    P -->|是| R[删除 AgentSession JSON]
+    P -->|否| N[返回未找到 文件仍保留]
 ```
 
-[`packages/web/src/services/AppWindowManager.ts` 第 31—54 行](../../../../packages/web/src/services/AppWindowManager.ts#L31) 在打开窗口时注入 `onClose`：
+窗口关闭没有指向 JSON 删除。记忆整理也不等于保存当前会话；会话消息在 B08/B09 的持久化步骤中已经处理。
 
-```ts
-if (entryType && entryId && MEMORY_ENTRY_TYPES.has(entryType)) {
-  const originalOnClose = config.onClose;
-  config = {
-    ...config,
-    onClose: () => {
-      originalOnClose?.();
-      destroyAgentSession({ sessionId, projectId }).catch((err) => console.error('[AppWindowManager] agent destroy failed:', err));
-      consolidateMemory(entryType, entryId).catch((err) => console.error('[AppWindowManager] memory consolidation failed:', err));
-    },
-  };
-}
-```
+## 四种结果的用户解释
 
-这里的关键是 `MEMORY_ENTRY_TYPES = new Set(['role-agent', 'agent', 'project', 'solution', 'skill'])`。只有这些入口类型的窗口才会在关闭时触发清理。 `entryType: 'skill'` 的「头脑风暴」窗口当然在其中。
+| 结果 | 窗口 | runtime | 会话 JSON |
+| --- | --- | --- | --- |
+| 正常关闭与销毁 | 关闭 | 移除 | 保留 |
+| 没找到 runtime | 关闭 | 原本不存在或定位失败 | 保留 |
+| destroy 抛错 | 关闭 | 可能残留 | 保留 |
+| 显式删除全局会话且路径命中 | 可开可关 | 不由 DELETE 自动代表 | 删除 |
+| 显式删除项目会话但未传 projectId | 可开可关 | 不由 DELETE 自动代表 | 可能仍保留并返回未找到 |
 
-## destroyAgentSession 清理什么
-
-[`packages/core/src/lib/integrations/electron/services/agent-session.ts` 第 132—145 行](../../../../packages/core/src/lib/integrations/electron/services/agent-session.ts#L132) 的 `destroyAgentSession`：
-
-```ts
-export async function destroyAgentSession(params: { sessionId?: string; projectId?: string }): Promise<void> {
-  if (isElectron()) {
-    return window.ipcRenderer.invoke(IPC_CHANNELS.AGENT_SESSION_DESTROY, params);
-  }
-  const response = await fetch('/api/agent/sessions/destroy', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  return response.json();
-}
-```
-
-它最终调用 `AgentManager` 的清理逻辑，移除缓存的 `OriginOSAgent` 实例。注意：它**不删除** `agentSessionService` 保存的会话 JSON 文件。
-
-[`packages/core/src/lib/integrations/pi-agent/agent-manager.ts` 第 525—557 行](../../../../packages/core/src/lib/integrations/pi-agent/agent-manager.ts#L525) 的 `removeAgent` / `finalizeAndRemoveAgent` 会：
-
-1. 停止订阅事件。
-2. 清理工具上下文。
-3. 从缓存中移除实例。
-
-## consolidateMemory 整理什么
-
-`consolidateMemory` 是 fire-and-forget 的记忆整理操作。它会：
-
-1. 读取本次会话的实践日志（`practice/` 下的 turn 记录）。
-2. 提取需要长期保存的记忆片段。
-3. 更新 `Memory.md` 或认知文件。
-
-这个操作失败时只打日志，不会阻止窗口关闭。因为它属于"最好成功但不阻塞 UI"的后台任务。
-
-## 会话 JSON 为什么保留
-
-[`packages/core/src/lib/features/agent/session-service.ts` 第 88—100 行](../../../../packages/core/src/lib/features/agent/session-service.ts#L88) 的 `saveSession` 在每次消息追加时都会写入磁盘。窗口关闭不调用 `deleteSession`，因此文件保留。
-
-```ts
-async saveSession(session: AgentSession): Promise<void> {
-  const filePath = this.getSessionFilePath(session.id, session.projectId);
-  await this.jsonStore.write(filePath, session);
-}
-```
-
-保留会话文件的原因：
-
-1. **恢复历史**：下次打开同一 Skill 时，`SkillDialog` 可以列出历史会话。
-2. **审计**：用户可以回看完整对话。
-3. **多窗口共享**：同一项目可能有多个窗口引用同一会话范围。
-
-## 关键区分：运行时销毁 vs 持久化删除
-
-| 操作 | 影响 | 不影响 |
-|------|------|--------|
-| 关闭窗口 | 触发 `onClose`，清理 Agent 运行时实例 | 不删除会话 JSON |
-| `destroyAgentSession` | 移除缓存的 `OriginOSAgent` | 不删除会话 JSON |
-| `consolidateMemory` | 更新长期记忆文件 | 不删除会话 JSON |
-| `deleteSession` | 删除磁盘上的会话 JSON | 只在显式调用时发生 |
-
-## 失败路径
-
-1. **`destroyAgentSession` 失败**：只打日志，窗口仍然关闭，可能导致运行时实例泄漏。
-2. **`consolidateMemory` 失败**：只打日志，记忆整理未完成，但用户无感知。
-3. **窗口关闭后误以为会话被删除**：实际上 JSON 仍在，可以恢复。
-4. **非 `MEMORY_ENTRY_TYPES` 的窗口关闭**：不触发任何清理，如果该窗口也持有 Agent 资源，可能泄漏。
+`agentDestroyed: false` 不必然是错误：runtime 可能已被清理或从未创建。是否需要告警取决于调用场景和观测数据。
 
 ## 测试证据与缺口
 
-- `AppWindowManager` 的关闭回调注入目前没有直接单元测试。
-- `destroyAgentSession` 和 `consolidateMemory` 的集成测试需要模拟窗口关闭场景。
+当前需要分别验证窗口回调注入、destroy route 两种模式、找不到 runtime 的幂等语义、DELETE 的持久化效果。任何一个测试都不能单独证明三类生命周期完全一致。
 
-缺口：建议为 `AppWindowManager.openWindow` 增加测试，验证 `MEMORY_ENTRY_TYPES` 内的窗口关闭时是否正确注入清理回调；并验证清理失败时窗口仍能关闭。
+特别应补的边界是模糊匹配：构造两个相似进程 id，验证不会销毁错误目标；若当前行为无法保证，应把风险写进实现与测试，而不是只在教材中提醒。
 
-## 练习与口头验收
+还应补项目会话删除用例：Given 会话位于 `projects/{projectId}/sessions`；When 只传 sessionId 调用当前 Web/IPC delete；Then 记录当前未命中的行为；修复合同后再断言带 projectId 可以删除正确文件且不会误删同名全局会话。
 
-1. 关闭「头脑风暴」窗口后，磁盘上的会话 JSON 是否还在？为什么？
-2. `destroyAgentSession` 和 `deleteSession` 有什么区别？
-3. 如果 `consolidateMemory` 失败，用户会感知到什么？为什么这样设计？
-4. 打开 [`AppWindowManager.ts`](../../../../packages/web/src/services/AppWindowManager.ts#L14)，说明 `MEMORY_ENTRY_TYPES` 包含哪些类型；如果某窗口 `entryType` 不在集合中，关闭时会跳过哪些回调。
+## 小实验与口头验收
 
-合上本页后，应能准确说明：关闭窗口触发 `destroyAgentSession`（清理运行时实例）和 `consolidateMemory`（整理记忆），但都不删除持久化会话 JSON；会话文件保留是为了恢复历史、审计和共享。
+给出“窗口关闭后历史仍能恢复”的现象，解释它为什么是预期行为；再给出“关闭后后台 worker 仍占资源”，列出要查的 request、response 中 `agentDestroyed` 与服务端日志。
 
-下一章追踪 Agent 调用工具时，产物和会话分别落在哪里。
+合上本页，应能回答：
+
+1. close、destroy、consolidate、delete 分别作用于什么对象？
+2. 为什么单窗 close 与 `closeAllWindows` 当前没有相同回调语义？
+3. Web 与 Desktop destroy 分别怎样回退定位 runtime？
+4. 为什么 200 或 `success:true` 加 `agentDestroyed:false` 不一定是错误？
+5. 为什么当前 DELETE 不能保证删除项目范围内的 Skill 会话？
+
+下一章查看同一次工作留下的三类磁盘痕迹，以及工具路径边界真实保护到哪里。

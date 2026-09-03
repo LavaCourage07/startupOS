@@ -1,156 +1,142 @@
-# B09：流式回复怎样一段一段出现在窗口
+# B09：一段回复怎样经过 SSE 去重与调度进入 React
 
-## 为什么不是一次性 JSON
+## Web 客户端不是 `EventSource`，Electron 客户端也不走 SSE
 
-模型生成回复时，一个字一个字地"想"出来。如果等模型全部想完再返回一个完整 JSON，用户会看到长时间空白，然后突然跳出一大段文字。流式响应（SSE / IPC 事件流）让模型每生成一小段就推送到前端，前端再逐段更新界面。
+常见误读是把所有流式客户端都想成 `new EventSource(url)`。当前 Web 实现需要 POST 消息正文和身份字段，因此使用 `fetch` 获取 `Response.body`，通过 `ReadableStream` reader 读取字节，再手工解析 SSE。Electron renderer 则调用 IPC，并订阅主进程发送的 `AGENT_EVENT`。两端最后都更新 React 消息，却没有共用同一种传输。
 
-但这带来工程问题：同一段文本可能被重复推送、事件可能乱序、高频更新会拖慢 React、用户可能中途取消。本章看 OriginOS 如何处理这些问题。
-
-## 调用链
+## 一条业务流在平台边界处分成两条传输链
 
 ```mermaid
 sequenceDiagram
-    participant Runtime as OriginOSAgent
-    participant API as messages/route.ts
-    participant Bridge as createEventStream
-    participant Dedupe as stream-dedupe.ts
-    participant Scheduler as stream-render-scheduler.ts
-    participant UI as usePiAgent
+    actor U as 用户
+    participant H as client-hooks
+    participant W as Web messages route
+    participant E as Electron main IPC handler
+    participant R as Agent runtime
+    participant Q as render scheduler
+    participant UI as React messages
 
-    Runtime->>API: text_delta / message_update / tool_execution_start
-    API->>Bridge: 转换为 StreamMessage
-    Bridge->>Dedupe: getVisibleStreamDelta
-    Dedupe->>Scheduler: 控制 commit 频率
-    Scheduler->>UI: 更新 messages 状态
-    UI->>UI: 渲染到 ChatMessageList
+    U->>H: 发送同一条消息
+    alt 普通 Web
+        H->>W: POST + Accept text/event-stream
+        W->>R: prompt
+        R-->>W: AgentEvent 或 RuntimeEvent
+        W-->>H: SSE 字节帧
+        H->>H: buffer + parseSSE
+    else Electron
+        H->>E: IPC MESSAGE_STREAM + streamId
+        E->>R: prompt
+        R-->>E: AgentEvent
+        E-->>H: AGENT_EVENT / batch_events
+    end
+    H->>Q: 累计后的 content
+    Q->>UI: 有界提交与最终提交
 ```
 
-## API route 中的事件桥接
+图中的 `alt` 是真实平台分支，不是两个可同时发生的步骤。Web route 内部还会按 runtime worker 与 in-process Agent 分成两座事件桥；Electron main 当前使用自己的订阅和批处理逻辑。scheduler 位于汇流后的 renderer，只控制何时渲染，不决定文本真值。
 
-[`packages/web/src/app/api/agent/sessions/[sessionId]/messages/route.ts` 第 315—330 行](../../../../packages/web/src/app/api/agent/sessions/[sessionId]/messages/route.ts#L315) 根据运行环境选择桥接方式：
+## Web route 内部再选择两种桥接模式
+
+[messages/route.ts 第 315—330 行](../../../../packages/web/src/app/api/agent/sessions/[sessionId]/messages/route.ts#L315) 检查 Agent 是否带运行中的 `__bridgeProcess`：
+
+- runtime mode 直接拦截 worker `RuntimeEvent`；
+- in-process mode 订阅 `OriginOSAgent` 的 `AgentEvent`。
+
+两者最终输出 `StreamMessage`，但事件名与累积方式不同。route 通过适配把 `TOOL_CALL`、`MESSAGE_SENT` 或 `message_update` 等映射为 `tool_start`、`text_delta`、`assistant_message`、`error` 和 `done`。
+
+这两座桥只属于 Web route，不能用来描述 Electron main。Electron 的 [agent-session-service.ts 第 633—672 行](../../../../packages/desktop/src/main/services/agent-session-service.ts#L633) 通过 `event.sender.send` 发 IPC 事件，并用 `StreamEventBatcher` 批量发送高频 `text_delta`；非文本事件先 flush 再单独发送。它没有生成 `data: ...\n\n` 字符串。
+
+## SSE 是有边界的文本帧
+
+服务器用：
 
 ```ts
-function createEventStream(agent: OriginOSAgent, session: AgentSession, body: unknown) {
-  const bridgeProcess = body.__bridgeProcess;
-  if (bridgeProcess) {
-    return createRuntimeEventStream(agent, session, body);
-  }
-  return createInProcessEventStream(agent, session, body);
-}
+controller.enqueue(
+  encoder.encode(`data: ${JSON.stringify(msg)}\n\n`),
+);
 ```
 
-- **In-process 模式**：`OriginOSAgent` 与 API route 在同一个 Node 进程内，直接订阅 `agent.subscribe`。
-- **Runtime 模式**：通过 `__bridgeProcess` 与独立 Agent 进程通信，覆盖 `process.eventHandler` 拦截事件。
+TCP/ReadableStream 的一个 chunk 不保证恰好等于一个 SSE 事件。客户端必须累计 `buffer`，只处理已经出现双换行的完整帧，并把尾部残片留给下一 chunk。把每个 chunk 直接 `JSON.parse` 会在帧被拆开时随机失败。
 
-两种模式的事件来源和累积方式不同，但最终都输出同一种 `StreamMessage` 给客户端。
+## 去重不是简单比较相等
 
-## 事件类型
+[packages/core/src/lib/integrations/pi-agent/stream-dedupe.ts 第 30—50 行](../../../../packages/core/src/lib/integrations/pi-agent/stream-dedupe.ts#L30) 的 `appendStreamDelta` 处理五种关系：空值、完全相等、delta 已是累计全文、长 delta 是 current 的前缀、current 已以 delta 结尾，以及后缀—前缀重叠。
 
-[`messages/route.ts` 第 29—40 行](../../../../packages/web/src/app/api/agent/sessions/[sessionId]/messages/route.ts#L29) 定义了 `StreamMessage` 类型：
+例子：
 
-```ts
-interface StreamMessage {
-  type:
-    | 'user_message'
-    | 'assistant_message'
-    | 'message_delta'
-    | 'text_delta'
-    | 'status'
-    | 'error'
-    | 'done'
-    | 'tool_start'
-    | 'tool_end';
-  data: unknown;
-}
+```text
+current = "三个卖点：专注"
+delta   = "专注搭子、错题回放"
 ```
 
-客户端最常用的是 `text_delta`（新增文本片段）和 `assistant_message`（完整助手消息）。`tool_start` / `tool_end` 表示工具调用边界，`done` 表示流结束。
+公共重叠“专注”不应重复，结果是“三个卖点：专注搭子、错题回放”。`getVisibleStreamDelta` 同时返回合并后的 `content` 与真正需要发出的新增 `delta`。
 
-## 去重：防止重复文本变成"真理"
+[同文件第 210—224 行](../../../../packages/core/src/lib/integrations/pi-agent/stream-dedupe.ts#L210) 的 `reconcileFinalStreamContent` 处理最终完整消息：若 final 是 streamed 的扩展则补尾部；若 streamed 更长则保留；完全无法建立前缀关系时以 final 为准。最终消息是一次权威校正，不是又追加一遍。
 
-[`packages/core/src/lib/integrations/pi-agent/stream-dedupe.ts` 第 42—80 行](../../../../packages/core/src/lib/integrations/pi-agent/stream-dedupe.ts#L42) 的 `getVisibleStreamDelta` 计算两次事件之间的可见差异：
+## Renderer 怎样拥有一条活动流
 
-```ts
-export function getVisibleStreamDelta(
-  previous: string | undefined,
-  current: string
-): { text: string; isDuplicate: boolean } {
-  // 如果 current 以 previous 开头，只返回新增部分
-  // 否则返回完整 current 并标记可能重复
-}
+[packages/core/src/lib/integrations/pi-agent/client-hooks.ts 第 724—1056 行](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts#L724) 为每次发送生成 `streamId`，并用 `activeStreamIdRef` 判断事件是否仍属于当前流。两端的停止手段不同。
+
+Web 分支使用 `AbortController` 取消 fetch；Electron 分支使用 `streamId` 过滤事件并取消 renderer 订阅。当前 `abort()` 对 AbortController 的调用不会自动终止 Electron main 已经启动的后台 `agent.prompt`。因此，当新流替换旧流或用户停止时：
+
+1. Web 旧 fetch 会收到 abort；Electron 旧订阅会被移除；
+2. 两端的 render schedulers 都会 cancel；
+3. 即使旧数据稍后到达，`streamId` 和 `isActiveStream()` 会阻止它更新当前消息；
+4. 这只能证明旧结果不污染 UI，不能证明服务端或主进程任务已经停止。
+
+取消网络、取消订阅、取消调度、拒绝旧流状态更新和终止后台 Agent 是五个不同动作。
+
+## Scheduler 为什么不是普通 debounce
+
+[packages/core/src/lib/integrations/pi-agent/stream-render-scheduler.ts 第 31—142 行](../../../../packages/core/src/lib/integrations/pi-agent/stream-render-scheduler.ts#L31) 默认间隔 32ms，保留 latestContent 与 renderedContent。`schedule` 逐步提交；`finish` 会把最终剩余内容立即提交并产生非 streaming 的最终状态；`cancel` 停止 timer 并释放等待者。
+
+它解决“文本真值增长很快，但 React 不必每个字节都 commit”。若把它误写成简单节流，就会漏掉 final authoritative commit 和取消后的 waiter 释放。
+
+## 一组事件的完整推演
+
+输入事件：
+
+```text
+text_delta: "三个"
+text_delta: "三个卖点"
+text_delta: "卖点：专注"
+assistant_message: "三个卖点：专注、陪伴、复盘"
+done
 ```
 
-为什么需要这个？因为上游可能同时发送 `text_delta` 和 `message_update`，两者携带的累计文本可能重叠。如果不做去重，同一段话会在界面上出现两次，用户会误以为模型说了两遍。
+逐步结果：
 
-[`reconcileFinalStreamContent` 第 210—224 行](../../../../packages/core/src/lib/integrations/pi-agent/stream-dedupe.ts#L210) 在流结束时做最终 reconciling，确保客户端保存的助手消息与服务器端一致。
+1. “三个”成为初始 content。
+2. “三个卖点”被识别为累计全文，结果替换为更长值而非追加。
+3. “卖点：专注”与尾部重叠，追加“：专注”。
+4. final 以完整助手消息校正尾部。
+5. scheduler `finish` 提交最终文本，`done` 清理进度。
 
-## 渲染调度：限制 React commit 频率
+## 失败与测试证据
 
-[`packages/core/src/lib/integrations/pi-agent/stream-render-scheduler.ts` 第 31—100 行](../../../../packages/core/src/lib/integrations/pi-agent/stream-render-scheduler.ts#L31) 控制界面更新频率。模型可能每秒产生几十个 `text_delta`，如果每个都触发 React re-render，长消息会严重掉帧。
+| 故障 | 防线 | 未保证的部分 |
+| --- | --- | --- |
+| SSE 帧跨 chunk | buffer + 双换行边界 | 服务端永不发送畸形 JSON |
+| 累计文本与 delta 混用 | stream-dedupe | 所有语义重复都能识别 |
+| 高频 React 更新 | scheduler | 浏览器在所有设备都达 60fps |
+| Web 旧流污染新会话 | streamId + fetch abort + active check | Web 服务端任务一定被真正终止 |
+| Electron 旧流污染新会话 | streamId + 取消订阅 + active check | 主进程中的 prompt 一定终止 |
+| final 与 streamed 冲突 | final reconciliation | final 内容本身一定正确 |
 
-调度器通常采用"批处理 + 节流"策略：在一定时间窗口内合并多个 delta，然后统一更新一次状态。这样用户看到流畅的打字效果，而 React 不会被压垮。
+[stream-dedupe.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/stream-dedupe.test.ts#L1) 与 [stream-render-scheduler.test.ts](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/stream-render-scheduler.test.ts#L1) 分别证明其断言覆盖的纯函数和调度行为。跨 Web route、fetch、Electron IPC、批处理、取消与 React state 的集成仍需分别建立 Hook/IPC 测试。
 
-## 客户端处理
+[stream-dedupe.test.ts 第 18—25 行](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/stream-dedupe.test.ts#L18) 的 Given 是 current 为 `hello world`、下一帧为累计全文 `hello world again`；When 调用 `getVisibleStreamDelta`；Then 完整 content 是新全文，可见 delta 只有 ` again`。第 39—44 行再证明 final 扩展 streamed 前缀时不会重复。它们没有经过网络 chunk、SSE parser 或 IPC batcher。
 
-[`packages/core/src/lib/integrations/pi-agent/client-hooks.ts` 第 868—999 行](../../../../packages/core/src/lib/integrations/pi-agent/client-hooks.ts#L868) 的 SSE 解析与消息更新：
+## 小实验与口头验收
 
-```ts
-const eventSource = new EventSource(url);
-eventSource.onmessage = (event) => {
-  const message = JSON.parse(event.data) as StreamMessage;
-  switch (message.type) {
-    case 'text_delta':
-      appendTextDelta(message.data as string);
-      break;
-    case 'assistant_message':
-      setAssistantMessage(message.data as AgentMessage);
-      break;
-    case 'tool_start':
-      setActiveTool(message.data as string);
-      break;
-    case 'done':
-      eventSource.close();
-      break;
-    case 'error':
-      setErrorMessage(message.data as string);
-      break;
-  }
-};
-```
+手工计算 `current='abcXYZ'`、`delta='XYZ123'`，预期得到 `abcXYZ123`；再解释为什么一个网络 chunk 不能直接当作一个 SSE event。最后把“停止 Web 流”和“停止 Electron 流”分别写成动作表。
 
-注意 abort 逻辑：如果用户中途取消发送，`usePiAgent` 会调用 `abortControllerRef.current.abort()`，然后丢弃旧流后续事件。第 511—596 行的 `sendMessage` 处理了这个边界。
+合上本页，应能回答：
 
-## 关键区分：SSE 事件 vs JSON 响应
+1. Web 为什么使用 fetch reader 而不是 EventSource？
+2. Electron 为什么没有 SSE 字节解析阶段？
+3. Web route 的两座 bridge 与平台的 Web/Electron 分支为什么不是同一层分支？
+4. 去重、最终校正和渲染调度分别拥有哪部分责任？
+5. 为什么旧流不再更新 UI，仍不能证明后台 Agent 已经终止？
 
-| 特性 | 非流式 JSON | 流式 SSE |
-|------|-------------|----------|
-| 响应格式 | 一个完整 JSON | 多个 `data:` 行 |
-| 用户体验 | 长时间空白后突然显示 | 逐字显示 |
-| 取消支持 | 请求发出后难取消 | 可 abort EventSource |
-| 错误处理 | 一次性返回错误 | 可在流中间返回 `error` 事件 |
-| 实现复杂度 | 低 | 高（去重、调度、状态合并） |
-
-## 失败路径
-
-1. **同一文本被重复推送**：`stream-dedupe` 负责识别并丢弃重复部分。
-2. **高频更新导致卡顿**：`stream-render-scheduler` 通过节流缓解。
-3. **用户中途取消后旧事件仍到达**：`usePiAgent` 通过 `abortControllerRef` 和 guard 丢弃旧流事件。
-4. **流结束但没有 `assistant_message`**：API route 会兜底读取 `agent.getSessionState().messages` 最后一条助手消息。
-
-## 测试证据与缺口
-
-- [`packages/core/src/lib/integrations/pi-agent/__tests__/stream-dedupe.test.ts`](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/stream-dedupe.test.ts#L1) 覆盖流式去重。
-- [`packages/core/src/lib/integrations/pi-agent/__tests__/stream-render-scheduler.test.ts`](../../../../packages/core/src/lib/integrations/pi-agent/__tests__/stream-render-scheduler.test.ts#L1) 覆盖渲染调度。
-
-缺口：目前没有直接测试覆盖「用户 abort 后旧流事件被丢弃」和「两条桥接模式输出一致」的集成场景。
-
-## 练习与口头验收
-
-1. 用纸面事件序列模拟：模型先发送 `"Hello"`，再发送 `"Hello world"`，`getVisibleStreamDelta` 应该返回什么？
-2. 为什么流式响应需要 `stream-render-scheduler`？没有它会出现什么问题？
-3. 用户中途取消后，`usePiAgent` 如何防止旧流事件继续更新界面？
-4. 比较 in-process 模式与 runtime 模式的事件来源差异。
-
-合上本页后，应能准确说明：流式回复不是单一 JSON，而是一系列 SSE/IPC 事件；事件需要经过桥接、去重、调度后才更新 UI；取消操作需要正确丢弃旧流事件。
-
-下一章看窗口关闭时会发生什么，以及为什么关闭窗口不等于删除会话。
+下一章回到窗口关闭动作，区分 UI 生命周期、runtime 生命周期和持久化会话生命周期。
